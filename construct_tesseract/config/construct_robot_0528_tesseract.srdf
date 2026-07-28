@@ -21,32 +21,36 @@
     <group name="right_tool">
         <link name="right_manipulator_ee_point"/>
     </group>
-    <group name="head_tool">
-        <link name="robot_head_rev_link2"/>
-    </group>
     <group name="robot_head">
         <joint name="robot_head_rev_joint1"/>
         <joint name="robot_head_rev_joint2"/>
     </group>
     <group name="dual_arm">
-        <!-- Subgroups let MoveIt associate both arm end effectors with this
-             compound planning group and create one RViz gizmo per arm. -->
-        <group name="left_manipulator"/>
-        <group name="right_manipulator"/>
-        <group name="robot_head"/>
+        <!-- Explicit joints keep this group compatible with both MoveIt and
+             Tesseract 0.22, whose SRDF parser does not expand subgroups. -->
+        <joint name="left_manipulator_joint1"/>
+        <joint name="left_manipulator_joint2"/>
+        <joint name="left_manipulator_joint3"/>
+        <joint name="left_manipulator_joint4"/>
+        <joint name="left_manipulator_joint5"/>
+        <joint name="left_manipulator_joint6"/>
+        <joint name="right_manipulator_joint1"/>
+        <joint name="right_manipulator_joint2"/>
+        <joint name="right_manipulator_joint3"/>
+        <joint name="right_manipulator_joint4"/>
+        <joint name="right_manipulator_joint5"/>
+        <joint name="right_manipulator_joint6"/>
+        <joint name="robot_head_rev_joint1"/>
+        <joint name="robot_head_rev_joint2"/>
     </group>
     <end_effector name="left_end_effector"
-                  parent_link="left_manipulator_ee_point"
+                  parent_link="left_manipulator_link6"
                   group="left_tool"
                   parent_group="left_manipulator"/>
     <end_effector name="right_end_effector"
-                  parent_link="right_manipulator_ee_point"
+                  parent_link="right_manipulator_link6"
                   group="right_tool"
                   parent_group="right_manipulator"/>
-    <end_effector name="head_end_effector"
-                  parent_link="robot_head_rev_link1"
-                  group="head_tool"
-                  parent_group="robot_head"/>
     <!-- The exported CAD collision meshes overlap for this cross-arm pair even
          though the physical links have clearance in the verified home pose. -->
     <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_link2" reason="Never"/>
@@ -240,4 +244,9 @@
     <disable_collisions link1="testbed_link" link2="zed2i_link" reason="Never"/>
     <disable_collisions link1="testbed_link" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="zed2i_link" link2="zed_bracket_link" reason="Adjacent"/>
+    <!-- Bullet reports a small CAD-mesh overlap at the verified fake-hardware
+         home pose; the physical mounting geometry has clearance. -->
+    <disable_collisions link1="left_manipulator_link2" link2="robot_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link2" link2="robot_base_link" reason="Never"/>
+    <contact_managers_plugin_config filename="package://construct_tesseract/config/contact_manager_plugins.yaml"/>
 </robot>

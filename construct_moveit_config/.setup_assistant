@@ -1,0 +1,6 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: construct_moveit_config
+    relative_path: config/construct_robot_0528.urdf.xacro
+  srdf:
+    relative_path: config/construct_robot_0528.srdf

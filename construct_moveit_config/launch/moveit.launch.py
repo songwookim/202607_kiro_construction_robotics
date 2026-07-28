@@ -115,6 +115,7 @@ def launch_setup(context, *args, **kwargs):
         MoveItConfigsBuilder('construct_robot_0528', package_name='construct_moveit_config')
         .robot_description(file_path="config/construct_robot_0528.urdf.xacro",
                             mappings=mappings)
+        .robot_description_semantic(file_path="config/construct_robot_0528.srdf")
         .trajectory_execution(file_path="config/moveit_controllers.yaml")
         .planning_scene_monitor(
             publish_robot_description=True, publish_robot_description_semantic=True

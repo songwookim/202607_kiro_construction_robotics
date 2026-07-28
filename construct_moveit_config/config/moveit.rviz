@@ -623,6 +623,19 @@ Visualization Manager:
       Value: true
       Velocity_Scaling_Factor: 0.1
   Enabled: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Marker Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /weld_path_markers
+      Name: Laser Weld Points
+      Namespaces:
+        weld_points: true
+        weld_seam: true
+      Value: true
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: World

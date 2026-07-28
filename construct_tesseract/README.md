@@ -10,9 +10,11 @@ The versions in `tesseract_humble.repos` match the upstream ROS 2 Humble
 ## Build the Tesseract overlay
 
 ```bash
-mkdir -p /tmp/kiro_tesseract_ws/src
-cd /tmp/kiro_tesseract_ws
-vcs import src < /home/irs/ros2_ws/src/construct_robot_ros2/construct_tesseract/tesseract_humble.repos
+mkdir -p /home/irs/ros2_ws/tesseract_ws/src
+cd /home/irs/ros2_ws/tesseract_ws
+vcs import --shallow src < /home/irs/ros2_ws/src/construct_robot_ros2/construct_tesseract/tesseract_humble.repos
+/home/irs/ros2_ws/src/construct_robot_ros2/construct_tesseract/scripts/patch_arm64.sh \
+  /home/irs/ros2_ws/tesseract_ws/src
 rosdep install --from-paths src --ignore-src -iry --rosdistro humble
 source /opt/ros/humble/setup.bash
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
@@ -31,16 +33,51 @@ colcon build --packages-up-to tesseract_environment --packages-skip ifopt \
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /tmp/kiro_tesseract_ws/install/setup.bash
+source /home/irs/ros2_ws/tesseract_ws/install/setup.bash
 cd /home/irs/ros2_ws
 colcon build --packages-select construct_tesseract
 source install/setup.bash
 export TESSERACT_RESOURCE_PATH=/home/irs/ros2_ws/install
 ros2 run construct_tesseract environment_check \
   /home/irs/ros2_ws/install/construct_description/share/construct_description/urdf_0528/construct_robot_0528.urdf \
-  /home/irs/ros2_ws/install/construct_moveit_config/share/construct_moveit_config/config/construct_robot_0528.srdf
+  /home/irs/ros2_ws/install/construct_tesseract/share/construct_tesseract/config/construct_robot_0528_tesseract.srdf
 ```
+
+The Tesseract-specific SRDF keeps `dual_arm` as an explicit joint list because
+Tesseract 0.22 does not expand MoveIt subgroup-only compound groups. MoveIt uses
+its normal SRDF with left/right subgroups so RViz exposes both end-effector
+interactive markers.
 
 After IPOPT is installed, build through `tesseract_motion_planners` and use
 the upstream `FreespacePipeline` or OMPL examples as the starting point for
 the first trajectory-planning integration.
+
+## Run the KIRO planning check
+
+The check plans a collision-aware five-state left-arm motion with OMPL and
+then optimizes the seed with TrajOpt:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/irs/ros2_ws/tesseract_ws/install/setup.bash
+source /home/irs/ros2_ws/install/setup.bash
+export TESSERACT_RESOURCE_PATH=/home/irs/ros2_ws/install
+ros2 run construct_tesseract motion_planning_check \
+  /home/irs/ros2_ws/install/construct_description/share/construct_description/urdf_0528/construct_robot_0528.urdf \
+  /home/irs/ros2_ws/install/construct_tesseract/share/construct_tesseract/config/construct_robot_0528_tesseract.srdf
+```
+
+## Visualize the dual-arm Tesseract trajectory
+
+Keep the MoveIt RViz launch running, then publish the coordinated 14-joint
+trajectory:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/irs/ros2_ws/tesseract_ws/install/setup.bash
+source /home/irs/ros2_ws/install/setup.bash
+export TESSERACT_RESOURCE_PATH=/home/irs/ros2_ws/install
+ros2 run construct_tesseract dual_arm_rviz_demo \
+  /home/irs/ros2_ws/install/construct_description/share/construct_description/urdf_0528/construct_robot_0528.urdf \
+  /home/irs/ros2_ws/install/construct_tesseract/share/construct_tesseract/config/construct_robot_0528_tesseract.srdf
+```

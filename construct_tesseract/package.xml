@@ -9,6 +9,9 @@
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>moveit_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>trajectory_msgs</depend>
   <exec_depend>construct_description</exec_depend>
   <exec_depend>construct_moveit_config</exec_depend>
 
