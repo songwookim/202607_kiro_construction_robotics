@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="construct_robot_0528">
+    <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS: When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS: When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
+    <group name="left_manipulator">
+        <chain base_link="left_manipulator_base_link" tip_link="left_manipulator_ee_point"/>
+    </group>
+    <group name="right_manipulator">
+        <chain base_link="right_manipulator_base_link" tip_link="right_manipulator_ee_point"/>
+    </group>
+    <group name="robot_head">
+        <joint name="robot_head_rev_joint1"/>
+        <joint name="robot_head_rev_joint2"/>
+    </group>
+    <group name="dual_arm">
+        <!-- Explicit joints keep this group compatible with both MoveIt and
+             Tesseract 0.22, whose SRDF parser does not expand subgroups. -->
+        <joint name="left_manipulator_joint1"/>
+        <joint name="left_manipulator_joint2"/>
+        <joint name="left_manipulator_joint3"/>
+        <joint name="left_manipulator_joint4"/>
+        <joint name="left_manipulator_joint5"/>
+        <joint name="left_manipulator_joint6"/>
+        <joint name="right_manipulator_joint1"/>
+        <joint name="right_manipulator_joint2"/>
+        <joint name="right_manipulator_joint3"/>
+        <joint name="right_manipulator_joint4"/>
+        <joint name="right_manipulator_joint5"/>
+        <joint name="right_manipulator_joint6"/>
+        <joint name="robot_head_rev_joint1"/>
+        <joint name="robot_head_rev_joint2"/>
+    </group>
+    <!-- The exported CAD collision meshes overlap for this cross-arm pair even
+         though the physical links have clearance in the verified home pose. -->
+    <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_link2" reason="Never"/>
+    <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="base_link" link2="controlbox_link" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="helios_link" reason="Never"/>
+    <disable_collisions link1="base_link" link2="left_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="base_link" link2="left_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="base_link" link2="left_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="base_link" link2="left_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="base_link" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="base_link" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="base_link" link2="right_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="base_link" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="base_link" link2="robot_base_link" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="base_link" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="base_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="base_link" link2="testbed_link" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="base_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="helios_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="left_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="left_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="robot_base_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="controlbox_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="left_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="left_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="left_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="robot_head_rev_link2" reason="Adjacent"/>
+    <disable_collisions link1="helios_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="helios_link" link2="zed_bracket_link" reason="Adjacent"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="left_manipulator_link_ee" reason="Adjacent"/>
+    <disable_collisions link1="left_D435_link" link2="right_D435_link" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="right_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_D435_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link1" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="robot_base_link" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_base_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link2" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="robot_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link1" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link3" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link2" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="left_manipulator_link4" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link3" link2="left_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="left_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link3" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link4" link2="left_manipulator_link5" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link4" link2="left_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link5" link2="left_manipulator_link6" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link5" link2="left_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link5" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link5" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link5" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link5" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link6" link2="left_manipulator_link_ee" reason="Adjacent"/>
+    <disable_collisions link1="left_manipulator_link6" link2="right_D435_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link6" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link6" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link6" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="left_manipulator_link_ee" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_base_link" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link1" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_D435_link" link2="right_manipulator_link_ee" reason="Adjacent"/>
+    <disable_collisions link1="right_D435_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link1" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="robot_base_link" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_base_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link2" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link3" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="robot_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link1" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link3" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link4" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link2" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link4" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link5" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link3" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link4" link2="right_manipulator_link5" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link4" link2="right_manipulator_link6" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link5" link2="right_manipulator_link6" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link5" link2="right_manipulator_link_ee" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link5" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link5" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link5" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="right_manipulator_link6" link2="right_manipulator_link_ee" reason="Adjacent"/>
+    <disable_collisions link1="right_manipulator_link6" link2="robot_head_base_link" reason="Never"/>
+    <disable_collisions link1="robot_base_link" link2="robot_head_base_link" reason="Adjacent"/>
+    <disable_collisions link1="robot_base_link" link2="robot_head_rev_link1" reason="Never"/>
+    <disable_collisions link1="robot_base_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="robot_base_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="robot_head_base_link" link2="robot_head_rev_link1" reason="Adjacent"/>
+    <disable_collisions link1="robot_head_base_link" link2="robot_head_rev_link2" reason="Never"/>
+    <disable_collisions link1="robot_head_base_link" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link1" link2="robot_head_rev_link2" reason="Adjacent"/>
+    <disable_collisions link1="robot_head_rev_link1" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link1" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link1" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link2" link2="testbed_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link2" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="robot_head_rev_link2" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="testbed_link" link2="zed2i_link" reason="Never"/>
+    <disable_collisions link1="testbed_link" link2="zed_bracket_link" reason="Never"/>
+    <disable_collisions link1="zed2i_link" link2="zed_bracket_link" reason="Adjacent"/>
+</robot>

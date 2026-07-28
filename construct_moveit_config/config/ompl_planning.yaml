@@ -1,0 +1,14 @@
+planning_plugin: ompl_interface/OMPLPlanner
+start_state_max_bounds_error: 0.1
+jiggle_fraction: 0.05
+
+# Request adapters are applied in reverse order. Keep Ruckig first so it runs
+# after TOTG and limits jerk on the final time-parameterized trajectory.
+request_adapters: >-
+    default_planner_request_adapters/AddRuckigTrajectorySmoothing
+    default_planner_request_adapters/AddTimeOptimalParameterization
+    default_planner_request_adapters/ResolveConstraintFrames
+    default_planner_request_adapters/FixWorkspaceBounds
+    default_planner_request_adapters/FixStartStateBounds
+    default_planner_request_adapters/FixStartStateCollision
+    default_planner_request_adapters/FixStartStatePathConstraints

@@ -1,0 +1,72 @@
+# This config file is used by ros2_control
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz; aligned with rbpodo move_servo_j command streaming
+
+    left_manipulator_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    right_manipulator_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    robot_head_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+left_manipulator_controller:
+  ros__parameters:
+    joints:
+      - left_manipulator_joint1
+      - left_manipulator_joint2
+      - left_manipulator_joint3
+      - left_manipulator_joint4
+      - left_manipulator_joint5
+      - left_manipulator_joint6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    open_loop_control: true
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.0
+
+right_manipulator_controller:
+  ros__parameters:
+    joints:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    open_loop_control: true
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.0
+
+robot_head_controller:
+  ros__parameters:
+    joints:
+      - robot_head_rev_joint1
+      - robot_head_rev_joint2
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    open_loop_control: true
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.0

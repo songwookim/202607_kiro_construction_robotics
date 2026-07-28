@@ -1,0 +1,17 @@
+# Default initial positions for construct_robot_0528's ros2_control fake system
+
+initial_positions:
+  left_manipulator_joint1: 0 # 4.957644632086159e-05
+  left_manipulator_joint2: -0.7767975217522227
+  left_manipulator_joint3: -1.570825302024956
+  left_manipulator_joint4: -4.466603319160641e-05
+  left_manipulator_joint5: -0.7767317140952323
+  left_manipulator_joint6: 6.233535385690629e-05
+  right_manipulator_joint1: 3.14 # 178
+  right_manipulator_joint2: 0.314159  # 18
+  right_manipulator_joint3: 1.43117 # 82 deg -> 1.43117 rad
+  right_manipulator_joint4: 1.1002556 # 63 degree -> 1.1002556 rad
+  right_manipulator_joint5: 0.261799 # 15 degree -> 0.261799 rad
+  right_manipulator_joint6: 2.89725 # 166 deg -> 2.89725 rad
+  robot_head_rev_joint1: 0
+  robot_head_rev_joint2: 0
