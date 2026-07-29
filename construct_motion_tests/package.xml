@@ -3,7 +3,7 @@
   <name>construct_motion_tests</name>
   <version>0.1.0</version>
   <description>Fake-hardware Cartesian motion integration tests.</description>
-  <maintainer email="irs@todo.todo">irs</maintainer>
+  <maintainer email="thddn191@gmail.com">irs</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

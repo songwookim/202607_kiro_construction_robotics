@@ -7,6 +7,7 @@ find_package(rclcpp REQUIRED)
 find_package(tesseract_environment QUIET)
 find_package(tesseract_motion_planners QUIET COMPONENTS ompl trajopt simple)
 find_package(trajectory_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 if(tesseract_environment_FOUND)
   add_executable(environment_check src/environment_check.cpp)
@@ -32,13 +33,27 @@ if(tesseract_environment_FOUND)
       dual_arm_rviz_demo
       moveit_msgs
       rclcpp
-      trajectory_msgs)
+      trajectory_msgs
+      visualization_msgs)
     target_link_libraries(
       dual_arm_rviz_demo
       tesseract::tesseract_environment
       tesseract::tesseract_motion_planners_ompl
       tesseract::tesseract_motion_planners_simple)
     install(TARGETS dual_arm_rviz_demo DESTINATION lib/${PROJECT_NAME})
+
+    add_executable(dual_arm_constrained_demo src/dual_arm_constrained_demo.cpp)
+    target_compile_features(dual_arm_constrained_demo PRIVATE cxx_std_17)
+    ament_target_dependencies(
+      dual_arm_constrained_demo
+      moveit_msgs
+      rclcpp
+      trajectory_msgs
+      visualization_msgs)
+    target_link_libraries(
+      dual_arm_constrained_demo
+      tesseract::tesseract_environment)
+    install(TARGETS dual_arm_constrained_demo DESTINATION lib/${PROJECT_NAME})
   endif()
 else()
   message(WARNING

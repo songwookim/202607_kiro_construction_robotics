@@ -9,6 +9,10 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from construct_msgs.action import CartesianPath
+from construct_robot.cartesian_path_common import (
+    PLANNING_GROUP_TIPS,
+    tip_link_for_group,
+)
 
 
 def make_pose(x: float, y: float, z: float, q=(0.0, 0.0, 0.0, 1.0)) -> Pose:
@@ -36,11 +40,7 @@ class CartesianPathActionClient(Node):
         self.exit_code = 1
 
     def scanner_path_from_current_tcp(self):
-        tip = (
-            "right_manipulator_ee_point"
-            if self._planning_group == "right_manipulator"
-            else "left_manipulator_ee_point"
-        )
+        tip = tip_link_for_group(self._planning_group)
         deadline = time.monotonic() + 5.0
         transform = None
         while time.monotonic() < deadline:
@@ -146,7 +146,11 @@ class CartesianPathActionClient(Node):
 
 def main(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--planning-group", default="left_manipulator")
+    parser.add_argument(
+        "--planning-group",
+        choices=tuple(PLANNING_GROUP_TIPS),
+        default="left_manipulator",
+    )
     parser.add_argument(
         "--scenario",
         choices=("demo", "laser-straight", "laser-live-straight"),

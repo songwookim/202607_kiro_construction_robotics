@@ -19,6 +19,10 @@ repositories:
     type: git
     url: https://github.com/tesseract-robotics/tesseract_planning.git
     version: 0.22.0
+  tesseract_qt:
+    type: git
+    url: https://github.com/tesseract-robotics/tesseract_qt.git
+    version: 0.22.0
   tesseract_ros2:
     type: git
     url: https://github.com/tesseract-robotics/tesseract_ros2.git

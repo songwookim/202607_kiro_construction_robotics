@@ -2,12 +2,11 @@ import math
 import time
 
 import rclpy
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Point, Pose, PoseArray
 from moveit_msgs.action import ExecuteTrajectory
 from moveit_msgs.msg import DisplayTrajectory
 from moveit_msgs.srv import GetCartesianPath
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from rclpy.action import ActionClient
+from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -15,20 +14,43 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
+from construct_robot.cartesian_path_common import (
+    PLANNING_GROUP_TIPS,
+    pose_is_valid,
+    tip_link_for_group,
+)
+
+
+FUTURE_POLL_PERIOD = 0.01
+PLANNING_TIMEOUT = 30.0
+EXECUTION_TIMEOUT = 120.0
 
 
 def interpolate_pose(start: Pose, goal: Pose, ratio: float) -> Pose:
-    """Linearly interpolate position and normalized quaternion components."""
+    """Interpolate position and use shortest-path normalized quaternion lerp."""
     pose = Pose()
     pose.position.x = start.position.x + (goal.position.x - start.position.x) * ratio
     pose.position.y = start.position.y + (goal.position.y - start.position.y) * ratio
     pose.position.z = start.position.z + (goal.position.z - start.position.z) * ratio
 
+    start_quaternion = (
+        start.orientation.x,
+        start.orientation.y,
+        start.orientation.z,
+        start.orientation.w,
+    )
+    goal_quaternion = (
+        goal.orientation.x,
+        goal.orientation.y,
+        goal.orientation.z,
+        goal.orientation.w,
+    )
+    if sum(a * b for a, b in zip(start_quaternion, goal_quaternion)) < 0.0:
+        goal_quaternion = tuple(-component for component in goal_quaternion)
     quaternion = [
-        start.orientation.x + (goal.orientation.x - start.orientation.x) * ratio,
-        start.orientation.y + (goal.orientation.y - start.orientation.y) * ratio,
-        start.orientation.z + (goal.orientation.z - start.orientation.z) * ratio,
-        start.orientation.w + (goal.orientation.w - start.orientation.w) * ratio,
+        start_component + (goal_component - start_component) * ratio
+        for start_component, goal_component
+        in zip(start_quaternion, goal_quaternion)
     ]
     norm = math.sqrt(sum(component * component for component in quaternion))
     if norm < 1e-12:
@@ -44,8 +66,115 @@ def interpolate_pose(start: Pose, goal: Pose, ratio: float) -> Pose:
     return pose
 
 
+def rotate_vector(quaternion, vector):
+    """Rotate a 3-vector by a normalized geometry_msgs Quaternion."""
+    qx, qy, qz, qw = (
+        quaternion.x,
+        quaternion.y,
+        quaternion.z,
+        quaternion.w,
+    )
+    norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if norm < 1e-12:
+        qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+    else:
+        qx, qy, qz, qw = (qx / norm, qy / norm, qz / norm, qw / norm)
+    vx, vy, vz = vector
+    # q * v * conjugate(q)
+    tx = 2.0 * (qy * vz - qz * vy)
+    ty = 2.0 * (qz * vx - qx * vz)
+    tz = 2.0 * (qx * vy - qy * vx)
+    return (
+        vx + qw * tx + qy * tz - qz * ty,
+        vy + qw * ty + qz * tx - qx * tz,
+        vz + qw * tz + qx * ty - qy * tx,
+    )
+
+
+def make_weld_visualization(waypoints, frame, stamp):
+    """Build conspicuous RViz markers and the corresponding PoseArray."""
+    pose_array = PoseArray()
+    pose_array.header.frame_id = frame
+    pose_array.header.stamp = stamp
+    pose_array.poses = list(waypoints)
+
+    markers = MarkerArray()
+    delete = Marker()
+    delete.action = Marker.DELETEALL
+    markers.markers.append(delete)
+
+    line = Marker()
+    line.header.frame_id = frame
+    line.header.stamp = stamp
+    line.ns = "weld_seam"
+    line.id = 0
+    line.type = Marker.LINE_STRIP
+    line.action = Marker.ADD
+    line.scale.x = 0.018
+    line.color.r, line.color.g, line.color.b, line.color.a = 1.0, 0.05, 0.02, 1.0
+    line.points = [pose.position for pose in waypoints]
+    markers.markers.append(line)
+
+    for index, pose in enumerate(waypoints):
+        point = Marker()
+        point.header.frame_id = frame
+        point.header.stamp = stamp
+        point.ns = "weld_points"
+        point.id = index + 1
+        point.type = Marker.SPHERE
+        point.action = Marker.ADD
+        point.pose = pose
+        point.scale.x = point.scale.y = point.scale.z = 0.06
+        point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.75, 0.0, 1.0
+        markers.markers.append(point)
+
+        axes = (
+            ("weld_frame_x", (1.0, 0.0, 0.0), (1.0, 0.05, 0.05)),
+            ("weld_frame_y", (0.0, 1.0, 0.0), (0.05, 1.0, 0.05)),
+            ("weld_frame_z", (0.0, 0.0, 1.0), (0.05, 0.25, 1.0)),
+        )
+        for namespace, local_axis, color in axes:
+            direction = rotate_vector(pose.orientation, local_axis)
+            arrow = Marker()
+            arrow.header.frame_id = frame
+            arrow.header.stamp = stamp
+            arrow.ns = namespace
+            arrow.id = index + 1
+            arrow.type = Marker.ARROW
+            arrow.action = Marker.ADD
+            arrow.points = [
+                Point(x=pose.position.x, y=pose.position.y, z=pose.position.z),
+                Point(
+                    x=pose.position.x + 0.25 * direction[0],
+                    y=pose.position.y + 0.25 * direction[1],
+                    z=pose.position.z + 0.25 * direction[2],
+                ),
+            ]
+            arrow.scale.x, arrow.scale.y, arrow.scale.z = 0.022, 0.045, 0.065
+            arrow.color.r, arrow.color.g, arrow.color.b = color
+            arrow.color.a = 1.0
+            markers.markers.append(arrow)
+
+        label = Marker()
+        label.header.frame_id = frame
+        label.header.stamp = stamp
+        label.ns = "weld_labels"
+        label.id = index + 1
+        label.type = Marker.TEXT_VIEW_FACING
+        label.action = Marker.ADD
+        label.pose.position.x = pose.position.x
+        label.pose.position.y = pose.position.y
+        label.pose.position.z = pose.position.z + 0.16
+        label.pose.orientation.w = 1.0
+        label.scale.z = 0.13
+        label.color.r = label.color.g = label.color.b = label.color.a = 1.0
+        label.text = f"W{index + 1}"
+        markers.markers.append(label)
+    return markers, pose_array
+
+
 class CartesianPathActionServer(Node):
-    """Dry-run Cartesian path server; it never commands robot hardware."""
+    """Visualize, plan, and optionally execute Cartesian weld paths."""
 
     def __init__(self) -> None:
         super().__init__("cartesian_path_action_server")
@@ -58,6 +187,9 @@ class CartesianPathActionServer(Node):
         )
         self._marker_publisher = self.create_publisher(
             MarkerArray, "weld_path_markers", marker_qos
+        )
+        self._pose_publisher = self.create_publisher(
+            PoseArray, "weld_6d_poses", marker_qos
         )
         self._display_publisher = self.create_publisher(
             DisplayTrajectory, "/display_planned_path", marker_qos
@@ -90,43 +222,25 @@ class CartesianPathActionServer(Node):
 
     def publish_weld_markers(self, waypoints):
         frame = self.get_parameter("planning_frame").value
-        markers = MarkerArray()
-        delete = Marker()
-        delete.action = Marker.DELETEALL
-        markers.markers.append(delete)
-
-        line = Marker()
-        line.header.frame_id = frame
-        line.ns = "weld_seam"
-        line.id = 0
-        line.type = Marker.LINE_STRIP
-        line.action = Marker.ADD
-        line.scale.x = 0.008
-        line.color.r = 1.0
-        line.color.g = 0.15
-        line.color.b = 0.05
-        line.color.a = 1.0
-        line.points = [pose.position for pose in waypoints]
-        markers.markers.append(line)
-
-        for index, pose in enumerate(waypoints):
-            point = Marker()
-            point.header.frame_id = frame
-            point.ns = "weld_points"
-            point.id = index + 1
-            point.type = Marker.SPHERE
-            point.action = Marker.ADD
-            point.pose = pose
-            point.scale.x = point.scale.y = point.scale.z = 0.035
-            point.color.r = 1.0
-            point.color.g = 0.8
-            point.color.b = 0.0
-            point.color.a = 1.0
-            markers.markers.append(point)
+        stamp = self.get_clock().now().to_msg()
+        markers, pose_array = make_weld_visualization(
+            waypoints, frame, stamp
+        )
+        self._pose_publisher.publish(pose_array)
         self._marker_publisher.publish(markers)
         self.get_logger().info(
-            f"Published {len(waypoints)} weld points on /weld_path_markers"
+            f"Published {len(waypoints)} weld 6D frames on "
+            "/weld_path_markers and /weld_6d_poses"
         )
+
+    @staticmethod
+    def _wait_for_future(future, timeout, operation):
+        deadline = time.monotonic() + timeout
+        while not future.done():
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"{operation} timed out after {timeout:.0f} s")
+            time.sleep(FUTURE_POLL_PERIOD)
+        return future.result()
 
     def plan_with_moveit(self, request):
         if not self._cartesian_client.wait_for_service(timeout_sec=5.0):
@@ -135,19 +249,16 @@ class CartesianPathActionServer(Node):
         cartesian.header.frame_id = self.get_parameter("planning_frame").value
         cartesian.start_state.is_diff = True
         cartesian.group_name = request.planning_group
-        cartesian.link_name = (
-            "right_manipulator_ee_point"
-            if request.planning_group == "right_manipulator"
-            else "left_manipulator_ee_point"
-        )
+        cartesian.link_name = tip_link_for_group(request.planning_group)
         cartesian.waypoints = request.waypoints
         cartesian.max_step = request.interpolation_step
         cartesian.jump_threshold = 0.0
         cartesian.avoid_collisions = True
-        future = self._cartesian_client.call_async(cartesian)
-        while not future.done():
-            time.sleep(0.01)
-        response = future.result()
+        response = self._wait_for_future(
+            self._cartesian_client.call_async(cartesian),
+            PLANNING_TIMEOUT,
+            "MoveIt Cartesian planning",
+        )
         if response is None:
             raise RuntimeError("MoveIt Cartesian service returned no response")
 
@@ -167,20 +278,38 @@ class CartesianPathActionServer(Node):
             raise RuntimeError("/execute_trajectory action unavailable")
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = trajectory
-        send_future = self._execute_client.send_goal_async(goal)
-        while not send_future.done():
-            time.sleep(0.01)
-        execute_handle = send_future.result()
+        execute_handle = self._wait_for_future(
+            self._execute_client.send_goal_async(goal),
+            PLANNING_TIMEOUT,
+            "MoveIt execution goal submission",
+        )
         if not execute_handle.accepted:
             raise RuntimeError("MoveIt execution goal rejected")
-        result_future = execute_handle.get_result_async()
-        while not result_future.done():
-            time.sleep(0.01)
-        return result_future.result().result
+        result_wrapper = self._wait_for_future(
+            execute_handle.get_result_async(),
+            EXECUTION_TIMEOUT,
+            "MoveIt trajectory execution",
+        )
+        return result_wrapper.result
 
     def goal_callback(self, goal_request):
-        if not goal_request.waypoints or goal_request.interpolation_step <= 0.0:
-            self.get_logger().warning("Rejected empty path or non-positive step")
+        if goal_request.planning_group not in PLANNING_GROUP_TIPS:
+            self.get_logger().warning(
+                f"Rejected unsupported planning group: "
+                f"{goal_request.planning_group}"
+            )
+            return GoalResponse.REJECT
+        if (
+            not goal_request.waypoints
+            or not math.isfinite(goal_request.interpolation_step)
+            or goal_request.interpolation_step <= 0.0
+        ):
+            self.get_logger().warning(
+                "Rejected empty path or invalid interpolation step"
+            )
+            return GoalResponse.REJECT
+        if not all(pose_is_valid(pose) for pose in goal_request.waypoints):
+            self.get_logger().warning("Rejected non-finite pose or zero quaternion")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 

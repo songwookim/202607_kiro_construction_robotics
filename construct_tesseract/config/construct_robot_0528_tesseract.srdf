@@ -248,5 +248,6 @@
          home pose; the physical mounting geometry has clearance. -->
     <disable_collisions link1="left_manipulator_link2" link2="robot_base_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link2" link2="robot_base_link" reason="Never"/>
+    <kinematics_plugin_config filename="package://construct_tesseract/config/kinematics_plugins.yaml"/>
     <contact_managers_plugin_config filename="package://construct_tesseract/config/contact_manager_plugins.yaml"/>
 </robot>

@@ -1,12 +1,12 @@
 import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import ExecuteProcess
-from ament_index_python.packages import get_package_share_directory
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
@@ -20,85 +20,66 @@ fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
 cb_simulation = LaunchConfiguration("cb_simulation")
 use_rviz = LaunchConfiguration("use_rviz")
 
-def generate_launch_description():
 
-    declared_arguments = []
-    declared_arguments.append(
+def generate_launch_description():
+    declared_arguments = [
         DeclareLaunchArgument(
             "rviz_config",
             default_value="moveit.rviz",
             description="RViz configuration file",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "left_robot_ip",
             default_value="192.168.1.11",
             description="Left RB Cobot Control Box IP address",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "right_robot_ip",
             default_value="192.168.1.10",
             description="Right RB Cobot Control Box IP address",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "use_fake_left_hardware",
             default_value="true",
             description="Use fake hardware for the left manipulator",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "use_fake_right_hardware",
             default_value="false",
             description="Use fake hardware for the right manipulator",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "use_initial_left_positions",
             default_value="true",
             description="Initialize fake left manipulator from initial_positions.yaml",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "use_initial_right_positions",
             default_value="false",
             description="Initialize fake right manipulator from initial_positions.yaml",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "fake_sensor_commands",
             default_value="false",
             description="True when use fake sensor commands",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "use_rviz",
             default_value="true",
             description="Start RViz",
-        )
-    )
-    declared_arguments.append(
+        ),
         DeclareLaunchArgument(
             "cb_simulation",
             default_value="false",
             description="Use the RB Control Box simulation mode",
-        )
-    )
+        ),
+    ]
     return LaunchDescription(
         declared_arguments + [OpaqueFunction(function=launch_setup)]
     )
 
 
-def launch_setup(context, *args, **kwargs):
+def launch_setup(_context):
     mappings = {
         "left_robot_ip": left_robot_ip,
         "right_robot_ip": right_robot_ip,
@@ -111,10 +92,14 @@ def launch_setup(context, *args, **kwargs):
     }
 
     moveit_config = (
-        # MoveItConfigsBuilder("construct_robot")
-        MoveItConfigsBuilder('construct_robot_0528', package_name='construct_moveit_config')
-        .robot_description(file_path="config/construct_robot_0528.urdf.xacro",
-                            mappings=mappings)
+        MoveItConfigsBuilder(
+            "construct_robot_0528",
+            package_name="construct_moveit_config",
+        )
+        .robot_description(
+            file_path="config/construct_robot_0528.urdf.xacro",
+            mappings=mappings,
+        )
         .robot_description_semantic(file_path="config/construct_robot_0528.srdf")
         .trajectory_execution(file_path="config/moveit_controllers.yaml")
         .planning_scene_monitor(
@@ -183,9 +168,9 @@ def launch_setup(context, *args, **kwargs):
 
     # ros2_control: left/right RB hardware plus a MoveIt-only fake head.
     ros2_controllers_path = os.path.join(
-        get_package_share_directory("construct_robot_bringup"),
+        get_package_share_directory("construct_moveit_config"),
         "config",
-        "controllers.yaml",
+        "ros2_controllers.yaml",
     )
     ros2_control_node = Node(
         package="controller_manager",

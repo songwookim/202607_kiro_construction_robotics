@@ -622,10 +622,9 @@ Visualization Manager:
         Show Robot Visual: true
       Value: true
       Velocity_Scaling_Factor: 0.1
-  Enabled: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Marker Topic:
+      Topic:
         Depth: 5
         Durability Policy: Transient Local
         History Policy: Keep Last
@@ -633,9 +632,45 @@ Visualization Manager:
         Value: /weld_path_markers
       Name: Laser Weld Points
       Namespaces:
+        weld_frame_x: true
+        weld_frame_y: true
+        weld_frame_z: true
+        weld_labels: true
         weld_points: true
         weld_seam: true
       Value: true
+    - Alpha: 1
+      Axes Length: 0.25
+      Axes Radius: 0.022
+      Class: rviz_default_plugins/PoseArray
+      Color: 255; 170; 0
+      Enabled: true
+      Head Length: 0.07
+      Head Radius: 0.045
+      Name: Weld 6D PoseArray
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /weld_6d_poses
+      Shaft Length: 0.18
+      Shaft Radius: 0.02
+      Shape: Axes
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /tesseract_constraint_markers
+      Name: Tesseract Dual-Arm Constraint
+      Namespaces:
+        tesseract_rigid_constraint: true
+      Value: true
+  Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: World

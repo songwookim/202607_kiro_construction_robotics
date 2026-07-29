@@ -8,14 +8,14 @@
     <xacro:arg name="use_initial_left_positions" default="true" />
     <xacro:arg name="use_initial_right_positions" default="true" />
     <xacro:arg name="initial_positions_file"
-               default="$(find construct_moveit_config)/config/initial_positions.yaml" />
+               default="$(find construct_description)/config/initial_positions.yaml" />
     <xacro:arg name="fake_sensor_commands" default="false" />
 
     <!-- Import construct_robot_0528 urdf file -->
     <xacro:include filename="$(find construct_description)/urdf_0528/construct_robot_0528.urdf" />
 
     <!-- Import control_xacro -->
-    <xacro:include filename="$(find construct_moveit_config)/config/construct_robot_0528.ros2_control.xacro" />
+    <xacro:include filename="$(find construct_description)/urdf_0528/construct_robot_0528.ros2_control.xacro" />
 
     <xacro:construct_robot_0528_ros2_control
         left_robot_ip="$(arg left_robot_ip)"

@@ -6,19 +6,20 @@ package_name = 'construct_robot'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='0.1.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='irs',
     maintainer_email='thddn191@gmail.com',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='KIRO hardware launch, Cartesian action, and weld GUI nodes',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
@@ -28,6 +29,8 @@ setup(
         'console_scripts': [
             'cartesian_path_server = construct_robot.cartesian_path_server:main',
             'cartesian_path_client = construct_robot.cartesian_path_client:main',
+            'weld_action_gui = construct_robot.weld_action_gui:main',
+            'viser_viewer = construct_robot.viser_viewer:main',
         ],
     },
 )
