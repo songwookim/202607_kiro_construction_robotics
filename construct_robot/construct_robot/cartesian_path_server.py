@@ -1,4 +1,6 @@
+import copy
 import math
+import threading
 import time
 
 import rclpy
@@ -14,9 +16,11 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
+from construct_msgs.srv import SetWelderCommand
 from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     pose_is_valid,
+    scale_trajectory_speed,
     tip_link_for_group,
 )
 
@@ -92,7 +96,7 @@ def rotate_vector(quaternion, vector):
 
 
 def make_weld_visualization(waypoints, frame, stamp):
-    """Build conspicuous RViz markers and the corresponding PoseArray."""
+    """Build compact RViz 6D-pose markers and corresponding PoseArray."""
     pose_array = PoseArray()
     pose_array.header.frame_id = frame
     pose_array.header.stamp = stamp
@@ -103,17 +107,21 @@ def make_weld_visualization(waypoints, frame, stamp):
     delete.action = Marker.DELETEALL
     markers.markers.append(delete)
 
-    line = Marker()
-    line.header.frame_id = frame
-    line.header.stamp = stamp
-    line.ns = "weld_seam"
-    line.id = 0
-    line.type = Marker.LINE_STRIP
-    line.action = Marker.ADD
-    line.scale.x = 0.018
-    line.color.r, line.color.g, line.color.b, line.color.a = 1.0, 0.05, 0.02, 1.0
-    line.points = [pose.position for pose in waypoints]
-    markers.markers.append(line)
+    if waypoints:
+        line = Marker()
+        line.header.frame_id = frame
+        line.header.stamp = stamp
+        line.ns = "weld_seam"
+        line.id = 0
+        line.type = Marker.LINE_STRIP
+        line.action = Marker.ADD
+        line.scale.x = 0.006
+        line.color.r = 1.0
+        line.color.g = 0.05
+        line.color.b = 0.02
+        line.color.a = 1.0
+        line.points = [pose.position for pose in waypoints]
+        markers.markers.append(line)
 
     for index, pose in enumerate(waypoints):
         point = Marker()
@@ -124,7 +132,7 @@ def make_weld_visualization(waypoints, frame, stamp):
         point.type = Marker.SPHERE
         point.action = Marker.ADD
         point.pose = pose
-        point.scale.x = point.scale.y = point.scale.z = 0.06
+        point.scale.x = point.scale.y = point.scale.z = 0.025
         point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.75, 0.0, 1.0
         markers.markers.append(point)
 
@@ -145,12 +153,16 @@ def make_weld_visualization(waypoints, frame, stamp):
             arrow.points = [
                 Point(x=pose.position.x, y=pose.position.y, z=pose.position.z),
                 Point(
-                    x=pose.position.x + 0.25 * direction[0],
-                    y=pose.position.y + 0.25 * direction[1],
-                    z=pose.position.z + 0.25 * direction[2],
+                    x=pose.position.x + 0.08 * direction[0],
+                    y=pose.position.y + 0.08 * direction[1],
+                    z=pose.position.z + 0.08 * direction[2],
                 ),
             ]
-            arrow.scale.x, arrow.scale.y, arrow.scale.z = 0.022, 0.045, 0.065
+            arrow.scale.x, arrow.scale.y, arrow.scale.z = (
+                0.008,
+                0.016,
+                0.024,
+            )
             arrow.color.r, arrow.color.g, arrow.color.b = color
             arrow.color.a = 1.0
             markers.markers.append(arrow)
@@ -164,9 +176,9 @@ def make_weld_visualization(waypoints, frame, stamp):
         label.action = Marker.ADD
         label.pose.position.x = pose.position.x
         label.pose.position.y = pose.position.y
-        label.pose.position.z = pose.position.z + 0.16
+        label.pose.position.z = pose.position.z + 0.06
         label.pose.orientation.w = 1.0
-        label.scale.z = 0.13
+        label.scale.z = 0.05
         label.color.r = label.color.g = label.color.b = label.color.a = 1.0
         label.text = f"W{index + 1}"
         markers.markers.append(label)
@@ -181,6 +193,10 @@ class CartesianPathActionServer(Node):
         self.declare_parameter("use_moveit", False)
         self.declare_parameter("execute_motion", False)
         self.declare_parameter("planning_frame", "World")
+        self.declare_parameter("use_h600_modbus", False)
+        self._approved_plan_lock = threading.Lock()
+        self._approved_plan_signature = None
+        self._approved_plan_response = None
         callback_group = ReentrantCallbackGroup()
         marker_qos = QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL
@@ -205,6 +221,11 @@ class CartesianPathActionServer(Node):
             "/execute_trajectory",
             callback_group=callback_group,
         )
+        self._welder_client = self.create_client(
+            SetWelderCommand,
+            "/h600/set_command",
+            callback_group=callback_group,
+        )
         self._server = ActionServer(
             self,
             CartesianPath,
@@ -220,9 +241,11 @@ class CartesianPathActionServer(Node):
             f"execute_motion={self.get_parameter('execute_motion').value})"
         )
 
-    def publish_weld_markers(self, waypoints):
+    def publish_weld_markers(self, waypoints, visible=True):
         frame = self.get_parameter("planning_frame").value
         stamp = self.get_clock().now().to_msg()
+        if not visible:
+            waypoints = []
         markers, pose_array = make_weld_visualization(
             waypoints, frame, stamp
         )
@@ -261,6 +284,7 @@ class CartesianPathActionServer(Node):
         )
         if response is None:
             raise RuntimeError("MoveIt Cartesian service returned no response")
+        scale_trajectory_speed(response.solution, request.velocity_scale)
 
         display = DisplayTrajectory()
         display.model_id = "construct_robot_0528"
@@ -269,9 +293,81 @@ class CartesianPathActionServer(Node):
         self._display_publisher.publish(display)
         self.get_logger().info(
             f"MoveIt path fraction={response.fraction:.3f}, "
-            f"points={len(response.solution.joint_trajectory.points)}"
+            f"points={len(response.solution.joint_trajectory.points)}, "
+            f"velocity_scale={request.velocity_scale:.2f}"
         )
         return response
+
+    @staticmethod
+    def plan_signature(request):
+        """Return the path/planning values which define an approved plan."""
+        pose_values = []
+        for pose in request.waypoints:
+            pose_values.extend(
+                (
+                    pose.position.x,
+                    pose.position.y,
+                    pose.position.z,
+                    pose.orientation.x,
+                    pose.orientation.y,
+                    pose.orientation.z,
+                    pose.orientation.w,
+                )
+            )
+        return (
+            request.planning_group,
+            request.interpolation_step,
+            request.velocity_scale,
+            tuple(pose_values),
+        )
+
+    def approve_plan(self, request, response):
+        with self._approved_plan_lock:
+            self._approved_plan_signature = self.plan_signature(request)
+            self._approved_plan_response = copy.deepcopy(response)
+
+    def approved_plan(self, request):
+        signature = self.plan_signature(request)
+        with self._approved_plan_lock:
+            if (
+                self._approved_plan_response is None
+                or signature != self._approved_plan_signature
+            ):
+                raise RuntimeError(
+                    "No matching approved plan. Press Plan Preview again "
+                    "after every path or speed change."
+                )
+            return copy.deepcopy(self._approved_plan_response)
+
+    def consume_approved_plan(self):
+        with self._approved_plan_lock:
+            self._approved_plan_signature = None
+            self._approved_plan_response = None
+
+    def set_welder(self, request, enabled):
+        """Set safe H600 command state around trajectory execution."""
+        if not self.get_parameter("use_h600_modbus").value:
+            raise RuntimeError("ARC requested but use_h600_modbus is false")
+        if not self._welder_client.wait_for_service(timeout_sec=3.0):
+            raise RuntimeError("/h600/set_command service unavailable")
+        command = SetWelderCommand.Request()
+        command.robot_ready = enabled
+        command.gas = enabled
+        command.arc = enabled
+        command.allow_nonzero_setpoints = enabled
+        if enabled:
+            command.current_raw = request.weld_current_raw
+            command.voltage_raw = request.weld_voltage_raw
+            command.v_offset_raw = request.weld_v_offset_raw
+        response = self._wait_for_future(
+            self._welder_client.call_async(command),
+            5.0,
+            f"H600 ARC {'ON' if enabled else 'OFF'}",
+        )
+        if response is None or not response.success:
+            message = response.message if response is not None else "no response"
+            raise RuntimeError(f"H600 command rejected: {message}")
+        self.get_logger().info(response.message)
 
     def execute_moveit_trajectory(self, trajectory):
         if not self._execute_client.wait_for_server(timeout_sec=5.0):
@@ -303,9 +399,12 @@ class CartesianPathActionServer(Node):
             not goal_request.waypoints
             or not math.isfinite(goal_request.interpolation_step)
             or goal_request.interpolation_step <= 0.0
+            or not math.isfinite(goal_request.velocity_scale)
+            or goal_request.velocity_scale <= 0.0
+            or goal_request.velocity_scale > 1.0
         ):
             self.get_logger().warning(
-                "Rejected empty path or invalid interpolation step"
+                "Rejected empty path, interpolation step, or velocity scale"
             )
             return GoalResponse.REJECT
         if not all(pose_is_valid(pose) for pose in goal_request.waypoints):
@@ -319,12 +418,21 @@ class CartesianPathActionServer(Node):
     def execute_callback(self, goal_handle):
         request = goal_handle.request
         result = CartesianPath.Result()
-        self.publish_weld_markers(request.waypoints)
+        self.publish_weld_markers(
+            request.waypoints,
+            request.visualize_path,
+        )
 
         moveit_response = None
         if self.get_parameter("use_moveit").value:
             try:
-                moveit_response = self.plan_with_moveit(request)
+                if request.reuse_approved_plan:
+                    moveit_response = self.approved_plan(request)
+                    self.get_logger().info(
+                        "Using the exact matching GUI-approved trajectory"
+                    )
+                else:
+                    moveit_response = self.plan_with_moveit(request)
                 if moveit_response.fraction < 0.999:
                     goal_handle.abort()
                     result.success = False
@@ -334,6 +442,8 @@ class CartesianPathActionServer(Node):
                     )
                     result.final_pose = request.waypoints[-1]
                     return result
+                if not request.execute_requested:
+                    self.approve_plan(request, moveit_response)
             except RuntimeError as error:
                 goal_handle.abort()
                 result.success = False
@@ -369,11 +479,28 @@ class CartesianPathActionServer(Node):
                     (waypoint_index + sample_index / samples) / segment_count
                 )
                 goal_handle.publish_feedback(feedback)
-                time.sleep(0.01)
+                time.sleep(0.01 / request.velocity_scale)
             start = target
 
-        if moveit_response is not None and self.get_parameter("execute_motion").value:
+        executed = False
+        if moveit_response is not None and request.execute_requested:
+            if not self.get_parameter("execute_motion").value:
+                goal_handle.abort()
+                result.success = False
+                result.message = (
+                    "Execution requested but the server was launched with "
+                    "execute_motion:=false"
+                )
+                result.final_pose = request.waypoints[-1]
+                result.sampled_path = sampled_path
+                return result
+            if request.reuse_approved_plan:
+                self.consume_approved_plan()
+            arc_started = False
             try:
+                if request.enable_arc:
+                    self.set_welder(request, True)
+                    arc_started = True
                 execute_result = self.execute_moveit_trajectory(
                     moveit_response.solution
                 )
@@ -387,6 +514,7 @@ class CartesianPathActionServer(Node):
                     result.final_pose = request.waypoints[-1]
                     result.sampled_path = sampled_path
                     return result
+                executed = True
             except RuntimeError as error:
                 goal_handle.abort()
                 result.success = False
@@ -394,12 +522,29 @@ class CartesianPathActionServer(Node):
                 result.final_pose = request.waypoints[-1]
                 result.sampled_path = sampled_path
                 return result
+            finally:
+                if arc_started:
+                    try:
+                        self.set_welder(request, False)
+                    except RuntimeError as error:
+                        self.get_logger().error(
+                            f"Failed to confirm H600 ARC OFF: {error}"
+                        )
 
         goal_handle.succeed()
         result.success = True
+        if executed:
+            completion = "planned and executed on the active controller"
+        elif moveit_response is not None:
+            completion = (
+                "planned preview approved for matching path and speed"
+            )
+        else:
+            completion = "sampled only; MoveIt is disabled"
         result.message = (
-            f"Path for '{request.planning_group}' completed "
-            f"with {len(sampled_path)} samples"
+            f"Path for '{request.planning_group}' {completion} · "
+            f"{len(sampled_path)} samples at "
+            f"{request.velocity_scale:.0%} speed"
         )
         result.final_pose = request.waypoints[-1]
         result.sampled_path = sampled_path

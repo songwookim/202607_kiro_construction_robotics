@@ -1,0 +1,10 @@
+bool robot_ready
+bool gas
+bool arc
+bool allow_nonzero_setpoints
+uint16 current_raw
+uint16 voltage_raw
+uint16 v_offset_raw
+---
+bool success
+string message

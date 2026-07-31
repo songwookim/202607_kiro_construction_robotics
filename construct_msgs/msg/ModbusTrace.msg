@@ -1,0 +1,10 @@
+std_msgs/Header header
+string direction
+string client_address
+uint16 transaction_id
+uint8 unit_id
+uint8 function_code
+uint16 register_address
+uint16 register_count
+string raw_hex
+string summary

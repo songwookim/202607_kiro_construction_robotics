@@ -8,11 +8,16 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/CartesianPath.action"
-  DEPENDENCIES geometry_msgs
+  "msg/ModbusTrace.msg"
+  "msg/WelderStatus.msg"
+  "srv/SetRobotConnection.srv"
+  "srv/SetWelderCommand.srv"
+  DEPENDENCIES geometry_msgs std_msgs
 )
 
 if(BUILD_TESTING)

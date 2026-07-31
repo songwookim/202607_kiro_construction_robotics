@@ -2,6 +2,9 @@
 
 ROS 2 Humble packages for the dual-arm KIRO construction robot.
 
+The complete node/topic/service/action and RB controller data flow is documented
+in [`docs/ROS_GRAPH.md`](docs/ROS_GRAPH.md).
+
 ## Packages
 
 - `construct_description`: URDF, ros2_control, and optimized mesh assets
@@ -44,10 +47,93 @@ The pinned Tesseract dependency overlay lives at
 main workspace build; build it explicitly with `--base-paths src`.
 
 Use **Acquire weld points**, inspect the three live TCP-relative poses, then
-use **Plan + execute right arm**. The GUI reports Action feedback/result while
+use **1 · Plan Preview**, inspect the trajectory in RViz or Viser, then use
+**2 · Execute Approved Plan**. Any pose or speed edit invalidates the approval.
 RViz displays the yellow weld points, red seam, right-arm trajectory and an
 RGB frame at every 6D pose (X red, Y green, Z blue). The same scanner output
 is available as `geometry_msgs/PoseArray` on `/weld_6d_poses`.
+
+The path table is editable. Select a waypoint to change its XYZ/quaternion,
+duplicate/delete/reorder it, nudge it along a World axis, or capture the
+physical right TCP into the table. Every edit is immediately republished to
+RViz and Viser. **Generate circle** creates a World-YZ circle around the
+current right TCP. With **TCP +Z faces center**, every waypoint gets a distinct
+6D orientation which continuously looks toward the circle center.
+
+**Show planned path** toggles the compact waypoint spheres, RGB 6D axes, labels,
+and connecting line in both RViz and Viser. Weaving is applied to the current
+acquired/taught seam, rather than creating a second unrelated line. Amplitude,
+cycles, samples per cycle, and Tool/World transverse axis are editable.
+
+The launch starts RViz, Viser, and the weld GUI together by default. Viser is
+at `http://localhost:8080`; its cyan transparent robot always follows live
+`/joint_states`, while the solid robot can preview a planned trajectory.
+
+To use the GUI's **Robot Connect / Robot Disconnect** buttons, start the
+supervised launch. The GUI remains open while the supervisor starts or stops
+the REAL-RB MoveIt/ros2_control child stack:
+
+```bash
+ros2 launch construct_robot weld_supervised.launch.py \
+  initial_connected:=false \
+  right_robot_ip:=192.168.1.10
+```
+
+Connect asks for confirmation, keeps ARC/nonzero outputs locked OFF, and uses
+the entered right RB IP. Disconnect stops MoveIt/ros2_control and the hardware
+connection without closing the GUI. The GUI reports `ROBOT CONNECTED` only
+after live right-arm `/joint_states` arrive. With the ordinary
+`weld_action_gui.launch.py`, the connection buttons intentionally report that
+no supervisor is available.
+
+The GUI launch also starts the H600 Modbus bridge derived from `~/test.py`.
+It serves the 201/202/204/205/206 command registers and publishes decoded
+211–213 feedback on `/h600/status`. Its safe defaults are port 1502, ARC
+disabled, and nonzero setpoints disabled:
+
+```bash
+# Safe fake-hardware integration; RViz + Viser + weld GUI
+ros2 launch construct_robot weld_action_gui.launch.py \
+  use_fake_right_hardware:=true execute_motion:=true
+
+# Physical right RB; keep ARC disabled for the first motion test
+ros2 launch construct_robot weld_action_gui.launch.py \
+  use_fake_right_hardware:=false \
+  use_initial_right_positions:=false \
+  right_robot_ip:=192.168.1.10 \
+  execute_motion:=true
+
+# Enable welding only after motion and the H600 map are verified
+ros2 launch construct_robot weld_action_gui.launch.py \
+  use_fake_right_hardware:=false \
+  use_initial_right_positions:=false \
+  right_robot_ip:=192.168.1.10 \
+  execute_motion:=true \
+  allow_arc_output:=true \
+  allow_nonzero_setpoints:=true
+```
+
+When enabled in the GUI, ARC/ready/gas turn on only after planning succeeds and
+immediately before trajectory execution. They are forced off after success,
+failure, disconnect, or node shutdown.
+
+The independent Wireshark-style H600 console shows register values, decoded
+status bits, RX/TX MBAP+PDU frames, transaction/unit/function/register fields,
+raw HEX, and CSV export:
+
+```bash
+# Start bridge and diagnostic GUI
+ros2 launch construct_robot h600_console.launch.py port:=1502
+
+# When weld_action_gui.launch.py already owns the bridge/port
+ros2 launch construct_robot h600_console.launch.py start_bridge:=false
+```
+
+See `docs/ADD_VISER_HOME_COMMAND.md` for a small, follow-along example that adds
+a collision-checked “move right arm to initial pose” Viser button.
+
+See `docs/CONTINUOUS_CIRCLE.md` for the exact waypoint, quaternion,
+interpolation, and multi-lap changes used to make circular welding continuous.
 
 First launch MoveIt and RViz with fake hardware:
 
@@ -75,6 +161,15 @@ ros2 run construct_robot cartesian_path_client \
   --scenario laser-live-straight
 ```
 
+CLI weaving test:
+
+```bash
+ros2 run construct_robot cartesian_path_client \
+  --planning-group right_manipulator \
+  --scenario laser-live-weave \
+  --velocity-scale 0.2
+```
+
 The goal is an ordered `geometry_msgs/Pose[]`. Feedback contains the current
 interpolated 6D pose, waypoint index and progress. The result contains the
 final pose and sampled path. Keep `execute_motion:=false` for visualization
@@ -85,13 +180,15 @@ model-validation command.
 
 ## Viser browser debug viewer
 
-Viser can replace the RViz visualization window while retaining the ROS and
-MoveIt backend. Start the complete fake-hardware stack without RViz:
+Viser can run beside RViz while retaining the same ROS and MoveIt backend.
+Start the complete fake-hardware stack with both viewers:
 
 ```bash
 source /home/irs/ros2_ws/install/setup.bash
 ros2 launch construct_robot viser_debug.launch.py
 ```
+
+Use `use_rviz:=false` when only the browser viewer is needed.
 
 Open `http://localhost:8080`, then send the right-arm scanner scenario:
 

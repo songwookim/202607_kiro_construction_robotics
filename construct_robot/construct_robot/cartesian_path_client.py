@@ -12,6 +12,7 @@ from construct_msgs.action import CartesianPath
 from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     tip_link_for_group,
+    weaving_waypoints,
 )
 
 
@@ -30,10 +31,11 @@ def make_pose(x: float, y: float, z: float, q=(0.0, 0.0, 0.0, 1.0)) -> Pose:
 
 
 class CartesianPathActionClient(Node):
-    def __init__(self, planning_group: str, scenario: str) -> None:
+    def __init__(self, planning_group, scenario, options) -> None:
         super().__init__("laser_weld_path_action_client")
         self._planning_group = planning_group
         self._scenario = scenario
+        self._options = options
         self._client = ActionClient(self, CartesianPath, "cartesian_path")
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -70,6 +72,14 @@ class CartesianPathActionClient(Node):
         goal = CartesianPath.Goal()
         goal.planning_group = self._planning_group
         goal.interpolation_step = 0.02
+        goal.velocity_scale = self._options.velocity_scale
+        goal.execute_requested = not self._options.plan_only
+        goal.reuse_approved_plan = self._options.execute_approved
+        goal.visualize_path = not self._options.hide_path
+        goal.enable_arc = self._options.enable_arc
+        goal.weld_current_raw = self._options.current_raw
+        goal.weld_voltage_raw = self._options.voltage_raw
+        goal.weld_v_offset_raw = self._options.v_offset_raw
         if self._scenario == "laser-live-straight":
             try:
                 goal.waypoints = self.scanner_path_from_current_tcp()
@@ -79,6 +89,24 @@ class CartesianPathActionClient(Node):
                 return
             self.get_logger().info(
                 "Laser scanner supplied 3 live TCP-relative collinear 6D poses"
+            )
+        elif self._scenario == "laser-live-weave":
+            try:
+                straight = self.scanner_path_from_current_tcp()
+            except RuntimeError as error:
+                self.get_logger().error(str(error))
+                rclpy.shutdown()
+                return
+            start = straight[0]
+            goal.waypoints = weaving_waypoints(
+                start,
+                length=0.08,
+                amplitude=0.003,
+                cycles=4,
+                samples_per_cycle=8,
+            )
+            self.get_logger().info(
+                "Generated live 80 mm seam with ±3 mm, 4-cycle weaving"
             )
         elif self._scenario == "laser-straight":
             # Simulated scanner output: three weld TCP poses on one straight
@@ -153,12 +181,35 @@ def main(args=None):
     )
     parser.add_argument(
         "--scenario",
-        choices=("demo", "laser-straight", "laser-live-straight"),
+        choices=(
+            "demo",
+            "laser-straight",
+            "laser-live-straight",
+            "laser-live-weave",
+        ),
         default="laser-straight",
     )
+    parser.add_argument("--velocity-scale", type=float, default=0.2)
+    execution = parser.add_mutually_exclusive_group()
+    execution.add_argument("--plan-only", action="store_true")
+    execution.add_argument("--execute-approved", action="store_true")
+    parser.add_argument("--hide-path", action="store_true")
+    parser.add_argument("--enable-arc", action="store_true")
+    parser.add_argument("--current-raw", type=int, default=0)
+    parser.add_argument("--voltage-raw", type=int, default=0)
+    parser.add_argument("--v-offset-raw", type=int, default=0)
     parsed, ros_args = parser.parse_known_args(args=args)
+    if not 0.0 < parsed.velocity_scale <= 1.0:
+        parser.error("--velocity-scale must be in (0, 1]")
+    for name in ("current_raw", "voltage_raw", "v_offset_raw"):
+        if not 0 <= getattr(parsed, name) <= 65535:
+            parser.error(f"--{name.replace('_', '-')} must be 0..65535")
     rclpy.init(args=ros_args)
-    node = CartesianPathActionClient(parsed.planning_group, parsed.scenario)
+    node = CartesianPathActionClient(
+        parsed.planning_group,
+        parsed.scenario,
+        parsed,
+    )
     node.send_demo_path()
     rclpy.spin(node)
     node.destroy_node()

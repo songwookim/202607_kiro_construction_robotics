@@ -1,0 +1,15 @@
+std_msgs/Header header
+bool client_connected
+string client_address
+bool robot_ready
+bool gas
+bool arc
+uint16 current_command_raw
+uint16 voltage_command_raw
+uint16 v_offset_command_raw
+uint16 status_raw
+bool welder_error
+bool welding
+bool touch_detect
+uint16 current_feedback_raw
+uint16 voltage_feedback_raw

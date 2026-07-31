@@ -25,7 +25,9 @@ from construct_robot.viser_utils import (
     trajectory_time,
     xyzw_to_wxyz,
 )
-
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import Constraints, JointConstraint
+from rclpy.action import ActionClient
 
 LEFT_TCP = "left_manipulator_ee_point"
 RIGHT_TCP = "right_manipulator_ee_point"
@@ -40,6 +42,8 @@ class RosViserBridge(Node):
         server,
         robot,
         robot_root,
+        live_robot,
+        live_robot_root,
         fk_model,
         joint_names,
         fixed_frame,
@@ -51,6 +55,8 @@ class RosViserBridge(Node):
         self._server = server
         self._robot = robot
         self._robot_root = robot_root
+        self._live_robot = live_robot
+        self._live_robot_root = live_robot_root
         self._fk_model = fk_model
         self._joint_names = tuple(joint_names)
         self._joint_index = {
@@ -74,6 +80,11 @@ class RosViserBridge(Node):
         self._weld_label_handles = []
         self._trajectory_handles = {}
 
+        self._move_group_client = ActionClient(
+            self,
+            MoveGroup,
+            "/move_action"
+        )
         latched_qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -142,7 +153,10 @@ class RosViserBridge(Node):
 
         with self._server.gui.add_folder("Layers"):
             self._show_robot = self._server.gui.add_checkbox(
-                "Robot", initial_value=True
+                "Selected/planned robot", initial_value=True
+            )
+            self._show_live_robot = self._server.gui.add_checkbox(
+                "Transparent live robot state", initial_value=True
             )
             self._show_grid = self._server.gui.add_checkbox(
                 "Ground grid", initial_value=True
@@ -159,7 +173,31 @@ class RosViserBridge(Node):
             self._show_tcp_paths = self._server.gui.add_checkbox(
                 "Planned TCP paths", initial_value=True
             )
+        with self._server.gui.add_folder(
+            "Robot commands",
+            expand_by_default=False,
+        ):
+            enable_commands = self._server.gui.add_checkbox(
+                "Enable real robot commands",
+                initial_value=False,
+            )
+            go_initial = self._server.gui.add_button(
+                "Move RIGHT arm to initial pose",
+            )
+            command_status = self._server.gui.add_text(
+                "Command status",
+                "disarmed",
+                disabled=True
+            )
+            @go_initial.on_click
+            def _go_initial(_event):
+                if not enable_commands.value:
+                    command_status.value = "REJECTED: enable commands first"
+                    return
+                command_status.value = "sending collision-checked MoveIt goal"
+                self.move_right_to_initial(command_status)
 
+ 
         with self._server.gui.add_folder("Trajectory playback"):
             self._mode = self._server.gui.add_dropdown(
                 "Robot source",
@@ -168,6 +206,10 @@ class RosViserBridge(Node):
             )
             self._play = self._server.gui.add_checkbox(
                 "Play", initial_value=False
+            )
+            self._auto_preview = self._server.gui.add_checkbox(
+                "Auto-preview new RViz/MoveIt plans",
+                initial_value=True,
             )
             self._loop = self._server.gui.add_checkbox(
                 "Loop", initial_value=True
@@ -223,6 +265,10 @@ class RosViserBridge(Node):
         @self._show_robot.on_update
         def _toggle_robot(_event):
             self._robot_root.visible = self._show_robot.value
+
+        @self._show_live_robot.on_update
+        def _toggle_live_robot(_event):
+            self._live_robot_root.visible = self._show_live_robot.value
 
         @self._show_grid.on_update
         def _toggle_grid(_event):
@@ -305,19 +351,19 @@ class RosViserBridge(Node):
         if len(positions) == 0:
             return
 
-        # self._weld_handles["points"] = self._server.scene.add_point_cloud(
-        #     "/debug/weld/points",
-        #     points=positions,
-        #     colors=(255, 170, 0),
-        #     point_size=0.055,
-        #     point_shape="circle",
-        # )
+        self._weld_handles["points"] = self._server.scene.add_point_cloud(
+            "/debug/weld/points",
+            points=positions,
+            colors=(255, 170, 0),
+            point_size=0.025,
+            point_shape="circle",
+        )
         self._weld_handles["axes"] = self._server.scene.add_batched_axes(
             "/debug/weld/axes",
             batched_wxyzs=orientations,
             batched_positions=positions,
-            axes_length=0.2,
-            axes_radius=0.008,
+            axes_length=0.08,
+            axes_radius=0.004,
         )
         if len(positions) > 1:
             segments = np.stack([positions[:-1], positions[1:]], axis=1)
@@ -326,7 +372,7 @@ class RosViserBridge(Node):
                     "/debug/weld/seam",
                     points=segments,
                     colors=(255, 35, 20),
-                    line_width=6.0,
+                    line_width=3.0,
                 )
             )
         for index, position in enumerate(positions, start=1):
@@ -334,7 +380,7 @@ class RosViserBridge(Node):
                 self._server.scene.add_label(
                     f"/debug/weld/labels/{index}",
                     text=f"W{index}",
-                    position=position + np.array([0.0, 0.0, 0.12]),
+                    position=position + np.array([0.0, 0.0, 0.06]),
                 )
             )
         self._apply_layer_visibility()
@@ -378,6 +424,9 @@ class RosViserBridge(Node):
             f"{self._plan_times[-1]:.2f} s"
         )
         self._render_tcp_paths()
+        if self._auto_preview.value:
+            self._mode.value = VIEW_MODES[1]
+            self._play.value = True
         self.get_logger().info(
             f"Loaded {len(configurations)} trajectory points in Viser"
         )
@@ -492,6 +541,7 @@ class RosViserBridge(Node):
         else:
             configuration = self._manual_configuration
         self._robot.update_cfg(configuration)
+        self._live_robot.update_cfg(live_configuration)
 
         if now - self._last_status_update > 0.2:
             weld_count = (
@@ -517,6 +567,61 @@ class RosViserBridge(Node):
             )
             self._last_status_update = now
 
+    def move_right_to_intial(self, status_handle):
+        joint_names = (
+            "right_manipulator_joint1",
+            "right_manipulator_joint2",
+            "right_manipulator_joint3",
+            "right_manipulator_joint4",
+            "right_manipulator_joint5",
+            "right_manipulator_joint6",
+        )
+        target = (
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        )
+        if not self._move_group_client.wait_for_server(timeout_sec=2.0):
+            status_handle.value = "ERROR: /move_ation unavailable"
+            return
+        constraints = Constraints()
+        for name, position in zip(joint_names, target):
+            joint = JointConstraint()
+            joint.joint_name = name
+            joint.position = position
+            joint.tolerance_above = 0.005
+            joint.tolerance_below = 0.005
+            joint.weight = 1.0
+            constraints.joint_constraints.append(joint)
+
+        goal = MoveGroup.Goal()
+        goal.request.group_name = "right_manipulator"
+        goal.request.num_planning_attempts = 5
+        goal.request.allowed_planning_time = 5.0
+        goal.request.max_velocity_scaling_factor = 0.05
+        goal.request.max_acceleration_scaling_factor = 0.05
+        goal.request.start_state.is_diff = True
+        goal.request.goal_constraints = [constraints]
+        goal.planning_options.plan_only = False
+        futurue = self._move_group_client.send_goal_async(goal)
+
+        def goal_response_callback(done):
+            handle = done.result()
+            if not handle.accepted:
+                status_handle.value = "REJECTED by MoveIt"
+                return
+            status_handle.value = "accepted; planning/executing"
+            result_future = handle.get_result_async()
+
+            def finished(result_done):
+                error_code = result_done.result().error_code.val
+                status_handle.value = f"finished; MoveIt error code {error_code}"
+                result_future.add_done_callback(finished)
+            result_future.add_done_callback(finished)
+        futurue.add_done_callback(goal_response_callback)
 
 def main(args=None):
     parser = argparse.ArgumentParser(
@@ -550,6 +655,10 @@ def main(args=None):
         str(urdf_path),
         filename_handler=resolve_ros_resource,
     )
+    live_model = yourdfpy.URDF.load(
+        str(urdf_path),
+        filename_handler=resolve_ros_resource,
+    )
     fk_model = yourdfpy.URDF.load(
         str(urdf_path),
         filename_handler=resolve_ros_resource,
@@ -566,6 +675,16 @@ def main(args=None):
         urdf_or_path=model,
         root_node_name="/robot",
     )
+    live_robot_root = server.scene.add_frame(
+        "/live_robot",
+        show_axes=False,
+    )
+    live_robot = ViserUrdf(
+        server,
+        urdf_or_path=live_model,
+        root_node_name="/live_robot",
+        mesh_color_override=(0.15, 0.85, 0.95, 0.25),
+    )
     joint_names = robot.get_actuated_joint_names()
 
     rclpy.init(args=ros_args)
@@ -573,6 +692,8 @@ def main(args=None):
         server=server,
         robot=robot,
         robot_root=robot_root,
+        live_robot=live_robot,
+        live_robot_root=live_robot_root,
         fk_model=fk_model,
         joint_names=joint_names,
         fixed_frame=parsed.fixed_frame,
@@ -582,7 +703,15 @@ def main(args=None):
     )
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(bridge)
-    executor_thread = threading.Thread(target=executor.spin, daemon=True)
+
+    def spin_executor():
+        try:
+            executor.spin()
+        except Exception as error:
+            if rclpy.ok():
+                bridge.get_logger().error(f"ROS executor stopped: {error}")
+
+    executor_thread = threading.Thread(target=spin_executor, daemon=True)
     executor_thread.start()
     try:
         while rclpy.ok():

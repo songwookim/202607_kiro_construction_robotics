@@ -1,0 +1,5 @@
+bool connect
+string right_robot_ip
+---
+bool accepted
+string message
