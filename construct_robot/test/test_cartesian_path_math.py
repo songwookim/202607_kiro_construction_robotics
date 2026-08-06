@@ -203,6 +203,32 @@ def test_circle_6d_poses_point_tcp_positive_z_toward_center():
         assert np.allclose(rotated_z, inward, atol=1e-7)
 
 
+def test_circle_normal_axis_selects_world_plane():
+    center = make_pose(1.0, 2.0, 3.0)
+    expected_constant_coordinate = {"x": 1.0, "y": 2.0, "z": 3.0}
+    for axis, expected in expected_constant_coordinate.items():
+        points = circle_waypoints(
+            center,
+            radius=0.1,
+            count=8,
+            closed=False,
+            normal_axis=axis,
+        )
+        assert all(
+            math.isclose(getattr(point.position, axis), expected)
+            for point in points
+        )
+
+
+def test_circle_rejects_unknown_normal_axis():
+    try:
+        circle_waypoints(make_pose(), 0.1, 8, normal_axis="bad")
+    except ValueError as error:
+        assert "normal axis" in str(error)
+    else:
+        raise AssertionError("Expected unknown normal axis to be rejected")
+
+
 def test_trajectory_velocity_scaling_changes_time_velocity_acceleration():
     trajectory = RobotTrajectory()
     point = JointTrajectoryPoint()

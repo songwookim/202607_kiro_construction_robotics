@@ -12,7 +12,7 @@
   <exec_depend>construct_description</exec_depend>
   <exec_depend>construct_moveit_config</exec_depend>
   <exec_depend>controller_manager</exec_depend>
-  <exec_depend>controller_manager_msgs</exec_depend>
+  <depend>controller_manager_msgs</depend>
   <depend>geometry_msgs</depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>joint_trajectory_controller</exec_depend>

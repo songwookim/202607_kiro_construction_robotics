@@ -89,6 +89,14 @@ def generate_launch_description():
                 LaunchConfiguration("execute_motion"),
                 value_type=bool,
             ),
+            "left_robot_ip": ParameterValue(
+                LaunchConfiguration("left_robot_ip"),
+                value_type=str,
+            ),
+            "right_robot_ip": ParameterValue(
+                LaunchConfiguration("right_robot_ip"),
+                value_type=str,
+            ),
         }],
     )
     # Fast DDS shared-memory lock files have repeatedly left this stack with

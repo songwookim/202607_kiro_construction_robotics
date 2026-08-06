@@ -149,22 +149,40 @@ def circle_waypoints(
     count: int,
     closed=True,
     face_center=False,
+    normal_axis="x",
 ):
-    """Generate a World-YZ circle, optionally pointing TCP +Z inward."""
+    """Generate a World-frame circle normal to X/Y/Z.
+
+    ``normal_axis`` selects the circle normal: X produces a YZ circle, Y an
+    XZ circle, and Z an XY circle.  When ``face_center`` is true, TCP +Z
+    points toward the center while TCP +X follows the circle normal.
+    """
     if not math.isfinite(radius) or radius <= 0.0:
         raise ValueError("Circle radius must be positive and finite")
     if count < 4:
         raise ValueError("A circle needs at least four points")
+    plane_axes = {
+        "x": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
+        "y": ((0.0, 0.0, 1.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        "z": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+    }
+    if normal_axis not in plane_axes:
+        raise ValueError(f"Unsupported circle normal axis: {normal_axis}")
+    radial_u, radial_v, normal = plane_axes[normal_axis]
     points = []
     for index in range(count):
         angle = 2.0 * math.pi * index / count
         pose = Pose()
-        pose.position.x = center.position.x
-        pose.position.y = center.position.y + radius * math.cos(angle)
-        pose.position.z = center.position.z + radius * math.sin(angle)
+        radial = tuple(
+            math.cos(angle) * u + math.sin(angle) * v
+            for u, v in zip(radial_u, radial_v)
+        )
+        pose.position.x = center.position.x + radius * radial[0]
+        pose.position.y = center.position.y + radius * radial[1]
+        pose.position.z = center.position.z + radius * radial[2]
         if face_center:
-            z_axis = (0.0, -math.cos(angle), -math.sin(angle))
-            x_axis = (1.0, 0.0, 0.0)
+            z_axis = tuple(-value for value in radial)
+            x_axis = normal
             y_axis = (
                 z_axis[1] * x_axis[2] - z_axis[2] * x_axis[1],
                 z_axis[2] * x_axis[0] - z_axis[0] * x_axis[2],

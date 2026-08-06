@@ -1550,20 +1550,8 @@
         iyz="2.39145132238029E-11"
         izz="0.335285037184983" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://construct_description/meshes_0528/testbed_link_optimized.stl" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
-      </material>
-    </visual>
+    <!-- Intentionally no visual: keep the testbed TF/reference geometry out
+         of every RViz RobotModel display. -->
     <collision>
       <origin
         xyz="0 0 0"

@@ -10,7 +10,9 @@ from tkinter import messagebox, ttk
 import rclpy
 from geometry_msgs.msg import Pose, PoseArray
 from control_msgs.action import FollowJointTrajectory
+from controller_manager_msgs.srv import ListControllers
 from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import Constraints, DisplayTrajectory, JointConstraint
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
@@ -54,6 +56,8 @@ class WeldActionNode(Node):
         self.ui = ui
         self.declare_parameter("expected_execute_motion", True)
         self.declare_parameter("robot_feedback_timeout", 5.0)
+        self.declare_parameter("left_robot_ip", "192.168.1.11")
+        self.declare_parameter("right_robot_ip", "192.168.1.10")
         self.client = ActionClient(self, CartesianPath, "cartesian_path")
         self.move_group_client = ActionClient(
             self,
@@ -76,6 +80,10 @@ class WeldActionNode(Node):
             SetDigitalOutput,
             "/right_rbpodo_hardware/set_digital_output",
         )
+        self.controller_list_client = self.create_client(
+            ListControllers,
+            "/controller_manager/list_controllers",
+        )
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.goal_handle = None
@@ -86,6 +94,9 @@ class WeldActionNode(Node):
         self.expect_robot_feedback = {"left": True, "right": True}
         self.robot_feedback_seen = {"left": False, "right": False}
         self.robot_ready_reported = {"left": False, "right": False}
+        self.controller_states = {"left": None, "right": None}
+        self.controller_state_future = None
+        self.latest_joint_positions = {}
         self.last_robot_feedback_at = {"left": None, "right": None}
         startup_deadline = time.monotonic() + 90.0
         self.connection_deadline = {
@@ -105,6 +116,11 @@ class WeldActionNode(Node):
         self.pose_publisher = self.create_publisher(
             PoseArray,
             "weld_6d_poses",
+            marker_qos,
+        )
+        self.display_trajectory_publisher = self.create_publisher(
+            DisplayTrajectory,
+            "/display_planned_path",
             marker_qos,
         )
         self.rviz_goal_refresh_publisher = self.create_publisher(
@@ -143,6 +159,8 @@ class WeldActionNode(Node):
         self.ui.post(
             self.ui.set_execution_configuration,
             self.get_parameter("expected_execute_motion").value,
+            self.get_parameter("left_robot_ip").value,
+            self.get_parameter("right_robot_ip").value,
         )
 
     def _system_state(self, message, arm):
@@ -165,6 +183,13 @@ class WeldActionNode(Node):
     def _joint_state(self, message):
         """Use complete finite measured arm states as connection feedback."""
         positions = dict(zip(message.name, message.position))
+        self.latest_joint_positions.update(
+            {
+                name: position
+                for name, position in positions.items()
+                if math.isfinite(position)
+            }
+        )
         received_at = time.monotonic()
         for arm, expected_names in ARM_JOINT_NAMES.items():
             if expected_names.issubset(positions) and all(
@@ -224,6 +249,7 @@ class WeldActionNode(Node):
             )
 
     def _check_robot_feedback(self):
+        self._request_controller_states()
         feedback_timeout = max(
             1.0,
             float(self.get_parameter("robot_feedback_timeout").value),
@@ -238,7 +264,10 @@ class WeldActionNode(Node):
             )
             controller_ready = (
                 not self.execute_motion_enabled
-                or self.trajectory_clients[arm].server_is_ready()
+                or (
+                    self.controller_states[arm] == "active"
+                    and self.trajectory_clients[arm].server_is_ready()
+                )
             )
             stack_ready = (
                 self.robot_feedback_seen[arm]
@@ -250,6 +279,20 @@ class WeldActionNode(Node):
                 self.robot_ready_reported[arm] = True
                 self.connection_deadline[arm] = None
                 self.ui.post(self.ui.robot_feedback_connected, arm)
+                continue
+            if self.robot_ready_reported[arm] and not stack_ready:
+                self.robot_ready_reported[arm] = False
+                self.rviz_goal_refresh_pending = True
+                detail = self._not_ready_detail(
+                    arm,
+                    feedback_is_fresh,
+                    move_group_ready,
+                    controller_ready,
+                )
+                self.ui.post(self.ui.robot_feedback_lost, arm, detail)
+                self.get_logger().warning(
+                    f"{arm.upper()} CONNECTION X · {detail}"
+                )
                 continue
             if (
                 self.expect_robot_feedback[arm]
@@ -307,6 +350,57 @@ class WeldActionNode(Node):
             self.get_logger().info(
                 "Requested RViz Goal State refresh from current state"
             )
+
+    def _request_controller_states(self):
+        if not self.controller_list_client.service_is_ready():
+            return
+        if (
+            self.controller_state_future is not None
+            and not self.controller_state_future.done()
+        ):
+            return
+        self.controller_state_future = self.controller_list_client.call_async(
+            ListControllers.Request()
+        )
+        self.controller_state_future.add_done_callback(
+            self._controller_states_received
+        )
+
+    def _controller_states_received(self, future):
+        try:
+            response = future.result()
+        except Exception as error:
+            self.get_logger().warning(
+                f"Failed to read controller states: {error}"
+            )
+            return
+        states = {
+            controller.name: controller.state
+            for controller in response.controller
+        }
+        for arm in ("left", "right"):
+            name = f"{arm}_manipulator_controller"
+            self.controller_states[arm] = states.get(name)
+
+    def _not_ready_detail(
+        self,
+        arm,
+        feedback_is_fresh,
+        move_group_ready,
+        controller_ready,
+    ):
+        if not feedback_is_fresh:
+            return "measured joint feedback timeout"
+        if not move_group_ready:
+            return "MoveGroup action unavailable"
+        if self.controller_states[arm] != "active":
+            return (
+                f"{arm}_manipulator_controller state="
+                f"{self.controller_states[arm] or 'unknown'}"
+            )
+        if not controller_ready:
+            return "FollowJointTrajectory action unavailable"
+        return "stack not ready"
 
     def _current_tcp_pose(self, planning_group):
         transform = self.tf_buffer.lookup_transform(
@@ -385,6 +479,7 @@ class WeldActionNode(Node):
 
     def generate_circle(
         self,
+        normal_axis,
         radius,
         count,
         closed,
@@ -400,6 +495,7 @@ class WeldActionNode(Node):
                 count,
                 closed,
                 face_center,
+                normal_axis,
             )
         except (TransformException, ValueError) as error:
             self.ui.post(self.ui.error, f"Circle generation failed: {error}")
@@ -417,8 +513,106 @@ class WeldActionNode(Node):
         )
         self.ui.post(
             self.ui.log,
-            f"Generated World-YZ circle · {description} · {orientation}",
+            f"Generated World-{normal_axis.upper()} normal circle · "
+            f"{description} · {orientation}",
         )
+
+    def capture_initial_state(self, planning_group):
+        arm = "left" if planning_group.startswith("left") else "right"
+        joint_names = [
+            f"{arm}_manipulator_joint{index}" for index in range(1, 7)
+        ]
+        try:
+            positions = [self.latest_joint_positions[name] for name in joint_names]
+            tcp = self._current_tcp_pose(planning_group)
+        except KeyError:
+            self.ui.post(self.ui.error, "Complete measured joint state is unavailable")
+            return
+        except TransformException as error:
+            self.ui.post(self.ui.error, f"Initial TCP capture failed: {error}")
+            return
+        self.ui.post(
+            self.ui.apply_initial_state,
+            planning_group,
+            joint_names,
+            positions,
+            tcp,
+        )
+
+    def plan_to_initial_state(self, planning_group, joint_names, positions):
+        try:
+            current_positions = [
+                self.latest_joint_positions[name] for name in joint_names
+            ]
+        except KeyError:
+            self.ui.post(
+                self.ui.error,
+                "Complete measured joint state is unavailable",
+            )
+            return
+        maximum_delta = max(
+            abs(current - target)
+            for current, target in zip(current_positions, positions)
+        )
+        if maximum_delta <= 0.002:
+            self.ui.post(
+                self.ui.pipeline_result,
+                "Already at captured initial position · no plan required",
+            )
+            return
+        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
+            self.ui.post(self.ui.error, "MoveGroup action server unavailable")
+            return
+        goal = MoveGroup.Goal()
+        goal.request.group_name = planning_group
+        goal.request.num_planning_attempts = 5
+        goal.request.allowed_planning_time = 5.0
+        goal.request.start_state.is_diff = True
+        constraints = Constraints()
+        for name, position in zip(joint_names, positions):
+            constraint = JointConstraint()
+            constraint.joint_name = name
+            constraint.position = position
+            constraint.tolerance_above = 0.001
+            constraint.tolerance_below = 0.001
+            constraint.weight = 1.0
+            constraints.joint_constraints.append(constraint)
+        goal.request.goal_constraints.append(constraints)
+        goal.planning_options.plan_only = True
+        goal.planning_options.look_around = False
+        goal.planning_options.replan = False
+        self.ui.post(self.ui.pipeline_waiting, "Planning to captured initial joint angles")
+        future = self.move_group_client.send_goal_async(goal)
+        future.add_done_callback(self._initial_plan_goal_response)
+
+    def _initial_plan_goal_response(self, future):
+        try:
+            goal_handle = future.result()
+        except Exception as error:
+            self.ui.post(self.ui.error, f"Initial-position plan failed: {error}")
+            return
+        if not goal_handle.accepted:
+            self.ui.post(self.ui.error, "Initial-position plan was rejected")
+            return
+        goal_handle.get_result_async().add_done_callback(self._initial_plan_result)
+
+    def _initial_plan_result(self, future):
+        try:
+            result = future.result().result
+        except Exception as error:
+            self.ui.post(self.ui.error, f"Initial-position plan failed: {error}")
+            return
+        if result.error_code.val != 1:
+            self.ui.post(
+                self.ui.error,
+                f"Initial-position plan failed (MoveIt code {result.error_code.val})",
+            )
+            return
+        display = DisplayTrajectory()
+        display.trajectory_start = result.trajectory_start
+        display.trajectory.append(result.planned_trajectory)
+        self.display_trajectory_publisher.publish(display)
+        self.ui.post(self.ui.pipeline_result, "Initial-position plan shown in RViz")
 
     def generate_weave(
         self,
@@ -492,6 +686,7 @@ class WeldActionNode(Node):
         self,
         points,
         velocity_scale,
+        interpolation_step,
         visualize_path,
         enable_arc,
         current_raw,
@@ -515,7 +710,7 @@ class WeldActionNode(Node):
             return
         goal = CartesianPath.Goal()
         goal.planning_group = planning_group
-        goal.interpolation_step = 0.005
+        goal.interpolation_step = interpolation_step
         goal.velocity_scale = velocity_scale
         goal.execute_requested = execute_requested
         goal.reuse_approved_plan = reuse_approved_plan
@@ -645,11 +840,13 @@ class WeldActionGui:
         self._ui_queue = queue.SimpleQueue()
         self.points = []
         self.weave_source = []
+        self.weave_base_paths = {"linear": [], "circle": []}
         self.path_kind = "empty"
         self.execution_allowed = False
         self.robot_connected = {"left": False, "right": False}
         self.plan_approved = False
         self.linear_tcp_endpoints = [None, None]
+        self.initial_joint_state = None
         self.pose_variables = {
             name: tk.StringVar(value="0.0") for name in self.POSE_FIELDS
         }
@@ -657,13 +854,16 @@ class WeldActionGui:
         self.circle_count = tk.IntVar(value=16)
         self.close_circle = tk.BooleanVar(value=True)
         self.circle_face_center = tk.BooleanVar(value=True)
+        self.circle_axis = tk.StringVar(value="X")
         self.nudge_mm = tk.DoubleVar(value=5.0)
         self.velocity_percent = tk.DoubleVar(value=20.0)
+        self.interpolation_step_mm = tk.DoubleVar(value=5.0)
         self.show_path = tk.BooleanVar(value=True)
         self.weave_amplitude_mm = tk.DoubleVar(value=3.0)
         self.weave_cycles = tk.IntVar(value=4)
         self.weave_samples = tk.IntVar(value=8)
         self.weave_axis = tk.StringVar(value="tool_y")
+        self.weave_base = tk.StringVar(value="linear")
         self.straight_reference = tk.StringVar(value="world")
         self.straight_axis = tk.StringVar(value="+X")
         self.straight_start_mode = tk.StringVar(value="Current TCP")
@@ -682,7 +882,6 @@ class WeldActionGui:
         self.h600_connected = False
         self.last_action_phase = ""
         self.previous_control_box_io = None
-        self.touch_sensor_arm = tk.StringVar(value="right")
         self.touch_input_states = {"left": None, "right": None}
         self.touch_input_rising_edges = {"left": 0, "right": 0}
         self.last_touch_pose = None
@@ -693,6 +892,10 @@ class WeldActionGui:
         self.weld_current_raw = tk.IntVar(value=0)
         self.weld_voltage_raw = tk.IntVar(value=0)
         self.weld_v_offset_raw = tk.IntVar(value=0)
+        self.robot_ips = {
+            "left": "192.168.1.11",
+            "right": "192.168.1.10",
+        }
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -744,20 +947,14 @@ class WeldActionGui:
         ).pack(side=tk.LEFT)
         self.planning_group.trace_add("write", self.arm_changed)
 
-        motion_tests = ttk.LabelFrame(
-            outer,
-            text="Motion test generators · click a row to expand/collapse",
+        motion_tests = self._create_toggle_section(
+            outer, "motion_test", "Motion Test", expanded=True
         )
-        motion_tests.pack(fill=tk.X)
-        straight = self._create_toggle_section(
-            motion_tests,
-            "straight",
-            "Straight path",
-            expanded=True,
-        )
+        straight = ttk.Frame(motion_tests)
+        straight.pack(fill=tk.X, pady=2)
         ttk.Button(
             straight,
-            text="Acquire straight path",
+            text="Generate linear path",
             command=self.acquire,
         ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Label(straight, text="reference").pack(side=tk.LEFT)
@@ -776,25 +973,6 @@ class WeldActionGui:
             state="readonly",
             width=4,
         ).pack(side=tk.LEFT, padx=(3, 7))
-        ttk.Label(straight, text="start").pack(side=tk.LEFT)
-        ttk.Combobox(
-            straight,
-            textvariable=self.straight_start_mode,
-            values=("Current TCP", "World XYZ"),
-            state="readonly",
-            width=11,
-        ).pack(side=tk.LEFT, padx=(3, 5))
-        for label, variable in (
-            ("X", self.straight_start_x),
-            ("Y", self.straight_start_y),
-            ("Z", self.straight_start_z),
-        ):
-            ttk.Label(straight, text=label).pack(side=tk.LEFT)
-            ttk.Entry(
-                straight,
-                textvariable=variable,
-                width=6,
-            ).pack(side=tk.LEFT, padx=(2, 4))
         ttk.Label(straight, text="distance mm").pack(side=tk.LEFT)
         ttk.Spinbox(
             straight,
@@ -814,11 +992,61 @@ class WeldActionGui:
             width=5,
         ).pack(side=tk.LEFT, padx=(3, 0))
 
-        tcp_line = self._create_toggle_section(
+        controls = ttk.Frame(motion_tests)
+        controls.pack(fill=tk.X, pady=2)
+        ttk.Button(
+            controls,
+            text="Generate circle",
+            command=self.generate_circle,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(controls, text="axis").pack(side=tk.LEFT)
+        ttk.Combobox(
+            controls,
+            textvariable=self.circle_axis,
+            values=("X", "Y", "Z"),
+            state="readonly",
+            width=3,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(controls, text="radius (mm)").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            controls,
+            from_=1,
+            to=200,
+            increment=1,
+            textvariable=self.radius_mm,
+            width=7,
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(controls, text="unique points").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            controls,
+            from_=4,
+            to=200,
+            increment=1,
+            textvariable=self.circle_count,
+            width=5,
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Checkbutton(
+            controls,
+            text="close path",
+            variable=self.close_circle,
+        ).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            controls,
+            text="TCP +Z faces center",
+            variable=self.circle_face_center,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(
             motion_tests,
-            "tcp_line",
-            "TCP-to-TCP linear path",
+            text="show planned path",
+            variable=self.show_path,
+            command=self.toggle_path_visibility,
+        ).pack(anchor=tk.W, pady=(3, 0))
+
+        welding_tests = self._create_toggle_section(
+            outer, "welding_test", "Welding Test", expanded=True
         )
+        tcp_line = ttk.Frame(welding_tests)
+        tcp_line.pack(fill=tk.X, pady=2)
         ttk.Button(
             tcp_line,
             text="Capture TCP 1",
@@ -857,96 +1085,39 @@ class WeldActionGui:
         )
         self.generate_tcp_line_button.pack(side=tk.LEFT)
 
-        controls = self._create_toggle_section(
-            motion_tests,
-            "circle",
-            "Circle path",
-        )
-        ttk.Button(
-            controls,
-            text="Generate circle",
-            command=self.generate_circle,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(controls, text="radius (mm)").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            controls,
-            from_=1,
-            to=200,
-            increment=1,
-            textvariable=self.radius_mm,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 8))
-        ttk.Label(controls, text="unique points").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            controls,
-            from_=4,
-            to=64,
-            increment=1,
-            textvariable=self.circle_count,
-            width=5,
-        ).pack(side=tk.LEFT, padx=(4, 8))
-        ttk.Checkbutton(
-            controls,
-            text="close path",
-            variable=self.close_circle,
-        ).pack(side=tk.LEFT)
-        ttk.Checkbutton(
-            controls,
-            text="TCP +Z faces center",
-            variable=self.circle_face_center,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Checkbutton(
-            controls,
-            text="show planned path",
-            variable=self.show_path,
-            command=self.toggle_path_visibility,
-        ).pack(side=tk.LEFT, padx=(14, 0))
-
-        teaching = ttk.Frame(outer)
+        teaching = ttk.LabelFrame(outer, text="TCP Teaching")
         teaching.pack(fill=tk.X, pady=(7, 0))
-        ttk.Label(
-            teaching,
-            text="TCP teaching:",
-            style="Step.TLabel",
-        ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             teaching,
-            text="Append current TCP",
-            command=self.append_tcp,
+            text="Get current TCP and set initial position",
+            command=self.capture_initial_state,
         ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
+        self.plan_initial_button = ttk.Button(
             teaching,
-            text="Replace selected ← TCP",
-            command=self.replace_with_tcp,
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            teaching,
-            text="Reverse seam",
-            command=self.reverse_path,
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            teaching,
-            text="Restore source seam",
-            command=self.restore_weave_source,
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            teaching,
-            text="Clear",
-            command=self.clear_path,
-        ).pack(side=tk.LEFT, padx=3)
-        self.path_summary = ttk.Label(teaching, text="empty path")
-        self.path_summary.pack(side=tk.LEFT, padx=(14, 0))
-
-        weaving = self._create_toggle_section(
-            motion_tests,
-            "weave",
-            "Weave path",
+            text="Plan to initial position",
+            command=self.plan_to_initial_state,
+            state=tk.DISABLED,
         )
+        self.plan_initial_button.pack(side=tk.LEFT, padx=3)
+        self.initial_state_status = ttk.Label(teaching, text="not captured")
+        self.initial_state_status.pack(side=tk.LEFT, padx=(12, 0))
+        self.path_summary = ttk.Label(teaching, text="empty path")
+
+        weaving = ttk.Frame(welding_tests)
+        weaving.pack(fill=tk.X, pady=2)
         ttk.Button(
             weaving,
-            text="Apply weave to current path",
+            text="Generate weave path",
             command=self.generate_weave,
         ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(weaving, text="base").pack(side=tk.LEFT)
+        ttk.Combobox(
+            weaving,
+            textvariable=self.weave_base,
+            values=("linear", "circle"),
+            state="readonly",
+            width=7,
+        ).pack(side=tk.LEFT, padx=(3, 8))
         for label, variable, start, end in (
             ("one-side amplitude mm", self.weave_amplitude_mm, 0.1, 50),
             ("weave count", self.weave_cycles, 1, 30),
@@ -981,14 +1152,12 @@ class WeldActionGui:
         )
         self.weave_summary.pack(side=tk.LEFT, padx=(8, 0))
 
-        ttk.Label(
-            outer,
-            text="Editable path · World frame",
-            style="Step.TLabel",
-        ).pack(anchor=tk.W, pady=(12, 5))
+        planned_path = self._create_toggle_section(
+            outer, "planned_path", "Planned Path · World frame"
+        )
         columns = ("id",) + self.POSE_FIELDS
         self.table = ttk.Treeview(
-            outer,
+            planned_path,
             columns=columns,
             show="headings",
             height=4,
@@ -1002,67 +1171,11 @@ class WeldActionGui:
                 anchor=tk.CENTER,
             )
         self.table.pack(fill=tk.X)
-        self.table.bind("<<TreeviewSelect>>", self.load_selected)
-
-        editor = ttk.Frame(outer)
-        editor.pack(fill=tk.X, pady=(6, 0))
-        for name in self.POSE_FIELDS:
-            ttk.Label(editor, text=name).pack(side=tk.LEFT)
-            ttk.Entry(
-                editor,
-                textvariable=self.pose_variables[name],
-                width=9,
-            ).pack(side=tk.LEFT, padx=(2, 5))
         ttk.Button(
-            editor,
-            text="Apply selected",
-            command=self.apply_selected,
-        ).pack(side=tk.LEFT, padx=(6, 0))
-
-        edit_buttons = ttk.Frame(outer)
-        edit_buttons.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(
-            edit_buttons,
-            text="Duplicate",
-            command=self.duplicate_selected,
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(
-            edit_buttons,
-            text="Delete",
-            command=self.delete_selected,
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(
-            edit_buttons,
-            text="Move up",
-            command=lambda: self.move_selected(-1),
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(
-            edit_buttons,
-            text="Move down",
-            command=lambda: self.move_selected(1),
-        ).pack(side=tk.LEFT, padx=(0, 14))
-        ttk.Label(edit_buttons, text="nudge (mm)").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            edit_buttons,
-            from_=0.1,
-            to=100,
-            increment=0.5,
-            textvariable=self.nudge_mm,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 6))
-        for axis in ("X", "Y", "Z"):
-            ttk.Button(
-                edit_buttons,
-                text=f"−{axis}",
-                command=lambda value=axis.lower(): self.nudge(value, -1),
-                width=4,
-            ).pack(side=tk.LEFT, padx=1)
-            ttk.Button(
-                edit_buttons,
-                text=f"+{axis}",
-                command=lambda value=axis.lower(): self.nudge(value, 1),
-                width=4,
-            ).pack(side=tk.LEFT, padx=1)
+            planned_path,
+            text="Delete All",
+            command=self.clear_path,
+        ).pack(anchor=tk.E, pady=(5, 0))
 
         robot_status = ttk.LabelFrame(outer, text="Robot connection")
         robot_status.pack(fill=tk.X, pady=(10, 0))
@@ -1070,8 +1183,8 @@ class WeldActionGui:
         for arm in ("left", "right"):
             label = tk.Label(
                 robot_status,
-                text=f"{arm.upper()}  X",
-                width=14,
+                text=f"Connect {arm.upper()} (IP): X",
+                width=32,
                 relief=tk.SOLID,
                 borderwidth=1,
                 bg="#fce8e6",
@@ -1081,14 +1194,21 @@ class WeldActionGui:
             label.pack(side=tk.LEFT, padx=6, pady=6)
             self.robot_connection_labels[arm] = label
 
-        io_monitor = ttk.LabelFrame(
-            outer,
-            text=(
-                "Rainbow control-box digital I/O · raw ports 0..15 · "
-                "touch DI0 · other observed candidates: 4, 8, 9, 10, 12, 13"
-            ),
+        head_label = tk.Label(
+            robot_status,
+            text="Connect HEAD (future): –",
+            width=26,
+            relief=tk.SOLID,
+            borderwidth=1,
+            bg="#eeeeee",
         )
-        io_monitor.pack(fill=tk.X, pady=(7, 0))
+        head_label.pack(side=tk.LEFT, padx=6, pady=6)
+
+        io_monitor = self._create_toggle_section(
+            outer,
+            "digital_io",
+            "Digital I/O · DI0 = TOUCH · ports 0..15",
+        )
         for io_row, kind in enumerate(("DI", "DO")):
             ttk.Label(
                 io_monitor,
@@ -1154,56 +1274,6 @@ class WeldActionGui:
             pady=(0, 5),
         )
 
-        touch_calibration = ttk.LabelFrame(
-            outer,
-            text="TCP touch calibration · simulated contact + real DI0",
-        )
-        touch_calibration.pack(fill=tk.X, pady=(7, 0))
-        touch_controls = ttk.Frame(touch_calibration)
-        touch_controls.pack(fill=tk.X, padx=6, pady=(5, 3))
-        ttk.Label(touch_controls, text="sensor control box").pack(
-            side=tk.LEFT,
-        )
-        touch_arm_selector = ttk.Combobox(
-            touch_controls,
-            textvariable=self.touch_sensor_arm,
-            values=("right", "left"),
-            state="readonly",
-            width=7,
-        )
-        touch_arm_selector.pack(side=tk.LEFT, padx=(4, 10))
-        touch_arm_selector.bind(
-            "<<ComboboxSelected>>",
-            self.touch_sensor_arm_changed,
-        )
-        ttk.Button(
-            touch_controls,
-            text="Simulate TOUCH now",
-            command=self.simulate_touch,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(
-            touch_controls,
-            text=(
-                "A rising DI0 or the simulate button captures the selected "
-                "arm TCP in World"
-            ),
-        ).pack(side=tk.LEFT)
-        self.touch_input_status = tk.Label(
-            touch_calibration,
-            text="RIGHT DI00 TOUCH: waiting for robot state",
-            anchor=tk.W,
-            relief=tk.SOLID,
-            borderwidth=1,
-            bg="#eeeeee",
-            font=("Sans", 10, "bold"),
-        )
-        self.touch_input_status.pack(fill=tk.X, padx=6, pady=3)
-        self.touch_pose_status = ttk.Label(
-            touch_calibration,
-            text="Last touch TCP: not captured",
-        )
-        self.touch_pose_status.pack(fill=tk.X, padx=6, pady=(2, 6))
-
         execution = ttk.Frame(outer)
         execution.pack(fill=tk.X, pady=(12, 0))
         self.plan_button = ttk.Button(
@@ -1227,7 +1297,7 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=(0, 18))
         ttk.Label(
             execution,
-            text="weld travel speed",
+            text="velocity scale",
         ).pack(side=tk.LEFT)
         ttk.Scale(
             execution,
@@ -1240,59 +1310,24 @@ class WeldActionGui:
         self.speed_label = ttk.Label(execution, text="20%")
         self.speed_label.pack(side=tk.LEFT)
 
-        welder = ttk.Frame(outer)
-        welder.pack(fill=tk.X, pady=(8, 0))
-        ttk.Checkbutton(
-            welder,
-            text="H600 ARC during execution",
-            variable=self.enable_arc,
-            command=self.invalidate_approved_plan,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        for label, variable in (
-            ("current raw", self.weld_current_raw),
-            ("voltage raw", self.weld_voltage_raw),
-            ("V offset", self.weld_v_offset_raw),
-        ):
-            ttk.Label(welder, text=label).pack(side=tk.LEFT)
-            ttk.Spinbox(
-                welder,
-                from_=0,
-                to=65535,
-                textvariable=variable,
-                width=7,
-            ).pack(side=tk.LEFT, padx=(3, 8))
-        self.welder_status = ttk.Label(
-            welder,
-            text="H600: waiting",
+        planning_settings = ttk.Frame(outer)
+        planning_settings.pack(fill=tk.X, pady=(5, 0))
+        ttk.Label(planning_settings, text="Cartesian interpolation step mm").pack(
+            side=tk.LEFT
         )
-        self.welder_status.pack(side=tk.LEFT, padx=(12, 0))
-        weld_timing = ttk.Frame(outer)
-        weld_timing.pack(fill=tk.X, pady=(4, 0))
-        ttk.Checkbutton(
-            weld_timing,
-            text="Require H600 welding feedback before motion",
-            variable=self.require_welding_feedback,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        for label, variable in (
-            ("pre-flow s", self.weld_preflow_seconds),
-            ("post-flow s", self.weld_postflow_seconds),
-        ):
-            ttk.Label(weld_timing, text=label).pack(side=tk.LEFT)
-            ttk.Spinbox(
-                weld_timing,
-                from_=0.0,
-                to=10.0,
-                increment=0.1,
-                textvariable=variable,
-                width=5,
-            ).pack(side=tk.LEFT, padx=(3, 9))
+        ttk.Spinbox(
+            planning_settings,
+            from_=0.5,
+            to=20.0,
+            increment=0.5,
+            textvariable=self.interpolation_step_mm,
+            width=6,
+            command=self.invalidate_approved_plan,
+        ).pack(side=tk.LEFT, padx=(4, 14))
         ttk.Label(
-            weld_timing,
-            text=(
-                "Sequence: ARC OFF approach → TCP1 → pre-flow/ARC ON → "
-                "TCP2 → ARC OFF/post-flow"
-            ),
-        ).pack(side=tk.LEFT, padx=(10, 0))
+            planning_settings,
+            text="trajectory profile: TOTG + Ruckig jerk smoothing",
+        ).pack(side=tk.LEFT)
 
         ttk.Label(
             outer,
@@ -1312,14 +1347,16 @@ class WeldActionGui:
             text="Pipeline status",
             style="Step.TLabel",
         ).pack(anchor=tk.W, pady=(8, 5))
-        self.status = tk.Text(
+        self.pipeline_status = tk.Label(
             outer,
-            height=6,
-            bg="#101820",
-            fg="#d5f5e3",
+            text="WAITING · ready",
+            anchor=tk.W,
+            relief=tk.SOLID,
+            borderwidth=1,
+            bg="#eeeeee",
+            font=("Sans", 10, "bold"),
         )
-        self.status.pack(fill=tk.X)
-        self.log("Ready · edits publish immediately to RViz")
+        self.pipeline_status.pack(fill=tk.X, ipady=5)
 
         self.node = WeldActionNode(self)
         self.executor = MultiThreadedExecutor(num_threads=2)
@@ -1377,6 +1414,10 @@ class WeldActionGui:
         self.generate_tcp_line_button.configure(state=tk.DISABLED)
         self.path_kind = "empty"
         self.weave_source = []
+        self.weave_base_paths = {"linear": [], "circle": []}
+        self.initial_joint_state = None
+        self.plan_initial_button.configure(state=tk.DISABLED)
+        self.initial_state_status.configure(text="not captured")
         self.set_points([])
         self.node.publish_points([], self.show_path.get())
         self._refresh_execution_controls()
@@ -1397,7 +1438,10 @@ class WeldActionGui:
         connected = self.robot_connected[selected_arm]
         for arm, value in self.robot_connected.items():
             self.robot_connection_labels[arm].configure(
-                text=f"{arm.upper()}  {'O' if value else 'X'}",
+                text=(
+                    f"Connect {arm.upper()} ({self.robot_ips[arm]}): "
+                    f"{'O' if value else 'X'}"
+                ),
                 bg="#e6f4ea" if value else "#fce8e6",
                 fg="#137333" if value else "#b3261e",
             )
@@ -1417,8 +1461,31 @@ class WeldActionGui:
         )
 
     def log(self, text):
-        self.status.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {text}\n")
-        self.status.see(tk.END)
+        if text.startswith("ERROR"):
+            self._set_pipeline_status("ERROR", text.removeprefix("ERROR · "))
+        elif text.startswith(("SUCCESS", "RESULT")):
+            self._set_pipeline_status("RESULT", text)
+        else:
+            self._set_pipeline_status("WAITING", text)
+
+    def _set_pipeline_status(self, state, message):
+        colors = {
+            "WAITING": ("#eeeeee", "#202124"),
+            "ERROR": ("#fce8e6", "#b3261e"),
+            "RESULT": ("#e6f4ea", "#137333"),
+        }
+        background, foreground = colors[state]
+        self.pipeline_status.configure(
+            text=f"{state} · {message}",
+            bg=background,
+            fg=foreground,
+        )
+
+    def pipeline_waiting(self, message):
+        self._set_pipeline_status("WAITING", message)
+
+    def pipeline_result(self, message):
+        self._set_pipeline_status("RESULT", message)
 
     def error(self, text):
         self.log(f"ERROR · {text}")
@@ -1463,15 +1530,20 @@ class WeldActionGui:
     def set_new_points(self, points, kind):
         if kind != "weave":
             self.weave_source = copy.deepcopy(list(points))
+        if kind == "circle":
+            self.weave_base_paths["circle"] = copy.deepcopy(list(points))
+        elif kind == "tcp_line":
+            self.weave_base_paths["linear"] = copy.deepcopy(list(points))
         self.path_kind = kind
         self.set_points(points)
 
-    def set_execution_configuration(self, execute_motion):
+    def set_execution_configuration(self, execute_motion, left_ip, right_ip):
         self.execution_allowed = execute_motion
+        self.robot_ips = {"left": left_ip, "right": right_ip}
         self.robot_connected = {"left": False, "right": False}
         self._refresh_execution_controls()
         self.log(
-            "Connecting LEFT 192.168.1.11 + RIGHT 192.168.1.10 · "
+            f"Connecting LEFT {left_ip} + RIGHT {right_ip} · "
             "waiting for measured feedback and planning readiness"
         )
 
@@ -1482,13 +1554,13 @@ class WeldActionGui:
             f"READY · {arm}-arm feedback and MoveIt/controller available"
         )
 
-    def robot_feedback_lost(self, arm):
+    def robot_feedback_lost(self, arm, detail="measured joint feedback timeout"):
         self.robot_connected[arm] = False
         self.invalidate_approved_plan()
         self._refresh_execution_controls()
         if self._selected_arm() == arm:
             self.plan_button.configure(state=tk.DISABLED)
-        self.log(f"ERROR · {arm}-arm measured joint feedback timeout")
+        self.log(f"ERROR · {arm}-arm unavailable · {detail}")
 
     def invalidate_approved_plan(self):
         self.plan_approved = False
@@ -1643,6 +1715,7 @@ class WeldActionGui:
         threading.Thread(
             target=self.node.generate_circle,
             args=(
+                self.circle_axis.get().lower(),
                 radius,
                 count,
                 bool(self.close_circle.get()),
@@ -1654,8 +1727,12 @@ class WeldActionGui:
         ).start()
 
     def generate_weave(self):
-        if len(self.points) < 2:
-            self.error("Teach or acquire at least two seam points first")
+        base_kind = self.weave_base.get()
+        source = self.weave_base_paths.get(base_kind, [])
+        if len(source) < 2:
+            self.error(
+                f"Generate a {base_kind} base path before applying weave"
+            )
             return
         try:
             amplitude = float(self.weave_amplitude_mm.get()) * 0.001
@@ -1664,11 +1741,6 @@ class WeldActionGui:
         except (ValueError, tk.TclError):
             self.error("Weave settings must be numeric")
             return
-        source = (
-            self.weave_source
-            if self.path_kind == "weave" and self.weave_source
-            else self.points
-        )
         self.weave_source = copy.deepcopy(source)
         seam_length = sum(
             (
@@ -1712,6 +1784,49 @@ class WeldActionGui:
                 self.show_path.get(),
                 self.planning_group.get(),
             ),
+            daemon=True,
+        ).start()
+
+    def capture_initial_state(self):
+        self.pipeline_waiting("Capturing current TCP and measured joint angles")
+        threading.Thread(
+            target=self.node.capture_initial_state,
+            args=(self.planning_group.get(),),
+            daemon=True,
+        ).start()
+
+    def apply_initial_state(
+        self,
+        planning_group,
+        joint_names,
+        positions,
+        tcp,
+    ):
+        self.initial_joint_state = (
+            planning_group,
+            tuple(joint_names),
+            tuple(positions),
+        )
+        angles = ", ".join(f"{math.degrees(value):.1f}°" for value in positions)
+        self.initial_state_status.configure(text=f"captured joints: {angles}")
+        self.plan_initial_button.configure(state=tk.NORMAL)
+        values = self._pose_values(tcp)
+        self.pipeline_result(
+            f"Initial state captured · TCP World XYZ="
+            f"({values[0]:.4f}, {values[1]:.4f}, {values[2]:.4f}) m"
+        )
+
+    def plan_to_initial_state(self):
+        if self.initial_joint_state is None:
+            self.error("Capture an initial position first")
+            return
+        group, joint_names, positions = self.initial_joint_state
+        if group != self.planning_group.get():
+            self.error("Captured initial position belongs to another arm")
+            return
+        threading.Thread(
+            target=self.node.plan_to_initial_state,
+            args=(group, joint_names, positions),
             daemon=True,
         ).start()
 
@@ -1824,6 +1939,7 @@ class WeldActionGui:
     def clear_path(self):
         self.path_kind = "empty"
         self.weave_source = []
+        self.weave_base_paths = {"linear": [], "circle": []}
         self.set_points([])
         self.node.publish_points([], self.show_path.get())
         self.log("Cleared taught path")
@@ -1874,6 +1990,9 @@ class WeldActionGui:
             v_offset_raw = int(self.weld_v_offset_raw.get())
             preflow_seconds = float(self.weld_preflow_seconds.get())
             postflow_seconds = float(self.weld_postflow_seconds.get())
+            interpolation_step = (
+                float(self.interpolation_step_mm.get()) * 0.001
+            )
         except (ValueError, tk.TclError):
             self.error("H600 raw values/timing are invalid")
             return
@@ -1883,11 +2002,15 @@ class WeldActionGui:
         if not 0.0 <= postflow_seconds <= 10.0:
             self.error("H600 post-flow must be in 0..10 seconds")
             return
+        if not 0.0005 <= interpolation_step <= 0.02:
+            self.error("Cartesian interpolation step must be 0.5..20 mm")
+            return
         threading.Thread(
             target=self.node.send,
             args=(
                 copy.deepcopy(self.points),
                 speed,
+                interpolation_step,
                 self.show_path.get(),
                 self.enable_arc.get(),
                 current_raw,
@@ -1906,18 +2029,6 @@ class WeldActionGui:
     def update_welder_status(self, message):
         self.h600_connected = bool(
             message.server_running and message.client_connected
-        )
-        connection = (
-            f"connected {message.client_address}"
-            if message.client_connected
-            else "disconnected"
-        )
-        self.welder_status.configure(
-            text=(
-                f"H600: {connection} · welding={message.welding} · "
-                f"I={message.current_feedback_raw} "
-                f"V={message.voltage_feedback_raw}"
-            )
         )
 
     def update_control_box_io(self, digital_in, digital_out):
@@ -1965,46 +2076,18 @@ class WeldActionGui:
         if changes:
             self.log("Rainbow control-box I/O changed · " + ", ".join(changes))
 
-    def touch_sensor_arm_changed(self, _event=None):
-        arm = self.touch_sensor_arm.get()
-        state = self.touch_input_states.get(arm)
-        self._refresh_touch_status(arm, state)
-        self.log(f"Touch sensor source changed to {arm.upper()} DI0")
-
-    def _refresh_touch_status(self, arm, active):
-        state = "waiting" if active is None else ("ON" if active else "OFF")
-        count = self.touch_input_rising_edges[arm]
-        self.touch_input_status.configure(
-            text=(
-                f"{arm.upper()} DI{TOUCH_INPUT_PORT:02d} TOUCH: {state} · "
-                f"detected contacts: {count}"
-            ),
-            bg="#81c995" if active else "#eeeeee",
-        )
-
     def update_touch_input(self, arm, active):
         previous = self.touch_input_states[arm]
         active = bool(active)
         self.touch_input_states[arm] = active
-        if arm == self.touch_sensor_arm.get():
-            self._refresh_touch_status(arm, active)
         if previous is not None and active and not previous:
             self.touch_input_rising_edges[arm] += 1
-            if arm == self.touch_sensor_arm.get():
-                self._refresh_touch_status(arm, active)
-                self._handle_touch_event(f"{arm.upper()} DI0")
+            self._handle_touch_event(arm, f"{arm.upper()} DI0")
 
-    def simulate_touch(self):
-        self._handle_touch_event("SIMULATED TOUCH")
-
-    def _handle_touch_event(self, source):
-        planning_group = self.planning_group.get()
-        self.touch_input_status.configure(
-            text=f"TOUCH DETECTED · {source} · capturing TCP...",
-            bg="#81c995",
-        )
+    def _handle_touch_event(self, arm, source):
+        planning_group = f"{arm}_manipulator"
         self.root.bell()
-        self.log(
+        self.pipeline_waiting(
             f"TOUCH DETECTED · source={source} · "
             f"capturing {planning_group} TCP"
         )
@@ -2013,19 +2096,7 @@ class WeldActionGui:
     def apply_touch_capture(self, pose, planning_group, source):
         self.last_touch_pose = copy.deepcopy(pose)
         values = self._pose_values(pose)
-        self.touch_input_status.configure(
-            text=f"TOUCH CAPTURED · {source} · {planning_group}",
-            bg="#81c995",
-        )
-        self.touch_pose_status.configure(
-            text=(
-                f"Last touch TCP · {planning_group} · {source} · "
-                f"World XYZ=({values[0]:.6f}, {values[1]:.6f}, "
-                f"{values[2]:.6f}) m · Q=({values[3]:.6f}, "
-                f"{values[4]:.6f}, {values[5]:.6f}, {values[6]:.6f})"
-            )
-        )
-        self.log(
+        self.pipeline_result(
             f"TOUCH TCP CAPTURED · {planning_group} · "
             f"World XYZ=({values[0]:.6f}, {values[1]:.6f}, "
             f"{values[2]:.6f}) m"
@@ -2119,7 +2190,7 @@ class WeldActionGui:
             if execute_requested
             else "PLAN PREVIEW for RViz"
         )
-        self.log(
+        self.pipeline_waiting(
             f"{operation} · "
             f"speed={velocity_scale:.0%}"
         )
@@ -2160,12 +2231,12 @@ class WeldActionGui:
                 else tk.DISABLED
             )
         )
-        self.log(text)
         if self.plan_approved:
-            self.log(
-                "Plan approved · inspect RViz, then press "
-                "Execute Approved Plan"
+            self.pipeline_result(
+                f"{text} · plan approved; inspect RViz, then execute"
             )
+        else:
+            self.pipeline_result(text)
 
     def cancel(self):
         self.node.cancel()

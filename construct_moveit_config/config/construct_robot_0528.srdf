@@ -228,6 +228,19 @@
     <disable_collisions link1="robot_head_rev_link2" link2="testbed_link" reason="Never"/>
     <disable_collisions link1="robot_head_rev_link2" link2="zed2i_link" reason="Never"/>
     <disable_collisions link1="robot_head_rev_link2" link2="zed_bracket_link" reason="Never"/>
+    <!-- The testbed is a visual/reference fixture for path teaching. Ignore it
+         completely in MoveIt while retaining robot self- and inter-arm
+         collision checking. -->
+    <disable_collisions link1="left_D435_link" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="left_manipulator_link4" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="left_manipulator_link5" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="left_manipulator_link6" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="left_manipulator_link_ee" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="right_D435_link" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="right_manipulator_link4" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="right_manipulator_link5" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="right_manipulator_link6" link2="testbed_link" reason="User"/>
+    <disable_collisions link1="right_manipulator_link_ee" link2="testbed_link" reason="User"/>
     <disable_collisions link1="testbed_link" link2="zed2i_link" reason="Never"/>
     <disable_collisions link1="testbed_link" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="zed2i_link" link2="zed_bracket_link" reason="Adjacent"/>
