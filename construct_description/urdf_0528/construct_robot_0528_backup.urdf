@@ -155,8 +155,8 @@
     name="left_manipulator_base_joint"
     type="fixed">
     <origin
-      xyz="0.25 0 1.0002"
-      rpy="0 0 3.141592653589793" />
+      xyz="-0.25 0 1.0002"
+      rpy="0 0 0" />
     <parent
       link="robot_base_link" />
     <child
@@ -676,8 +676,8 @@
     name="right_manipulator_base_joint"
     type="fixed">
     <origin
-      xyz="-0.25 0 1.00019999999931"
-      rpy="0 0 3.141592653589793" />
+      xyz="0.24999999999997 0 1.00019999999931"
+      rpy="0 0 0" />
     <parent
       link="robot_base_link" />
     <child
@@ -1780,7 +1780,8 @@
       link="testbed_link" />
     <child
       link="weld_point2_1" />
-    <axis
+    <
+      
       xyz="0 0 0" />
   </joint>
   <link name="weld_point2_2" />

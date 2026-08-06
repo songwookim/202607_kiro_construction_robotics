@@ -30,11 +30,9 @@ setup(
             'cartesian_path_server = construct_robot.cartesian_path_server:main',
             'cartesian_path_client = construct_robot.cartesian_path_client:main',
             'weld_action_gui = construct_robot.weld_action_gui:main',
-            'viser_viewer = construct_robot.viser_viewer:main',
             'h600_modbus_bridge = construct_robot.h600_modbus_bridge:main',
             'h600_modbus_gui = construct_robot.h600_modbus_gui:main',
-            'weld_stack_supervisor = construct_robot.weld_stack_supervisor:main',
-            'rviz_goal_state_sync = construct_robot.rviz_goal_state_sync:main',
+            'robust_controller_spawner = construct_robot.robust_controller_spawner:main',
         ],
     },
 )

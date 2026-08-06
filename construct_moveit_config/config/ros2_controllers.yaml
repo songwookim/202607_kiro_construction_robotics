@@ -30,10 +30,16 @@ left_manipulator_controller:
       - position
     action_monitor_rate: 20.0
     allow_partial_joints_goal: false
-    open_loop_control: true
+    open_loop_control: false
     constraints:
       stopped_velocity_tolerance: 0.01
-      goal_time: 0.0
+      goal_time: 2.0
+      left_manipulator_joint1: {trajectory: 0.15, goal: 0.02}
+      left_manipulator_joint2: {trajectory: 0.15, goal: 0.02}
+      left_manipulator_joint3: {trajectory: 0.15, goal: 0.02}
+      left_manipulator_joint4: {trajectory: 0.15, goal: 0.02}
+      left_manipulator_joint5: {trajectory: 0.15, goal: 0.02}
+      left_manipulator_joint6: {trajectory: 0.15, goal: 0.02}
 
 right_manipulator_controller:
   ros__parameters:
@@ -50,10 +56,16 @@ right_manipulator_controller:
       - position
     action_monitor_rate: 20.0
     allow_partial_joints_goal: false
-    open_loop_control: true
+    open_loop_control: false
     constraints:
       stopped_velocity_tolerance: 0.01
-      goal_time: 0.0
+      goal_time: 2.0
+      right_manipulator_joint1: {trajectory: 0.15, goal: 0.02}
+      right_manipulator_joint2: {trajectory: 0.15, goal: 0.02}
+      right_manipulator_joint3: {trajectory: 0.15, goal: 0.02}
+      right_manipulator_joint4: {trajectory: 0.15, goal: 0.02}
+      right_manipulator_joint5: {trajectory: 0.15, goal: 0.02}
+      right_manipulator_joint6: {trajectory: 0.15, goal: 0.02}
 
 robot_head_controller:
   ros__parameters:

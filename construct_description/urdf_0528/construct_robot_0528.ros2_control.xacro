@@ -2,10 +2,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro
     name="construct_robot_0528_ros2_control"
-    params="left_robot_ip right_robot_ip cb_simulation:=false use_fake_left_hardware:=true use_fake_right_hardware:=false use_initial_left_positions:=true use_initial_right_positions:=true initial_positions_file fake_sensor_commands:=false">
-
-    <xacro:property name="initial_positions"
-                    value="${xacro.load_yaml(initial_positions_file)['initial_positions']}" />
+    params="left_robot_ip right_robot_ip cb_simulation:=false use_fake_left_hardware:=false use_fake_right_hardware:=false fake_sensor_commands:=false">
 
     <xacro:macro name="configure_rb_joint" params="joint_name initial_value:=0.0">
       <joint name="${joint_name}">
@@ -37,12 +34,12 @@
           <param name="robot_ip">${left_robot_ip}</param>
         </xacro:unless>
       </hardware>
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint1" initial_value="${initial_positions['left_manipulator_joint1'] if use_initial_left_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint2" initial_value="${initial_positions['left_manipulator_joint2'] if use_initial_left_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint3" initial_value="${initial_positions['left_manipulator_joint3'] if use_initial_left_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint4" initial_value="${initial_positions['left_manipulator_joint4'] if use_initial_left_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint5" initial_value="${initial_positions['left_manipulator_joint5'] if use_initial_left_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="left_manipulator_joint6" initial_value="${initial_positions['left_manipulator_joint6'] if use_initial_left_positions else 0.0}" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint1" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint2" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint3" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint4" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint5" />
+      <xacro:configure_rb_joint joint_name="left_manipulator_joint6" />
     </ros2_control>
 
     <ros2_control name="RightRBPodoHardwareInterface" type="system">
@@ -59,12 +56,12 @@
           <param name="robot_ip">${right_robot_ip}</param>
         </xacro:unless>
       </hardware>
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint1" initial_value="${initial_positions['right_manipulator_joint1'] if use_initial_right_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint2" initial_value="${initial_positions['right_manipulator_joint2'] if use_initial_right_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint3" initial_value="${initial_positions['right_manipulator_joint3'] if use_initial_right_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint4" initial_value="${initial_positions['right_manipulator_joint4'] if use_initial_right_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint5" initial_value="${initial_positions['right_manipulator_joint5'] if use_initial_right_positions else 0.0}" />
-      <xacro:configure_rb_joint joint_name="right_manipulator_joint6" initial_value="${initial_positions['right_manipulator_joint6'] if use_initial_right_positions else 0.0}" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint1" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint2" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint3" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint4" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint5" />
+      <xacro:configure_rb_joint joint_name="right_manipulator_joint6" />
     </ros2_control>
 
     <!-- The two-axis head is MoveIt-only and never connects to an RB Control Box. -->

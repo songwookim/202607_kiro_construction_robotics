@@ -1,5 +1,9 @@
 bool robot_ready
+bool robot_error
+bool touch
 bool gas
+bool reverse_inching
+bool inching
 bool arc
 bool allow_nonzero_setpoints
 uint16 current_raw

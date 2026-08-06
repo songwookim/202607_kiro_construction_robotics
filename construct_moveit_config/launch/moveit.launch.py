@@ -2,23 +2,22 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
 right_robot_ip = LaunchConfiguration("right_robot_ip")
 left_robot_ip = LaunchConfiguration("left_robot_ip")
-use_fake_left_hardware = LaunchConfiguration("use_fake_left_hardware")
-use_fake_right_hardware = LaunchConfiguration("use_fake_right_hardware")
-use_initial_left_positions = LaunchConfiguration("use_initial_left_positions")
-use_initial_right_positions = LaunchConfiguration("use_initial_right_positions")
 fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
 cb_simulation = LaunchConfiguration("cb_simulation")
 use_rviz = LaunchConfiguration("use_rviz")
+execute_motion = LaunchConfiguration("execute_motion")
 
 
 def generate_launch_description():
@@ -39,26 +38,6 @@ def generate_launch_description():
             description="Right RB Cobot Control Box IP address",
         ),
         DeclareLaunchArgument(
-            "use_fake_left_hardware",
-            default_value="true",
-            description="Use fake hardware for the left manipulator",
-        ),
-        DeclareLaunchArgument(
-            "use_fake_right_hardware",
-            default_value="false",
-            description="Use fake hardware for the right manipulator",
-        ),
-        DeclareLaunchArgument(
-            "use_initial_left_positions",
-            default_value="true",
-            description="Initialize fake left manipulator from initial_positions.yaml",
-        ),
-        DeclareLaunchArgument(
-            "use_initial_right_positions",
-            default_value="false",
-            description="Initialize fake right manipulator from initial_positions.yaml",
-        ),
-        DeclareLaunchArgument(
             "fake_sensor_commands",
             default_value="false",
             description="True when use fake sensor commands",
@@ -67,6 +46,11 @@ def generate_launch_description():
             "use_rviz",
             default_value="true",
             description="Start RViz",
+        ),
+        DeclareLaunchArgument(
+            "execute_motion",
+            default_value="true",
+            description="Allow MoveIt trajectory execution on controllers",
         ),
         DeclareLaunchArgument(
             "cb_simulation",
@@ -80,18 +64,20 @@ def generate_launch_description():
 
 
 def launch_setup(_context):
+    execution_enabled = execute_motion.perform(_context).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     mappings = {
         "left_robot_ip": left_robot_ip,
         "right_robot_ip": right_robot_ip,
-        "use_fake_left_hardware": use_fake_left_hardware,
-        "use_fake_right_hardware": use_fake_right_hardware,
-        "use_initial_left_positions": use_initial_left_positions,
-        "use_initial_right_positions": use_initial_right_positions,
         "fake_sensor_commands": fake_sensor_commands,
         "cb_simulation": cb_simulation,
     }
 
-    moveit_config = (
+    moveit_builder = (
         MoveItConfigsBuilder(
             "construct_robot_0528",
             package_name="construct_moveit_config",
@@ -101,21 +87,41 @@ def launch_setup(_context):
             mappings=mappings,
         )
         .robot_description_semantic(file_path="config/construct_robot_0528.srdf")
-        .trajectory_execution(file_path="config/moveit_controllers.yaml")
         .planning_scene_monitor(
             publish_robot_description=True, publish_robot_description_semantic=True
         )
         .planning_pipelines(
-            pipelines=["ompl", "chomp", "pilz_industrial_motion_planner"]
+            pipelines=(
+                ["ompl", "chomp", "pilz_industrial_motion_planner"]
+                if execution_enabled
+                else ["ompl"]
+            )
         )
-        .to_moveit_configs()
     )
+    if execution_enabled:
+        moveit_builder = moveit_builder.trajectory_execution(
+            file_path="config/moveit_controllers.yaml"
+        )
+    else:
+        moveit_builder = moveit_builder.trajectory_execution(
+            file_path="config/plan_only_controllers.yaml",
+            moveit_manage_controllers=False,
+        )
+    moveit_config = moveit_builder.to_moveit_configs()
     # Start the actual move_group node/action server
     run_move_group_node = Node(
         package="moveit_ros_move_group",
         executable="move_group",
         output="screen",
-        parameters=[moveit_config.to_dict()],
+        parameters=[
+            moveit_config.to_dict(),
+            {
+                "allow_trajectory_execution": ParameterValue(
+                    execute_motion,
+                    value_type=bool,
+                )
+            },
+        ],
     )
 
     rviz_base = LaunchConfiguration("rviz_config")
@@ -179,26 +185,36 @@ def launch_setup(_context):
         output="both",
     )
 
-    # Use one spawner so configure/activate service calls are serialized.
-    # Separate concurrent spawners can time out while the real RB hardware
-    # occupies controller_manager's service callback.
+    # Humble's stock spawner does not apply --service-call-timeout to its
+    # load_controller call. On this target a valid response can exceed its
+    # hard-coded 10 s default, causing a retry/"already loaded" failure.
+    controllers = ["joint_state_broadcaster"]
+    if execution_enabled:
+        controllers.extend(
+            [
+                "right_manipulator_controller",
+                "left_manipulator_controller",
+                "robot_head_controller",
+            ]
+        )
+
     controllers_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
+        package="construct_robot",
+        executable="robust_controller_spawner",
         arguments=[
-            "joint_state_broadcaster",
-            "right_manipulator_controller",
-            "left_manipulator_controller",
-            "robot_head_controller",
-            "--controller-manager-timeout",
-            "300",
-            "--service-call-timeout",
-            "60",
-            "--switch-timeout",
-            "60",
+            *controllers,
             "--controller-manager",
             "/controller_manager",
+            "--response-timeout",
+            "90",
         ],
+    )
+
+    start_move_group_after_controllers = RegisterEventHandler(
+        OnProcessExit(
+            target_action=controllers_spawner,
+            on_exit=[run_move_group_node],
+        )
     )
 
     nodes_to_start = [
@@ -206,8 +222,8 @@ def launch_setup(_context):
         world_alias_tf,
         link0_alias_tf,
         robot_state_publisher,
-        run_move_group_node,
         ros2_control_node,
+        start_move_group_after_controllers,
         controllers_spawner,
     ]
 

@@ -4,7 +4,6 @@ import struct
 from geometry_msgs.msg import Pose
 from moveit_msgs.msg import RobotTrajectory
 import numpy as np
-from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 from construct_robot.cartesian_path_common import (
@@ -23,14 +22,7 @@ from construct_robot.cartesian_path_server import (
     rotate_vector,
 )
 from construct_msgs.action import CartesianPath
-from construct_robot.viser_utils import (
-    merge_joint_positions,
-    resolve_ros_resource,
-    xyzw_to_wxyz,
-)
 from construct_robot.h600_modbus_bridge import H600Protocol, H600State
-from construct_robot.rviz_goal_state_sync import has_complete_right_state
-from construct_robot.weld_action_gui import complete_right_joint_positions
 
 
 def make_pose(x=0.0, y=0.0, z=0.0, quaternion=(0.0, 0.0, 0.0, 1.0)):
@@ -48,8 +40,14 @@ def make_pose(x=0.0, y=0.0, z=0.0, quaternion=(0.0, 0.0, 0.0, 1.0)):
 
 
 def test_tip_link_for_supported_groups():
-    assert tip_link_for_group("left_manipulator") == "left_manipulator_ee_point"
-    assert tip_link_for_group("right_manipulator") == "right_manipulator_ee_point"
+    assert (
+        tip_link_for_group("left_manipulator")
+        == "left_manipulator_ee_point"
+    )
+    assert (
+        tip_link_for_group("right_manipulator")
+        == "right_manipulator_ee_point"
+    )
 
 
 def test_tip_link_rejects_unknown_group():
@@ -58,7 +56,9 @@ def test_tip_link_rejects_unknown_group():
     except ValueError as error:
         assert "Unsupported planning group" in str(error)
     else:
-        raise AssertionError("Expected an unsupported group to raise ValueError")
+        raise AssertionError(
+            "Expected an unsupported group to raise ValueError"
+        )
 
 
 def test_pose_validation():
@@ -83,25 +83,6 @@ def test_rotate_vector_quarter_turn_about_z():
     assert math.isclose(rotated[0], 0.0, abs_tol=1e-9)
     assert math.isclose(rotated[1], 1.0, abs_tol=1e-9)
     assert math.isclose(rotated[2], 0.0, abs_tol=1e-9)
-
-
-def test_resolve_ros_resource():
-    resolved = resolve_ros_resource(
-        "package://construct_description/urdf_0528/construct_robot_0528.urdf"
-    )
-    assert resolved.endswith(
-        "/construct_description/urdf_0528/construct_robot_0528.urdf"
-    )
-
-
-def test_joint_state_merge_ignores_unknown_and_non_finite_values():
-    merged = merge_joint_positions(
-        [0.0, 0.0],
-        {"joint_a": 0, "joint_b": 1},
-        ["joint_b", "unknown", "joint_a"],
-        [1.5, 2.0, math.nan],
-    )
-    assert merged.tolist() == [0.0, 1.5]
 
 
 def test_straight_waypoints_world_negative_axis_and_spacing():
@@ -177,46 +158,6 @@ def test_linear_pose_waypoints_rejects_same_position():
         assert "different positions" in str(error)
     else:
         raise AssertionError("Expected equal TCP positions to be rejected")
-
-
-def test_rviz_goal_sync_requires_six_finite_right_joint_positions():
-    state = JointState()
-    state.name = [
-        f"right_manipulator_joint{index}" for index in range(1, 7)
-    ]
-    state.position = [0.1 * index for index in range(6)]
-    assert has_complete_right_state(state)
-
-    state.position[-1] = math.nan
-    assert not has_complete_right_state(state)
-
-
-def test_weld_gui_extracts_ordered_right_joint_pose():
-    state = JointState()
-    state.name = [
-        "right_manipulator_joint3",
-        "unknown",
-        "right_manipulator_joint1",
-        "right_manipulator_joint6",
-        "right_manipulator_joint2",
-        "right_manipulator_joint5",
-        "right_manipulator_joint4",
-    ]
-    state.position = [3.0, 99.0, 1.0, 6.0, 2.0, 5.0, 4.0]
-    assert complete_right_joint_positions(state) == (
-        1.0,
-        2.0,
-        3.0,
-        4.0,
-        5.0,
-        6.0,
-    )
-
-
-def test_viser_quaternion_order_and_normalization():
-    pose = make_pose(quaternion=(0.0, 0.0, 2.0, 2.0))
-    wxyz = xyzw_to_wxyz(pose.orientation)
-    assert np.allclose(wxyz, [math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)])
 
 
 def test_closed_four_point_circle_has_four_unique_points_and_return():
@@ -324,6 +265,9 @@ def test_approved_plan_signature_changes_with_path_or_speed():
     goal.waypoints = [make_pose(x=0.1), make_pose(x=0.2)]
     original = CartesianPathActionServer.plan_signature(goal)
 
+    goal.enable_arc = True
+    assert CartesianPathActionServer.plan_signature(goal) != original
+    goal.enable_arc = False
     goal.velocity_scale = 0.1
     assert CartesianPathActionServer.plan_signature(goal) != original
     goal.velocity_scale = 0.2
@@ -339,7 +283,11 @@ class _TestLogger:
 def test_h600_modbus_command_read_and_feedback_write():
     state = H600State(
         robot_ready=True,
+        command_robot_error=True,
+        command_touch=True,
         gas=True,
+        reverse_inching=True,
+        inching=True,
         arc=True,
         current_raw=120,
         voltage_raw=240,
@@ -348,8 +296,19 @@ def test_h600_modbus_command_read_and_feedback_write():
     response = protocol.process_pdu(struct.pack(">BHH", 0x03, 201, 10))
     values = struct.unpack(">10H", response[2:])
     assert values[0] == 1
-    assert values[1] == 0x0009
+    assert values[1] == 0x009F
     assert values[3:5] == (120, 240)
+
+    state.command_robot_error = False
+    state.command_touch = False
+    state.gas = False
+    state.reverse_inching = False
+    state.inching = True
+    state.arc = False
+    assert state.command_registers()[1] == 0x0002
+    state.reverse_inching = True
+    state.inching = False
+    assert state.command_registers()[1] == 0x0004
 
     write = (
         struct.pack(">BHHB", 0x10, 211, 3, 6)
@@ -359,3 +318,43 @@ def test_h600_modbus_command_read_and_feedback_write():
     assert state.registers[211] == 0x0020
     assert state.registers[212] == 111
     assert state.registers[213] == 222
+
+
+class _WeldSequenceFake:
+    def __init__(self):
+        self.events = []
+
+    def require_h600_connection(self):
+        self.events.append(("connected",))
+        return "192.168.1.2:50200"
+
+    def publish_phase(self, _goal_handle, _request, phase, _progress):
+        self.events.append(("phase", phase))
+
+    def set_welder(self, _request, ready, gas, arc, setpoints):
+        self.events.append(("command", ready, gas, arc, setpoints))
+
+    def wait_for_welding_feedback(self, expected):
+        self.events.append(("feedback", expected))
+
+
+def test_h600_tcp1_to_tcp2_weld_command_sequence():
+    fake = _WeldSequenceFake()
+    goal = CartesianPath.Goal()
+    goal.waypoints = [make_pose(), make_pose(x=0.1)]
+    goal.weld_preflow_seconds = 0.0
+    goal.weld_postflow_seconds = 0.0
+    goal.require_welding_feedback = True
+
+    CartesianPathActionServer.start_welding(fake, object(), goal)
+    CartesianPathActionServer.stop_welding(fake, object(), goal)
+
+    commands = [event for event in fake.events if event[0] == "command"]
+    assert commands == [
+        ("command", True, True, False, True),
+        ("command", True, True, True, True),
+        ("command", True, True, False, False),
+        ("command", False, False, False, False),
+    ]
+    feedback = [event for event in fake.events if event[0] == "feedback"]
+    assert feedback == [("feedback", True), ("feedback", False)]

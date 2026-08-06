@@ -1,5 +1,6 @@
 import copy
 import math
+import queue
 import signal
 import threading
 import time
@@ -8,43 +9,41 @@ from tkinter import messagebox, ttk
 
 import rclpy
 from geometry_msgs.msg import Pose, PoseArray
+from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import MoveGroup
-from moveit_msgs.msg import Constraints, JointConstraint
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rbpodo_msgs.msg import SystemState
+from rbpodo_msgs.srv import SetDigitalOutput
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import MarkerArray
 
 from construct_msgs.action import CartesianPath
 from construct_msgs.msg import WelderStatus
-from construct_msgs.srv import SetRobotConnection
 from construct_robot.cartesian_path_common import (
     circle_waypoints,
     linear_pose_waypoints,
     pose_is_valid,
     straight_waypoints,
+    tip_link_for_group,
     weaving_from_path,
 )
 from construct_robot.cartesian_path_server import make_weld_visualization
 
 
-RIGHT_JOINT_NAMES = tuple(
-    f"right_manipulator_joint{index}" for index in range(1, 7)
-)
-
-
-def complete_right_joint_positions(message):
-    positions = dict(zip(message.name, message.position))
-    if not all(
-        name in positions and math.isfinite(positions[name])
-        for name in RIGHT_JOINT_NAMES
-    ):
-        return None
-    return tuple(float(positions[name]) for name in RIGHT_JOINT_NAMES)
+OBSERVED_H600_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
+TOUCH_INPUT_PORT = 0
+ARM_JOINT_NAMES = {
+    arm: frozenset(
+        f"{arm}_manipulator_joint{index}" for index in range(1, 7)
+    )
+    for arm in ("left", "right")
+}
 
 
 class WeldActionNode(Node):
@@ -53,30 +52,47 @@ class WeldActionNode(Node):
     def __init__(self, ui):
         super().__init__("weld_action_gui")
         self.ui = ui
-        self.declare_parameter("expected_execute_motion", False)
-        self.declare_parameter("expected_robot_connected", True)
-        self.declare_parameter(
-            "expected_right_robot_ip",
-            "192.168.1.10",
-        )
+        self.declare_parameter("expected_execute_motion", True)
+        self.declare_parameter("robot_feedback_timeout", 5.0)
         self.client = ActionClient(self, CartesianPath, "cartesian_path")
         self.move_group_client = ActionClient(
             self,
             MoveGroup,
             "/move_action",
         )
-        self.connection_client = self.create_client(
-            SetRobotConnection,
-            "/weld_stack/set_robot_connection",
+        self.trajectory_clients = {
+            "left": ActionClient(
+                self,
+                FollowJointTrajectory,
+                "/left_manipulator_controller/follow_joint_trajectory",
+            ),
+            "right": ActionClient(
+                self,
+                FollowJointTrajectory,
+                "/right_manipulator_controller/follow_joint_trajectory",
+            ),
+        }
+        self.digital_output_client = self.create_client(
+            SetDigitalOutput,
+            "/right_rbpodo_hardware/set_digital_output",
         )
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.goal_handle = None
-        self.initial_goal_handle = None
         self.request_execution = False
-        self.joint_state_lock = threading.Lock()
-        self.right_joint_positions = None
-        self.robot_feedback_seen = False
+        self.execute_motion_enabled = self.get_parameter(
+            "expected_execute_motion"
+        ).value
+        self.expect_robot_feedback = {"left": True, "right": True}
+        self.robot_feedback_seen = {"left": False, "right": False}
+        self.robot_ready_reported = {"left": False, "right": False}
+        self.last_robot_feedback_at = {"left": None, "right": None}
+        startup_deadline = time.monotonic() + 90.0
+        self.connection_deadline = {
+            "left": startup_deadline,
+            "right": startup_deadline,
+        }
+        self.rviz_goal_refresh_pending = True
         marker_qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -91,10 +107,31 @@ class WeldActionNode(Node):
             "weld_6d_poses",
             marker_qos,
         )
+        self.rviz_goal_refresh_publisher = self.create_publisher(
+            Empty,
+            "/rviz/moveit/update_goal_state",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+            ),
+        )
         self.create_subscription(
             WelderStatus,
             "/h600/status",
             self._welder_status,
+            10,
+        )
+        self.create_timer(0.5, self._check_robot_feedback)
+        self.create_subscription(
+            SystemState,
+            "/right_rbpodo_hardware/system_state",
+            lambda message: self._system_state(message, "right"),
+            10,
+        )
+        self.create_subscription(
+            SystemState,
+            "/left_rbpodo_hardware/system_state",
+            lambda message: self._system_state(message, "left"),
             10,
         )
         self.create_subscription(
@@ -106,96 +143,175 @@ class WeldActionNode(Node):
         self.ui.post(
             self.ui.set_execution_configuration,
             self.get_parameter("expected_execute_motion").value,
-            self.get_parameter("expected_robot_connected").value,
-            self.get_parameter("expected_right_robot_ip").value,
         )
 
+    def _system_state(self, message, arm):
+        self.ui.post(
+            self.ui.update_touch_input,
+            arm,
+            bool(message.digital_in[TOUCH_INPUT_PORT]),
+        )
+        if arm == "right":
+            self.ui.post(
+                self.ui.update_control_box_io,
+                tuple(message.digital_in),
+                tuple(message.digital_out),
+            )
+        if not self.expect_robot_feedback[arm]:
+            return
+        self.last_robot_feedback_at[arm] = time.monotonic()
+        self.robot_feedback_seen[arm] = True
+
     def _joint_state(self, message):
-        positions = complete_right_joint_positions(message)
-        if positions is None:
-            return
-        with self.joint_state_lock:
-            self.right_joint_positions = positions
-        if not self.robot_feedback_seen:
-            self.robot_feedback_seen = True
-            self.ui.post(self.ui.robot_feedback_connected)
+        """Use complete finite measured arm states as connection feedback."""
+        positions = dict(zip(message.name, message.position))
+        received_at = time.monotonic()
+        for arm, expected_names in ARM_JOINT_NAMES.items():
+            if expected_names.issubset(positions) and all(
+                math.isfinite(positions[name]) for name in expected_names
+            ):
+                self.last_robot_feedback_at[arm] = received_at
+                self.robot_feedback_seen[arm] = True
 
-    def current_right_joint_positions(self):
-        with self.joint_state_lock:
-            return self.right_joint_positions
-
-    def move_right_to_joint_positions(self, positions, velocity_scale):
-        if len(positions) != len(RIGHT_JOINT_NAMES) or not all(
-            math.isfinite(value) for value in positions
-        ):
-            self.ui.post(self.ui.initial_move_error, "Invalid saved pose")
-            return
-        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
-            self.ui.post(
-                self.ui.initial_move_error,
-                "MoveIt /move_action unavailable",
-            )
-            return
-
-        constraints = Constraints()
-        for name, position in zip(RIGHT_JOINT_NAMES, positions):
-            constraint = JointConstraint()
-            constraint.joint_name = name
-            constraint.position = position
-            constraint.tolerance_above = 0.005
-            constraint.tolerance_below = 0.005
-            constraint.weight = 1.0
-            constraints.joint_constraints.append(constraint)
-
-        goal = MoveGroup.Goal()
-        goal.request.group_name = "right_manipulator"
-        goal.request.num_planning_attempts = 5
-        goal.request.allowed_planning_time = 5.0
-        goal.request.max_velocity_scaling_factor = velocity_scale
-        goal.request.max_acceleration_scaling_factor = velocity_scale
-        goal.request.start_state.is_diff = True
-        goal.request.goal_constraints = [constraints]
-        goal.planning_options.plan_only = False
-        future = self.move_group_client.send_goal_async(goal)
-        future.add_done_callback(self._initial_goal_response)
-
-    def _initial_goal_response(self, future):
+    def capture_touch_pose(self, planning_group, source):
         try:
-            self.initial_goal_handle = future.result()
-        except Exception as error:
+            pose = self._current_tcp_pose(planning_group)
+        except TransformException as error:
             self.ui.post(
-                self.ui.initial_move_error,
-                f"Initial pose goal failed: {error}",
-            )
-            return
-        if not self.initial_goal_handle.accepted:
-            self.ui.post(
-                self.ui.initial_move_error,
-                "Initial pose goal rejected by MoveIt",
+                self.ui.error,
+                f"Touch TCP capture failed: {error}",
             )
             return
         self.ui.post(
-            self.ui.log,
-            "Initial pose goal accepted · planning/executing",
+            self.ui.apply_touch_capture,
+            pose,
+            planning_group,
+            source,
         )
-        result = self.initial_goal_handle.get_result_async()
-        result.add_done_callback(self._initial_move_result)
 
-    def _initial_move_result(self, future):
-        try:
-            error_code = future.result().result.error_code.val
-        except Exception as error:
+    def set_digital_output(self, port, value):
+        if not self.digital_output_client.wait_for_service(timeout_sec=2.0):
             self.ui.post(
-                self.ui.initial_move_error,
-                f"Initial pose result failed: {error}",
+                self.ui.digital_output_result,
+                port,
+                False,
+                "/right_rbpodo_hardware/set_digital_output unavailable",
             )
             return
-        self.ui.post(self.ui.initial_move_finished, error_code)
+        request = SetDigitalOutput.Request()
+        request.port = port
+        request.value = value
+        future = self.digital_output_client.call_async(request)
+        future.add_done_callback(
+            lambda result: self._digital_output_result(result, port)
+        )
 
-    def _current_tcp_pose(self):
+    def _digital_output_result(self, future, port):
+        try:
+            response = future.result()
+            self.ui.post(
+                self.ui.digital_output_result,
+                port,
+                response.success,
+                response.message,
+            )
+        except Exception as error:
+            self.ui.post(
+                self.ui.digital_output_result,
+                port,
+                False,
+                str(error),
+            )
+
+    def _check_robot_feedback(self):
+        feedback_timeout = max(
+            1.0,
+            float(self.get_parameter("robot_feedback_timeout").value),
+        )
+        move_group_ready = self.move_group_client.server_is_ready()
+        for arm in ("left", "right"):
+            last_feedback = self.last_robot_feedback_at[arm]
+            deadline = self.connection_deadline[arm]
+            feedback_is_fresh = (
+                last_feedback is not None
+                and time.monotonic() - last_feedback <= feedback_timeout
+            )
+            controller_ready = (
+                not self.execute_motion_enabled
+                or self.trajectory_clients[arm].server_is_ready()
+            )
+            stack_ready = (
+                self.robot_feedback_seen[arm]
+                and feedback_is_fresh
+                and move_group_ready
+                and controller_ready
+            )
+            if stack_ready and not self.robot_ready_reported[arm]:
+                self.robot_ready_reported[arm] = True
+                self.connection_deadline[arm] = None
+                self.ui.post(self.ui.robot_feedback_connected, arm)
+                continue
+            if (
+                self.expect_robot_feedback[arm]
+                and not self.robot_ready_reported[arm]
+                and deadline is not None
+                and time.monotonic() > deadline
+            ):
+                self.connection_deadline[arm] = None
+                detail = (
+                    "measured joint feedback received, but MoveIt/controllers did "
+                    "not become ready"
+                    if self.robot_feedback_seen[arm]
+                    else "no fresh complete measured joint state received"
+                )
+                self.ui.post(self.ui.robot_feedback_lost, arm)
+                self.get_logger().error(
+                    f"{arm.upper()} CONNECTION X · {detail}"
+                )
+                continue
+            if (
+                not self.expect_robot_feedback[arm]
+                or not self.robot_feedback_seen[arm]
+                or last_feedback is None
+                or feedback_is_fresh
+            ):
+                continue
+            self.robot_feedback_seen[arm] = False
+            if self.robot_ready_reported[arm]:
+                self.robot_ready_reported[arm] = False
+                self.rviz_goal_refresh_pending = True
+                self.ui.post(self.ui.robot_feedback_lost, arm)
+
+        expected_real_arms = tuple(
+            arm
+            for arm in ("left", "right")
+            if self.expect_robot_feedback[arm]
+        )
+        all_expected_arms_ready = (
+            bool(expected_real_arms)
+            and move_group_ready
+            and all(
+                self.robot_ready_reported[arm]
+                for arm in expected_real_arms
+            )
+        )
+        if (
+            self.rviz_goal_refresh_pending
+            and all_expected_arms_ready
+            and self.rviz_goal_refresh_publisher.get_subscription_count() > 0
+        ):
+            # This invokes RViz's own "Goal State = <current>" callback. It
+            # changes only the orange query state and sends no robot command.
+            self.rviz_goal_refresh_publisher.publish(Empty())
+            self.rviz_goal_refresh_pending = False
+            self.get_logger().info(
+                "Requested RViz Goal State refresh from current state"
+            )
+
+    def _current_tcp_pose(self, planning_group):
         transform = self.tf_buffer.lookup_transform(
             "World",
-            "right_manipulator_ee_point",
+            tip_link_for_group(planning_group),
             rclpy.time.Time(),
             timeout=Duration(seconds=1.0),
         )
@@ -225,9 +341,10 @@ class WeldActionNode(Node):
         count,
         explicit_position,
         visible,
+        planning_group,
     ):
         try:
-            tcp = self._current_tcp_pose()
+            tcp = self._current_tcp_pose(planning_group)
             if explicit_position is not None:
                 (
                     tcp.position.x,
@@ -273,9 +390,10 @@ class WeldActionNode(Node):
         closed,
         face_center,
         visible,
+        planning_group,
     ):
         try:
-            tcp = self._current_tcp_pose()
+            tcp = self._current_tcp_pose(planning_group)
             points = circle_waypoints(
                 tcp,
                 radius,
@@ -330,9 +448,9 @@ class WeldActionNode(Node):
             f"cycles={cycles}, axis={transverse_axis}",
         )
 
-    def capture_tcp(self, replace_index, visible):
+    def capture_tcp(self, replace_index, visible, planning_group):
         try:
-            pose = self._current_tcp_pose()
+            pose = self._current_tcp_pose(planning_group)
         except TransformException as error:
             self.ui.post(self.ui.error, f"TCP capture failed: {error}")
             return
@@ -343,9 +461,9 @@ class WeldActionNode(Node):
             visible,
         )
 
-    def capture_linear_tcp(self, endpoint_index):
+    def capture_linear_tcp(self, endpoint_index, planning_group):
         try:
-            pose = self._current_tcp_pose()
+            pose = self._current_tcp_pose(planning_group)
         except TransformException as error:
             self.ui.post(self.ui.error, f"TCP capture failed: {error}")
             return
@@ -370,41 +488,6 @@ class WeldActionNode(Node):
             f"distance={distance * 1000.0:.1f} mm · {count} poses",
         )
 
-    def set_robot_connection(self, connect, right_robot_ip):
-        if not self.connection_client.wait_for_service(timeout_sec=1.5):
-            self.ui.post(
-                self.ui.error,
-                "Robot connection supervisor unavailable. Start "
-                "weld_supervised.launch.py",
-            )
-            return
-        if connect:
-            self.robot_feedback_seen = False
-        request = SetRobotConnection.Request()
-        request.connect = connect
-        request.right_robot_ip = right_robot_ip
-        future = self.connection_client.call_async(request)
-        future.add_done_callback(
-            lambda result: self._connection_response(result, connect)
-        )
-
-    def _connection_response(self, future, connect):
-        try:
-            response = future.result()
-            if response.accepted:
-                self.ui.post(
-                    self.ui.connection_change_accepted,
-                    connect,
-                    response.message,
-                )
-            else:
-                self.ui.post(self.ui.error, response.message)
-        except Exception as error:
-            self.ui.post(
-                self.ui.error,
-                f"Robot connection request failed: {error}",
-            )
-
     def send(
         self,
         points,
@@ -414,8 +497,12 @@ class WeldActionNode(Node):
         current_raw,
         voltage_raw,
         v_offset_raw,
+        preflow_seconds,
+        postflow_seconds,
+        require_welding_feedback,
         execute_requested,
         reuse_approved_plan,
+        planning_group,
     ):
         if not points:
             self.ui.post(self.ui.error, "Create weld points first")
@@ -427,7 +514,7 @@ class WeldActionNode(Node):
             )
             return
         goal = CartesianPath.Goal()
-        goal.planning_group = "right_manipulator"
+        goal.planning_group = planning_group
         goal.interpolation_step = 0.005
         goal.velocity_scale = velocity_scale
         goal.execute_requested = execute_requested
@@ -437,6 +524,9 @@ class WeldActionNode(Node):
         goal.weld_current_raw = current_raw
         goal.weld_voltage_raw = voltage_raw
         goal.weld_v_offset_raw = v_offset_raw
+        goal.weld_preflow_seconds = preflow_seconds
+        goal.weld_postflow_seconds = postflow_seconds
+        goal.require_welding_feedback = require_welding_feedback
         goal.waypoints = points
         self.request_execution = execute_requested
         self.ui.post(
@@ -457,6 +547,7 @@ class WeldActionNode(Node):
             feedback.progress,
             feedback.waypoint_index,
             feedback.current_pose,
+            feedback.phase,
         )
 
     def goal_response(self, future):
@@ -503,18 +594,61 @@ class WeldActionGui:
 
     POSE_FIELDS = ("x", "y", "z", "qx", "qy", "qz", "qw")
 
+    def _create_toggle_section(
+        self,
+        parent,
+        key,
+        title,
+        expanded=False,
+    ):
+        container = ttk.Frame(parent)
+        container.pack(fill=tk.X, pady=2)
+        button = ttk.Button(
+            container,
+            command=lambda selected=key: self.toggle_motion_section(selected),
+        )
+        button.pack(fill=tk.X)
+        body = ttk.Frame(container, padding=(8, 5))
+        self.motion_sections[key] = {
+            "body": body,
+            "button": button,
+            "title": title,
+            "expanded": bool(expanded),
+        }
+        if expanded:
+            body.pack(fill=tk.X)
+        self._refresh_motion_section_button(key)
+        return body
+
+    def _refresh_motion_section_button(self, key):
+        section = self.motion_sections[key]
+        marker = "▼" if section["expanded"] else "▶"
+        section["button"].configure(
+            text=f"{marker}  {section['title']}",
+        )
+
+    def toggle_motion_section(self, key):
+        section = self.motion_sections[key]
+        section["expanded"] = not section["expanded"]
+        if section["expanded"]:
+            section["body"].pack(fill=tk.X)
+        else:
+            section["body"].pack_forget()
+        self._refresh_motion_section_button(key)
+        self.root.after_idle(self._update_scroll_region)
+
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KIRO Laser Weld · Editable Right Arm Action")
+        self.root.title("Editable Cartesian Action")
         self.root.geometry("1240x940")
         self._closing = False
+        self._ui_queue = queue.SimpleQueue()
         self.points = []
         self.weave_source = []
         self.path_kind = "empty"
         self.execution_allowed = False
-        self.robot_connected = True
+        self.robot_connected = {"left": False, "right": False}
         self.plan_approved = False
-        self.saved_initial_joints = None
         self.linear_tcp_endpoints = [None, None]
         self.pose_variables = {
             name: tk.StringVar(value="0.0") for name in self.POSE_FIELDS
@@ -539,9 +673,23 @@ class WeldActionGui:
         self.straight_distance_mm = tk.DoubleVar(value=200.0)
         self.straight_count = tk.IntVar(value=5)
         self.tcp_line_count = tk.IntVar(value=10)
-        self.tcp_line_direction = tk.StringVar(value="TCP 2 → TCP 1")
+        self.tcp_line_direction = tk.StringVar(value="TCP 1 → TCP 2")
+        self.planning_group = tk.StringVar(value="right_manipulator")
         self.enable_arc = tk.BooleanVar(value=False)
-        self.right_robot_ip = tk.StringVar(value="192.168.1.10")
+        self.require_welding_feedback = tk.BooleanVar(value=True)
+        self.weld_preflow_seconds = tk.DoubleVar(value=0.5)
+        self.weld_postflow_seconds = tk.DoubleVar(value=0.5)
+        self.h600_connected = False
+        self.last_action_phase = ""
+        self.previous_control_box_io = None
+        self.touch_sensor_arm = tk.StringVar(value="right")
+        self.touch_input_states = {"left": None, "right": None}
+        self.touch_input_rising_edges = {"left": 0, "right": 0}
+        self.last_touch_pose = None
+        self.motion_sections = {}
+        self.control_box_io_labels = {}
+        self.pending_do_ports = set()
+        self.unlock_all_do_ports = tk.BooleanVar(value=False)
         self.weld_current_raw = tk.IntVar(value=0)
         self.weld_voltage_raw = tk.IntVar(value=0)
         self.weld_v_offset_raw = tk.IntVar(value=0)
@@ -551,26 +699,62 @@ class WeldActionGui:
         style.configure("Title.TLabel", font=("Sans", 18, "bold"))
         style.configure("Step.TLabel", font=("Sans", 11, "bold"))
 
-        outer = ttk.Frame(self.root, padding=16)
-        outer.pack(fill=tk.BOTH, expand=True)
+        scroll_container = ttk.Frame(self.root)
+        scroll_container.pack(fill=tk.BOTH, expand=True)
+        self.content_canvas = tk.Canvas(
+            scroll_container,
+            highlightthickness=0,
+        )
+        content_scrollbar = ttk.Scrollbar(
+            scroll_container,
+            orient=tk.VERTICAL,
+            command=self.content_canvas.yview,
+        )
+        self.content_canvas.configure(yscrollcommand=content_scrollbar.set)
+        content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.content_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        outer = ttk.Frame(self.content_canvas, padding=16)
+        self.content_window = self.content_canvas.create_window(
+            (0, 0),
+            window=outer,
+            anchor=tk.NW,
+        )
+        outer.bind("<Configure>", self._update_scroll_region)
+        self.content_canvas.bind("<Configure>", self._resize_scroll_content)
+        self.root.bind_all("<MouseWheel>", self._scroll_content)
         ttk.Label(
             outer,
-            text="KIRO Editable Welding Action Console",
+            text="Welding Interface",
             style="Title.TLabel",
         ).pack(anchor=tk.W)
-        ttk.Label(
-            outer,
-            text=(
-                "Laser/GUI poses → /cartesian_path → MoveIt → "
-                "right_manipulator controller"
-            ),
-        ).pack(anchor=tk.W, pady=(2, 12))
 
-        straight = ttk.LabelFrame(
+        arm_selection = ttk.Frame(outer)
+        arm_selection.pack(fill=tk.X, pady=(0, 7))
+        ttk.Label(
+            arm_selection,
+            text="Cartesian arm:",
+            style="Step.TLabel",
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Combobox(
+            arm_selection,
+            textvariable=self.planning_group,
+            values=("right_manipulator", "left_manipulator"),
+            state="readonly",
+            width=22,
+        ).pack(side=tk.LEFT)
+        self.planning_group.trace_add("write", self.arm_changed)
+
+        motion_tests = ttk.LabelFrame(
             outer,
-            text="1 · Acquire straight seam with respect to axis",
+            text="Motion test generators · click a row to expand/collapse",
         )
-        straight.pack(fill=tk.X)
+        motion_tests.pack(fill=tk.X)
+        straight = self._create_toggle_section(
+            motion_tests,
+            "straight",
+            "Straight path",
+            expanded=True,
+        )
         ttk.Button(
             straight,
             text="Acquire straight path",
@@ -630,11 +814,11 @@ class WeldActionGui:
             width=5,
         ).pack(side=tk.LEFT, padx=(3, 0))
 
-        tcp_line = ttk.LabelFrame(
-            outer,
-            text="TCP-to-TCP linear seam",
+        tcp_line = self._create_toggle_section(
+            motion_tests,
+            "tcp_line",
+            "TCP-to-TCP linear path",
         )
-        tcp_line.pack(fill=tk.X, pady=(7, 0))
         ttk.Button(
             tcp_line,
             text="Capture TCP 1",
@@ -673,8 +857,11 @@ class WeldActionGui:
         )
         self.generate_tcp_line_button.pack(side=tk.LEFT)
 
-        controls = ttk.LabelFrame(outer, text="Circle seam")
-        controls.pack(fill=tk.X, pady=(7, 0))
+        controls = self._create_toggle_section(
+            motion_tests,
+            "circle",
+            "Circle path",
+        )
         ttk.Button(
             controls,
             text="Generate circle",
@@ -750,11 +937,11 @@ class WeldActionGui:
         self.path_summary = ttk.Label(teaching, text="empty path")
         self.path_summary.pack(side=tk.LEFT, padx=(14, 0))
 
-        weaving = ttk.LabelFrame(
-            outer,
-            text="2 · Apply weaving to the current taught seam",
+        weaving = self._create_toggle_section(
+            motion_tests,
+            "weave",
+            "Weave path",
         )
-        weaving.pack(fill=tk.X, pady=(7, 0))
         ttk.Button(
             weaving,
             text="Apply weave to current path",
@@ -804,7 +991,7 @@ class WeldActionGui:
             outer,
             columns=columns,
             show="headings",
-            height=8,
+            height=4,
             selectmode="browse",
         )
         for name in columns:
@@ -877,58 +1064,145 @@ class WeldActionGui:
                 width=4,
             ).pack(side=tk.LEFT, padx=1)
 
-        hardware_mode = ttk.Frame(outer)
-        hardware_mode.pack(fill=tk.X, pady=(10, 0))
-        self.execution_mode = ttk.Label(
-            hardware_mode,
-            text="Execution mode: waiting for launch configuration",
+        robot_status = ttk.LabelFrame(outer, text="Robot connection")
+        robot_status.pack(fill=tk.X, pady=(10, 0))
+        self.robot_connection_labels = {}
+        for arm in ("left", "right"):
+            label = tk.Label(
+                robot_status,
+                text=f"{arm.upper()}  X",
+                width=14,
+                relief=tk.SOLID,
+                borderwidth=1,
+                bg="#fce8e6",
+                fg="#b3261e",
+                font=("Sans", 11, "bold"),
+            )
+            label.pack(side=tk.LEFT, padx=6, pady=6)
+            self.robot_connection_labels[arm] = label
+
+        io_monitor = ttk.LabelFrame(
+            outer,
+            text=(
+                "Rainbow control-box digital I/O · raw ports 0..15 · "
+                "touch DI0 · other observed candidates: 4, 8, 9, 10, 12, 13"
+            ),
+        )
+        io_monitor.pack(fill=tk.X, pady=(7, 0))
+        for io_row, kind in enumerate(("DI", "DO")):
+            ttk.Label(
+                io_monitor,
+                text=kind,
+                font=("Sans", 10, "bold"),
+            ).grid(row=io_row, column=0, padx=(6, 4), pady=3)
+            for port in range(16):
+                candidate = port in OBSERVED_H600_IO_CANDIDATES
+                label = tk.Label(
+                    io_monitor,
+                    text=f"{port:02d}\n–",
+                    width=4,
+                    relief=tk.SOLID,
+                    borderwidth=2 if candidate else 1,
+                    bg="#dbeafe" if candidate else "#eeeeee",
+                    font=("Monospace", 9, "bold" if candidate else "normal"),
+                )
+                label.grid(row=io_row, column=port + 1, padx=2, pady=3)
+                self.control_box_io_labels[(kind, port)] = label
+                if kind == "DO":
+                    label.configure(cursor="hand2")
+                    label.bind(
+                        "<Button-1>",
+                        lambda _event, selected=port: (
+                            self.request_do_toggle(selected)
+                        ),
+                    )
+        self.control_box_io_status = ttk.Label(
+            io_monitor,
+            text="Waiting for /right_rbpodo_hardware/system_state",
+        )
+        self.control_box_io_status.grid(
+            row=2,
+            column=0,
+            columnspan=17,
+            sticky=tk.W,
+            padx=6,
+            pady=(2, 5),
+        )
+        ttk.Checkbutton(
+            io_monitor,
+            text="Unlock clicking non-candidate DO ports",
+            variable=self.unlock_all_do_ports,
+            command=self.confirm_all_do_unlock,
+        ).grid(
+            row=3,
+            column=0,
+            columnspan=12,
+            sticky=tk.W,
+            padx=6,
+            pady=(0, 5),
+        )
+        ttk.Button(
+            io_monitor,
+            text="Candidate DO all OFF",
+            command=self.candidate_outputs_off,
+        ).grid(
+            row=3,
+            column=12,
+            columnspan=5,
+            sticky=tk.E,
+            padx=6,
+            pady=(0, 5),
+        )
+
+        touch_calibration = ttk.LabelFrame(
+            outer,
+            text="TCP touch calibration · simulated contact + real DI0",
+        )
+        touch_calibration.pack(fill=tk.X, pady=(7, 0))
+        touch_controls = ttk.Frame(touch_calibration)
+        touch_controls.pack(fill=tk.X, padx=6, pady=(5, 3))
+        ttk.Label(touch_controls, text="sensor control box").pack(
+            side=tk.LEFT,
+        )
+        touch_arm_selector = ttk.Combobox(
+            touch_controls,
+            textvariable=self.touch_sensor_arm,
+            values=("right", "left"),
+            state="readonly",
+            width=7,
+        )
+        touch_arm_selector.pack(side=tk.LEFT, padx=(4, 10))
+        touch_arm_selector.bind(
+            "<<ComboboxSelected>>",
+            self.touch_sensor_arm_changed,
+        )
+        ttk.Button(
+            touch_controls,
+            text="Simulate TOUCH now",
+            command=self.simulate_touch,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(
+            touch_controls,
+            text=(
+                "A rising DI0 or the simulate button captures the selected "
+                "arm TCP in World"
+            ),
+        ).pack(side=tk.LEFT)
+        self.touch_input_status = tk.Label(
+            touch_calibration,
+            text="RIGHT DI00 TOUCH: waiting for robot state",
+            anchor=tk.W,
+            relief=tk.SOLID,
+            borderwidth=1,
+            bg="#eeeeee",
             font=("Sans", 10, "bold"),
         )
-        self.execution_mode.pack(side=tk.LEFT)
-        ttk.Label(
-            hardware_mode,
-            text="right RB IP",
-        ).pack(side=tk.LEFT, padx=(18, 4))
-        ttk.Entry(
-            hardware_mode,
-            textvariable=self.right_robot_ip,
-            width=15,
-        ).pack(side=tk.LEFT)
-        ttk.Button(
-            hardware_mode,
-            text="Robot Connect",
-            command=self.connect_robot,
-        ).pack(side=tk.LEFT, padx=(8, 3))
-        ttk.Button(
-            hardware_mode,
-            text="Robot Disconnect",
-            command=self.disconnect_robot,
-        ).pack(side=tk.LEFT, padx=3)
-
-        initial_pose = ttk.Frame(outer)
-        initial_pose.pack(fill=tk.X, pady=(7, 0))
-        ttk.Label(
-            initial_pose,
-            text="Right arm initial pose:",
-            style="Step.TLabel",
-        ).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(
-            initial_pose,
-            text="Save CURRENT as initial",
-            command=self.save_current_as_initial,
-        ).pack(side=tk.LEFT, padx=(0, 6))
-        self.go_initial_button = ttk.Button(
-            initial_pose,
-            text="Go to saved initial",
-            command=self.go_to_saved_initial,
-            state=tk.DISABLED,
+        self.touch_input_status.pack(fill=tk.X, padx=6, pady=3)
+        self.touch_pose_status = ttk.Label(
+            touch_calibration,
+            text="Last touch TCP: not captured",
         )
-        self.go_initial_button.pack(side=tk.LEFT, padx=(0, 9))
-        self.initial_pose_status = ttk.Label(
-            initial_pose,
-            text="not saved",
-        )
-        self.initial_pose_status.pack(side=tk.LEFT)
+        self.touch_pose_status.pack(fill=tk.X, padx=6, pady=(2, 6))
 
         execution = ttk.Frame(outer)
         execution.pack(fill=tk.X, pady=(12, 0))
@@ -972,6 +1246,7 @@ class WeldActionGui:
             welder,
             text="H600 ARC during execution",
             variable=self.enable_arc,
+            command=self.invalidate_approved_plan,
         ).pack(side=tk.LEFT, padx=(0, 10))
         for label, variable in (
             ("current raw", self.weld_current_raw),
@@ -991,6 +1266,33 @@ class WeldActionGui:
             text="H600: waiting",
         )
         self.welder_status.pack(side=tk.LEFT, padx=(12, 0))
+        weld_timing = ttk.Frame(outer)
+        weld_timing.pack(fill=tk.X, pady=(4, 0))
+        ttk.Checkbutton(
+            weld_timing,
+            text="Require H600 welding feedback before motion",
+            variable=self.require_welding_feedback,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        for label, variable in (
+            ("pre-flow s", self.weld_preflow_seconds),
+            ("post-flow s", self.weld_postflow_seconds),
+        ):
+            ttk.Label(weld_timing, text=label).pack(side=tk.LEFT)
+            ttk.Spinbox(
+                weld_timing,
+                from_=0.0,
+                to=10.0,
+                increment=0.1,
+                textvariable=variable,
+                width=5,
+            ).pack(side=tk.LEFT, padx=(3, 9))
+        ttk.Label(
+            weld_timing,
+            text=(
+                "Sequence: ARC OFF approach → TCP1 → pre-flow/ARC ON → "
+                "TCP2 → ARC OFF/post-flow"
+            ),
+        ).pack(side=tk.LEFT, padx=(10, 0))
 
         ttk.Label(
             outer,
@@ -1016,10 +1318,8 @@ class WeldActionGui:
             bg="#101820",
             fg="#d5f5e3",
         )
-        self.status.pack(fill=tk.BOTH, expand=True)
-        self.log(
-            "Ready · edits publish immediately to both RViz and Viser"
-        )
+        self.status.pack(fill=tk.X)
+        self.log("Ready · edits publish immediately to RViz")
 
         self.node = WeldActionNode(self)
         self.executor = MultiThreadedExecutor(num_threads=2)
@@ -1037,7 +1337,84 @@ class WeldActionGui:
         self.root.after(200, self.check_ros)
 
     def post(self, callback, *args):
-        self.root.after(0, callback, *args)
+        self._ui_queue.put((callback, args))
+
+    def _drain_ui_queue(self):
+        while True:
+            try:
+                callback, args = self._ui_queue.get_nowait()
+            except queue.Empty:
+                return
+            callback(*args)
+
+    def _update_scroll_region(self, _event=None):
+        self.content_canvas.configure(
+            scrollregion=self.content_canvas.bbox("all")
+        )
+
+    def _resize_scroll_content(self, event):
+        self.content_canvas.itemconfigure(
+            self.content_window,
+            width=event.width,
+        )
+
+    def _scroll_content(self, event):
+        if event.delta:
+            self.content_canvas.yview_scroll(
+                int(-event.delta / 120),
+                "units",
+            )
+
+    def arm_changed(self, *_args):
+        if not hasattr(self, "node"):
+            return
+        group = self.planning_group.get()
+        if group != "right_manipulator":
+            self.enable_arc.set(False)
+        self.linear_tcp_endpoints = [None, None]
+        self.tcp_1_status.configure(text="not captured")
+        self.tcp_2_status.configure(text="not captured")
+        self.generate_tcp_line_button.configure(state=tk.DISABLED)
+        self.path_kind = "empty"
+        self.weave_source = []
+        self.set_points([])
+        self.node.publish_points([], self.show_path.get())
+        self._refresh_execution_controls()
+        self.log(f"Cartesian arm changed to {group} · path cleared")
+
+    def _selected_arm(self):
+        return (
+            "left"
+            if self.planning_group.get() == "left_manipulator"
+            else "right"
+        )
+
+    def _selected_robot_connected(self):
+        return self.robot_connected[self._selected_arm()]
+
+    def _refresh_execution_controls(self):
+        selected_arm = self._selected_arm()
+        connected = self.robot_connected[selected_arm]
+        for arm, value in self.robot_connected.items():
+            self.robot_connection_labels[arm].configure(
+                text=f"{arm.upper()}  {'O' if value else 'X'}",
+                bg="#e6f4ea" if value else "#fce8e6",
+                fg="#137333" if value else "#b3261e",
+            )
+        self.plan_button.configure(
+            state=tk.NORMAL if self.points and connected else tk.DISABLED
+        )
+        self.execute_button.configure(
+            state=(
+                tk.NORMAL
+                if (
+                    self.plan_approved
+                    and self.execution_allowed
+                    and connected
+                )
+                else tk.DISABLED
+            )
+        )
 
     def log(self, text):
         self.status.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {text}\n")
@@ -1046,7 +1423,11 @@ class WeldActionGui:
     def error(self, text):
         self.log(f"ERROR · {text}")
         self.plan_approved = False
-        state = tk.NORMAL if self.points else tk.DISABLED
+        state = (
+            tk.NORMAL
+            if self.points and self._selected_robot_connected()
+            else tk.DISABLED
+        )
         self.plan_button.configure(state=state)
         self.execute_button.configure(state=tk.DISABLED)
 
@@ -1065,7 +1446,7 @@ class WeldActionGui:
         self.plan_button.configure(
             state=(
                 tk.NORMAL
-                if self.points and self.robot_connected
+                if self.points and self._selected_robot_connected()
                 else tk.DISABLED
             ),
         )
@@ -1085,186 +1466,29 @@ class WeldActionGui:
         self.path_kind = kind
         self.set_points(points)
 
-    def set_execution_configuration(
-        self,
-        execute_motion,
-        robot_connected,
-        right_robot_ip,
-    ):
+    def set_execution_configuration(self, execute_motion):
         self.execution_allowed = execute_motion
-        self.robot_connected = robot_connected
-        self.right_robot_ip.set(right_robot_ip)
-        if not robot_connected:
-            text = "ROBOT DISCONNECTED · REAL RB"
-            color = "#b3261e"
-        elif execute_motion:
-            text = "ROBOT CONNECTED · EXECUTION ENABLED · REAL RB"
-            color = "#b06000"
-        else:
-            text = "ROBOT CONNECTED · PLAN-ONLY · REAL RB"
-            color = "#b3261e"
-        self.execute_button.configure(
-            state=(
-                tk.NORMAL
-                if (
-                    execute_motion
-                    and robot_connected
-                    and self.plan_approved
-                )
-                else tk.DISABLED
-            )
-        )
-        self.execution_mode.configure(text=text, foreground=color)
-        self._update_go_initial_button()
-        self.log(text)
-
-    def _update_go_initial_button(self):
-        enabled = (
-            self.execution_allowed
-            and self.robot_connected
-            and self.saved_initial_joints is not None
-        )
-        self.go_initial_button.configure(
-            state=tk.NORMAL if enabled else tk.DISABLED
-        )
-
-    def save_current_as_initial(self):
-        positions = self.node.current_right_joint_positions()
-        if positions is None:
-            self.error(
-                "Cannot save initial pose: incomplete right-arm /joint_states"
-            )
-            return
-        self.saved_initial_joints = tuple(positions)
-        values = ", ".join(f"{value:.3f}" for value in positions)
-        self.initial_pose_status.configure(
-            text=f"saved [{values}] rad"
-        )
-        self._update_go_initial_button()
-        self.log("Saved CURRENT right-arm joint pose as initial")
-
-    def go_to_saved_initial(self):
-        if self.saved_initial_joints is None:
-            self.error("Save the current right-arm pose first")
-            return
-        if not self.execution_allowed:
-            self.error("Execution is disabled by launch configuration")
-            return
-        if not self.robot_connected:
-            self.error("Connect the REAL RB robot first")
-            return
-        confirmed = messagebox.askyesno(
-            "Move REAL right arm to saved initial pose?",
-            (
-                "Move the physical right arm to the saved six-joint "
-                "pose through MoveIt?\n\n"
-                "Verify the workspace and emergency stop first."
-            ),
-            icon="warning",
-        )
-        if not confirmed:
-            return
-        velocity_scale = max(
-            0.01,
-            min(1.0, self.velocity_percent.get() / 100.0),
-        )
-        self.go_initial_button.configure(state=tk.DISABLED)
-        self.initial_pose_status.configure(text="planning/executing...")
+        self.robot_connected = {"left": False, "right": False}
+        self._refresh_execution_controls()
         self.log(
-            f"Going to saved initial pose · speed={velocity_scale:.0%}"
+            "Connecting LEFT 192.168.1.11 + RIGHT 192.168.1.10 · "
+            "waiting for measured feedback and planning readiness"
         )
-        threading.Thread(
-            target=self.node.move_right_to_joint_positions,
-            args=(self.saved_initial_joints, velocity_scale),
-            daemon=True,
-        ).start()
 
-    def initial_move_finished(self, error_code):
-        if error_code == 1:
-            self.initial_pose_status.configure(text="reached saved initial")
-            self.log("SUCCESS · reached saved right-arm initial pose")
-        else:
-            self.initial_pose_status.configure(
-                text=f"MoveIt error code {error_code}"
-            )
-            self.error(
-                f"Failed to reach saved initial pose · code={error_code}"
-            )
-        self._update_go_initial_button()
-
-    def initial_move_error(self, message):
-        self.initial_pose_status.configure(text=message)
-        self.error(message)
-        self._update_go_initial_button()
-
-    def connect_robot(self):
-        right_robot_ip = self.right_robot_ip.get().strip()
-        if not right_robot_ip:
-            self.error("Enter the right RB IP before connecting")
-            return
-        confirmed = messagebox.askyesno(
-            "Connect REAL RB robot?",
-            (
-                f"Connect to the physical right RB at {right_robot_ip}?\n\n"
-                "ARC remains locked OFF. Verify the emergency stop and "
-                "workspace."
-            ),
-            icon="warning",
+    def robot_feedback_connected(self, arm):
+        self.robot_connected[arm] = True
+        self._refresh_execution_controls()
+        self.log(
+            f"READY · {arm}-arm feedback and MoveIt/controller available"
         )
-        if not confirmed:
-            return
-        self.log(f"Connecting REAL RB at {right_robot_ip}...")
-        threading.Thread(
-            target=self.node.set_robot_connection,
-            args=(True, right_robot_ip),
-            daemon=True,
-        ).start()
 
-    def disconnect_robot(self):
-        confirmed = messagebox.askyesno(
-            "Disconnect REAL RB robot?",
-            "Stop MoveIt/ros2_control and disconnect the physical right arm?",
-            icon="warning",
-        )
-        if not confirmed:
-            return
-        self.log("Disconnecting REAL RB...")
-        threading.Thread(
-            target=self.node.set_robot_connection,
-            args=(False, self.right_robot_ip.get().strip()),
-            daemon=True,
-        ).start()
-
-    def connection_change_accepted(self, connected, message):
-        self.robot_connected = connected
-        if connected:
-            text = "ROBOT CONNECTING · REAL RB"
-            color = "#b06000"
-            if self.points:
-                self.plan_button.configure(state=tk.NORMAL)
-        else:
-            text = "ROBOT DISCONNECTED · REAL RB"
-            color = "#b3261e"
-            self.invalidate_approved_plan()
-        self.execution_mode.configure(text=text, foreground=color)
-        self._update_go_initial_button()
-        self.log(message)
-
-    def robot_feedback_connected(self):
-        self.robot_connected = True
-        mode = (
-            "EXECUTION ENABLED"
-            if self.execution_allowed
-            else "PLAN-ONLY"
-        )
-        self.execution_mode.configure(
-            text=f"ROBOT CONNECTED · {mode} · REAL RB",
-            foreground="#137333",
-        )
-        if self.points:
-            self.plan_button.configure(state=tk.NORMAL)
-        self._update_go_initial_button()
-        self.log("Live right-arm /joint_states received")
+    def robot_feedback_lost(self, arm):
+        self.robot_connected[arm] = False
+        self.invalidate_approved_plan()
+        self._refresh_execution_controls()
+        if self._selected_arm() == arm:
+            self.plan_button.configure(state=tk.DISABLED)
+        self.log(f"ERROR · {arm}-arm measured joint feedback timeout")
 
     def invalidate_approved_plan(self):
         self.plan_approved = False
@@ -1392,7 +1616,7 @@ class WeldActionGui:
             self.error("Straight position/distance/count must be numeric")
             return
         self.log(
-            "Reading current right TCP orientation and generating "
+            f"Reading current {self.planning_group.get()} TCP and generating "
             f"{reference} {direction} straight seam"
         )
         threading.Thread(
@@ -1404,6 +1628,7 @@ class WeldActionGui:
                 count,
                 explicit_position,
                 self.show_path.get(),
+                self.planning_group.get(),
             ),
             daemon=True,
         ).start()
@@ -1423,6 +1648,7 @@ class WeldActionGui:
                 bool(self.close_circle.get()),
                 bool(self.circle_face_center.get()),
                 self.show_path.get(),
+                self.planning_group.get(),
             ),
             daemon=True,
         ).start()
@@ -1481,15 +1707,22 @@ class WeldActionGui:
     def append_tcp(self):
         threading.Thread(
             target=self.node.capture_tcp,
-            args=(None, self.show_path.get()),
+            args=(
+                None,
+                self.show_path.get(),
+                self.planning_group.get(),
+            ),
             daemon=True,
         ).start()
 
     def capture_linear_tcp(self, endpoint_index):
-        self.log(f"Reading current right TCP as TCP {endpoint_index + 1}...")
+        self.log(
+            f"Reading current {self.planning_group.get()} TCP as "
+            f"TCP {endpoint_index + 1}..."
+        )
         threading.Thread(
             target=self.node.capture_linear_tcp,
-            args=(endpoint_index,),
+            args=(endpoint_index, self.planning_group.get()),
             daemon=True,
         ).start()
 
@@ -1543,7 +1776,11 @@ class WeldActionGui:
             return
         threading.Thread(
             target=self.node.capture_tcp,
-            args=(index, self.show_path.get()),
+            args=(
+                index,
+                self.show_path.get(),
+                self.planning_group.get(),
+            ),
             daemon=True,
         ).start()
 
@@ -1560,7 +1797,10 @@ class WeldActionGui:
         self.weave_source = copy.deepcopy(self.points)
         self.set_points(self.points, selected_index)
         self.node.publish_points(self.points, visible)
-        self.log(f"{action} current right TCP · World 6D pose")
+        self.log(
+            f"{action} current {self.planning_group.get()} TCP · "
+            "World 6D pose"
+        )
 
     def reverse_path(self):
         if len(self.points) < 2:
@@ -1595,6 +1835,9 @@ class WeldActionGui:
         )
 
     def plan_preview(self):
+        if not self._selected_robot_connected():
+            self.error("Connect the robot and wait for live /joint_states")
+            return
         self._send_path(execute_requested=False)
 
     def execute_approved(self):
@@ -1604,19 +1847,41 @@ class WeldActionGui:
         if not self.execution_allowed:
             self.error("Server execution is disabled by launch configuration")
             return
-        if not self.robot_connected:
+        if not self._selected_robot_connected():
             self.error("Connect the REAL RB robot first")
+            return
+        if self.enable_arc.get() and not self.h600_connected:
+            self.error("H600 must be connected on TCP/502 before welding")
+            return
+        if self.enable_arc.get() and not messagebox.askyesno(
+            "Confirm physical welding sequence",
+            "Execute TCP1 approach, enable H600 welding, move to TCP2, "
+            "then disable welding?",
+        ):
+            self.log("Physical welding sequence canceled")
             return
         self._send_path(execute_requested=True)
 
     def _send_path(self, execute_requested):
         speed = max(0.01, min(1.0, self.velocity_percent.get() / 100.0))
+        planning_group = self.planning_group.get()
+        if self.enable_arc.get() and planning_group != "right_manipulator":
+            self.error("H600 ARC is allowed only for right_manipulator")
+            return
         try:
             current_raw = int(self.weld_current_raw.get())
             voltage_raw = int(self.weld_voltage_raw.get())
             v_offset_raw = int(self.weld_v_offset_raw.get())
+            preflow_seconds = float(self.weld_preflow_seconds.get())
+            postflow_seconds = float(self.weld_postflow_seconds.get())
         except (ValueError, tk.TclError):
-            self.error("H600 raw values must be integers")
+            self.error("H600 raw values/timing are invalid")
+            return
+        if not 0.0 <= preflow_seconds <= 10.0:
+            self.error("H600 pre-flow must be in 0..10 seconds")
+            return
+        if not 0.0 <= postflow_seconds <= 10.0:
+            self.error("H600 post-flow must be in 0..10 seconds")
             return
         threading.Thread(
             target=self.node.send,
@@ -1628,13 +1893,20 @@ class WeldActionGui:
                 current_raw,
                 voltage_raw,
                 v_offset_raw,
+                preflow_seconds,
+                postflow_seconds,
+                self.require_welding_feedback.get(),
                 execute_requested,
                 execute_requested,
+                planning_group,
             ),
             daemon=True,
         ).start()
 
     def update_welder_status(self, message):
+        self.h600_connected = bool(
+            message.server_running and message.client_connected
+        )
         connection = (
             f"connected {message.client_address}"
             if message.client_connected
@@ -1648,48 +1920,250 @@ class WeldActionGui:
             )
         )
 
+    def update_control_box_io(self, digital_in, digital_out):
+        current = (tuple(digital_in), tuple(digital_out))
+        previous = self.previous_control_box_io
+        changes = []
+        for kind, values, old_values in (
+            ("DI", current[0], previous[0] if previous else None),
+            ("DO", current[1], previous[1] if previous else None),
+        ):
+            for port, value in enumerate(values):
+                changed = (
+                    old_values is not None and value != old_values[port]
+                )
+                candidate = port in OBSERVED_H600_IO_CANDIDATES
+                if value:
+                    background = "#81c995"
+                elif changed:
+                    background = "#fdd663"
+                elif candidate:
+                    background = "#dbeafe"
+                else:
+                    background = "#eeeeee"
+                self.control_box_io_labels[(kind, port)].configure(
+                    text=f"{port:02d}\n{'ON' if value else 'OFF'}",
+                    bg=background,
+                )
+                if changed:
+                    changes.append(
+                        f"{kind}{port}={'ON' if value else 'OFF'}"
+                    )
+        self.previous_control_box_io = current
+        active_inputs = [
+            str(index) for index, value in enumerate(current[0]) if value
+        ]
+        active_outputs = [
+            str(index) for index, value in enumerate(current[1]) if value
+        ]
+        self.control_box_io_status.configure(
+            text=(
+                f"Active DI: {', '.join(active_inputs) or 'none'} · "
+                f"Active DO: {', '.join(active_outputs) or 'none'}"
+            )
+        )
+        if changes:
+            self.log("Rainbow control-box I/O changed · " + ", ".join(changes))
+
+    def touch_sensor_arm_changed(self, _event=None):
+        arm = self.touch_sensor_arm.get()
+        state = self.touch_input_states.get(arm)
+        self._refresh_touch_status(arm, state)
+        self.log(f"Touch sensor source changed to {arm.upper()} DI0")
+
+    def _refresh_touch_status(self, arm, active):
+        state = "waiting" if active is None else ("ON" if active else "OFF")
+        count = self.touch_input_rising_edges[arm]
+        self.touch_input_status.configure(
+            text=(
+                f"{arm.upper()} DI{TOUCH_INPUT_PORT:02d} TOUCH: {state} · "
+                f"detected contacts: {count}"
+            ),
+            bg="#81c995" if active else "#eeeeee",
+        )
+
+    def update_touch_input(self, arm, active):
+        previous = self.touch_input_states[arm]
+        active = bool(active)
+        self.touch_input_states[arm] = active
+        if arm == self.touch_sensor_arm.get():
+            self._refresh_touch_status(arm, active)
+        if previous is not None and active and not previous:
+            self.touch_input_rising_edges[arm] += 1
+            if arm == self.touch_sensor_arm.get():
+                self._refresh_touch_status(arm, active)
+                self._handle_touch_event(f"{arm.upper()} DI0")
+
+    def simulate_touch(self):
+        self._handle_touch_event("SIMULATED TOUCH")
+
+    def _handle_touch_event(self, source):
+        planning_group = self.planning_group.get()
+        self.touch_input_status.configure(
+            text=f"TOUCH DETECTED · {source} · capturing TCP...",
+            bg="#81c995",
+        )
+        self.root.bell()
+        self.log(
+            f"TOUCH DETECTED · source={source} · "
+            f"capturing {planning_group} TCP"
+        )
+        self.node.capture_touch_pose(planning_group, source)
+
+    def apply_touch_capture(self, pose, planning_group, source):
+        self.last_touch_pose = copy.deepcopy(pose)
+        values = self._pose_values(pose)
+        self.touch_input_status.configure(
+            text=f"TOUCH CAPTURED · {source} · {planning_group}",
+            bg="#81c995",
+        )
+        self.touch_pose_status.configure(
+            text=(
+                f"Last touch TCP · {planning_group} · {source} · "
+                f"World XYZ=({values[0]:.6f}, {values[1]:.6f}, "
+                f"{values[2]:.6f}) m · Q=({values[3]:.6f}, "
+                f"{values[4]:.6f}, {values[5]:.6f}, {values[6]:.6f})"
+            )
+        )
+        self.log(
+            f"TOUCH TCP CAPTURED · {planning_group} · "
+            f"World XYZ=({values[0]:.6f}, {values[1]:.6f}, "
+            f"{values[2]:.6f}) m"
+        )
+
+    def confirm_all_do_unlock(self):
+        if not self.unlock_all_do_ports.get():
+            return
+        if not messagebox.askyesno(
+            "Unlock all Rainbow DO ports",
+            "Unknown outputs may operate gas, inching, ARC, or another "
+            "actuator. Allow clicking every DO0..15 port?",
+        ):
+            self.unlock_all_do_ports.set(False)
+
+    def request_do_toggle(self, port):
+        if self.previous_control_box_io is None:
+            self.error("Rainbow control-box state is not available")
+            return
+        if port in self.pending_do_ports:
+            return
+        candidate = port in OBSERVED_H600_IO_CANDIDATES
+        if not candidate and not self.unlock_all_do_ports.get():
+            self.error(
+                f"DO{port} is locked · enable non-candidate DO clicking first"
+            )
+            return
+        current = bool(self.previous_control_box_io[1][port])
+        target = not current
+        if not messagebox.askyesno(
+            f"Toggle Rainbow DO{port}",
+            f"Command control-box DO{port}: "
+            f"{'ON' if current else 'OFF'} → {'ON' if target else 'OFF'}?\n\n"
+            "This is a physical output and may operate connected equipment.",
+        ):
+            return
+        self.pending_do_ports.add(port)
+        label = self.control_box_io_labels[("DO", port)]
+        label.configure(bg="#fdd663", text=f"{port:02d}\nWAIT")
+        self.log(
+            f"Rainbow DO{port} command requested · "
+            f"{'ON' if target else 'OFF'}"
+        )
+        threading.Thread(
+            target=self.node.set_digital_output,
+            args=(port, target),
+            daemon=True,
+        ).start()
+
+    def candidate_outputs_off(self):
+        if not messagebox.askyesno(
+            "Force candidate outputs OFF",
+            "Command DO4, DO8, DO9, DO10, DO12, and DO13 to OFF?",
+        ):
+            return
+        for port in sorted(OBSERVED_H600_IO_CANDIDATES):
+            self.pending_do_ports.add(port)
+            threading.Thread(
+                target=self.node.set_digital_output,
+                args=(port, False),
+                daemon=True,
+            ).start()
+        self.log("Rainbow candidate DO all-OFF requested")
+
+    def digital_output_result(self, port, success, message):
+        self.pending_do_ports.discard(port)
+        prefix = "OK" if success else "REJECTED"
+        self.log(f"Rainbow DO{port} {prefix} · {message}")
+        if not success and self.previous_control_box_io is not None:
+            value = self.previous_control_box_io[1][port]
+            self.control_box_io_labels[("DO", port)].configure(
+                text=f"{port:02d}\n{'ON' if value else 'OFF'}",
+                bg=(
+                    "#81c995"
+                    if value
+                    else (
+                        "#dbeafe"
+                        if port in OBSERVED_H600_IO_CANDIDATES
+                        else "#eeeeee"
+                    )
+                ),
+            )
+
     def begin(self, velocity_scale, execute_requested):
         self.bar["value"] = 0
+        self.last_action_phase = ""
         self.plan_button.configure(state=tk.DISABLED)
         self.execute_button.configure(state=tk.DISABLED)
         operation = (
             "EXECUTE exact approved plan"
             if execute_requested
-            else "PLAN PREVIEW for RViz + Viser"
+            else "PLAN PREVIEW for RViz"
         )
         self.log(
             f"{operation} · "
             f"speed={velocity_scale:.0%}"
         )
 
-    def progress(self, value, waypoint, pose):
+    def progress(self, value, waypoint, pose, phase):
         self.bar["value"] = value * 100
         position = pose.position
         self.feedback_label.configure(
             text=(
-                f"waypoint: {waypoint + 1} · progress: {value:.0%} · "
+                f"{phase or 'PATH'} · waypoint: {waypoint + 1} · "
+                f"progress: {value:.0%} · "
                 f"pose: ({position.x:.3f}, {position.y:.3f}, "
                 f"{position.z:.3f})"
             ),
         )
+        if phase and phase != self.last_action_phase:
+            self.last_action_phase = phase
+            self.log(f"Sequence phase · {phase}")
 
     def finish(self, text, was_execution):
         self.bar["value"] = 100
         self.plan_button.configure(
-            state=tk.NORMAL if self.points else tk.DISABLED
+            state=(
+                tk.NORMAL
+                if self.points and self._selected_robot_connected()
+                else tk.DISABLED
+            )
         )
         self.plan_approved = not was_execution
         self.execute_button.configure(
             state=(
                 tk.NORMAL
-                if self.plan_approved and self.execution_allowed
+                if (
+                    self.plan_approved
+                    and self.execution_allowed
+                    and self._selected_robot_connected()
+                )
                 else tk.DISABLED
             )
         )
         self.log(text)
         if self.plan_approved:
             self.log(
-                "Plan approved · inspect RViz/Viser, then press "
+                "Plan approved · inspect RViz, then press "
                 "Execute Approved Plan"
             )
 
@@ -1710,10 +2184,11 @@ class WeldActionGui:
         self.node.destroy_node()
 
     def check_ros(self):
+        self._drain_ui_queue()
         if not rclpy.ok():
             self.root.destroy()
             return
-        self.root.after(200, self.check_ros)
+        self.root.after(50, self.check_ros)
 
     def mainloop(self):
         self.root.mainloop()

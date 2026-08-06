@@ -8,14 +8,17 @@
   <license>Apache-2.0</license>
 
   <depend>construct_msgs</depend>
+  <depend>control_msgs</depend>
   <exec_depend>construct_description</exec_depend>
   <exec_depend>construct_moveit_config</exec_depend>
   <exec_depend>controller_manager</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
   <depend>geometry_msgs</depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>joint_trajectory_controller</exec_depend>
   <depend>moveit_msgs</depend>
   <exec_depend>rbpodo_hardware</exec_depend>
+  <depend>rbpodo_msgs</depend>
   <depend>rclpy</depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <depend>sensor_msgs</depend>

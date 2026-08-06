@@ -12,8 +12,6 @@ def generate_launch_description():
     right_robot_ip = LaunchConfiguration("right_robot_ip")
     use_fake_left_hardware = LaunchConfiguration("use_fake_left_hardware")
     use_fake_right_hardware = LaunchConfiguration("use_fake_right_hardware")
-    use_initial_left_positions = LaunchConfiguration("use_initial_left_positions")
-    use_initial_right_positions = LaunchConfiguration("use_initial_right_positions")
     fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
     cb_simulation = LaunchConfiguration("cb_simulation")
 
@@ -38,8 +36,6 @@ def generate_launch_description():
             " right_robot_ip:=", right_robot_ip,
             " use_fake_left_hardware:=", use_fake_left_hardware,
             " use_fake_right_hardware:=", use_fake_right_hardware,
-            " use_initial_left_positions:=", use_initial_left_positions,
-            " use_initial_right_positions:=", use_initial_right_positions,
             " fake_sensor_commands:=", fake_sensor_commands,
             " cb_simulation:=", cb_simulation,
         ])
@@ -56,10 +52,6 @@ def generate_launch_description():
             "use_fake_left_hardware", default_value="true"),
         DeclareLaunchArgument(
             "use_fake_right_hardware", default_value="true"),
-        DeclareLaunchArgument(
-            "use_initial_left_positions", default_value="true"),
-        DeclareLaunchArgument(
-            "use_initial_right_positions", default_value="true"),
         DeclareLaunchArgument(
             "fake_sensor_commands", default_value="false"),
         DeclareLaunchArgument(

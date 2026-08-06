@@ -40,7 +40,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/base_link_optimized.stl" />
+          filename="../meshes_0528/base_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -54,7 +54,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/base_link_optimized.stl" />
+          filename="../meshes_0528/base_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -80,7 +80,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_base_link_optimized.stl" />
+          filename="../meshes_0528/robot_base_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -94,7 +94,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_base_link_optimized.stl" />
+          filename="../meshes_0528/robot_base_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -133,7 +133,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_base_link_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_base_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -147,7 +147,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_base_link_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_base_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -155,8 +155,8 @@
     name="left_manipulator_base_joint"
     type="fixed">
     <origin
-      xyz="0.25 0 1.0002"
-      rpy="0 0 3.141592653589793" />
+      xyz="-0.25 0 1.0002"
+      rpy="0 0 0" />
     <parent
       link="robot_base_link" />
     <child
@@ -186,7 +186,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link1_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link1_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -200,7 +200,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link1_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link1_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -244,7 +244,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link2_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link2_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -258,7 +258,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link2_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link2_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -302,7 +302,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link3_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link3_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -316,7 +316,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link3_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link3_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -360,7 +360,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link4_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link4_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -374,7 +374,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link4_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link4_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -418,7 +418,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link5_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link5_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -432,7 +432,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link5_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link5_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -476,7 +476,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link6_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link6_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -490,7 +490,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link6_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link6_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -534,7 +534,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link_ee_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link_ee_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -548,7 +548,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_manipulator_link_ee_optimized.stl" />
+          filename="../meshes_0528/left_manipulator_link_ee_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -587,7 +587,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_D435_link_optimized.stl" />
+          filename="../meshes_0528/left_D435_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -601,7 +601,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/left_D435_link_optimized.stl" />
+          filename="../meshes_0528/left_D435_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -654,7 +654,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_base_link_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_base_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -668,7 +668,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_base_link_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_base_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -676,8 +676,8 @@
     name="right_manipulator_base_joint"
     type="fixed">
     <origin
-      xyz="-0.25 0 1.00019999999931"
-      rpy="0 0 3.141592653589793" />
+      xyz="0.24999999999997 0 1.00019999999931"
+      rpy="0 0 0" />
     <parent
       link="robot_base_link" />
     <child
@@ -707,7 +707,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link1_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link1_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -721,7 +721,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link1_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link1_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -765,7 +765,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link2_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link2_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -779,7 +779,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link2_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link2_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -823,7 +823,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link3_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link3_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -837,7 +837,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link3_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link3_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -881,7 +881,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link4_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link4_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -895,7 +895,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link4_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link4_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -939,7 +939,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link5_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link5_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -953,7 +953,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link5_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link5_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -997,7 +997,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link6_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link6_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1011,7 +1011,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link6_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link6_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1055,7 +1055,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link_ee_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link_ee_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1069,7 +1069,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_manipulator_link_ee_optimized.stl" />
+          filename="../meshes_0528/right_manipulator_link_ee_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1108,7 +1108,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_D435_link_optimized.stl" />
+          filename="../meshes_0528/right_D435_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1122,7 +1122,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/right_D435_link_optimized.stl" />
+          filename="../meshes_0528/right_D435_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1175,7 +1175,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_base_link_optimized.stl" />
+          filename="../meshes_0528/robot_head_base_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1189,7 +1189,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_base_link_optimized.stl" />
+          filename="../meshes_0528/robot_head_base_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1228,7 +1228,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_rev_link1_optimized.stl" />
+          filename="../meshes_0528/robot_head_rev_link1_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1242,7 +1242,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_rev_link1_optimized.stl" />
+          filename="../meshes_0528/robot_head_rev_link1_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1286,7 +1286,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_rev_link2_optimized.stl" />
+          filename="../meshes_0528/robot_head_rev_link2_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1300,7 +1300,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/robot_head_rev_link2_optimized.stl" />
+          filename="../meshes_0528/robot_head_rev_link2_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1344,7 +1344,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/helios_link_optimized.stl" />
+          filename="../meshes_0528/helios_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1358,7 +1358,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/helios_link_optimized.stl" />
+          filename="../meshes_0528/helios_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1397,7 +1397,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/zed_bracket_link_optimized.stl" />
+          filename="../meshes_0528/zed_bracket_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1411,7 +1411,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/zed_bracket_link_optimized.stl" />
+          filename="../meshes_0528/zed_bracket_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1450,7 +1450,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/zed2i_link_optimized.stl" />
+          filename="../meshes_0528/zed2i_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1464,7 +1464,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/zed2i_link_optimized.stl" />
+          filename="../meshes_0528/zed2i_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1503,7 +1503,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/controlbox_link_optimized.stl" />
+          filename="../meshes_0528/controlbox_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1517,7 +1517,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/controlbox_link_optimized.stl" />
+          filename="../meshes_0528/controlbox_link_optimized.stl" />
       </geometry>
     </collision>
   </link>
@@ -1556,7 +1556,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/testbed_link_optimized.stl" />
+          filename="../meshes_0528/testbed_link_optimized.stl" />
       </geometry>
       <material
         name="">
@@ -1570,7 +1570,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://construct_description/meshes_0528/testbed_link_optimized.stl" />
+          filename="../meshes_0528/testbed_link_optimized.stl" />
       </geometry>
     </collision>
   </link>

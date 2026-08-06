@@ -1,7 +1,7 @@
 # Circle 용접을 끊김 없이 만드는 수정 실습
 
-이 문서는 `ADD_VISER_HOME_COMMAND.md`와 같은 방식으로, 어느 파일의 어느
-함수 앞뒤에 무엇을 붙여 넣는지 순서대로 설명한다.
+이 문서는 어느 파일의 어느 함수 앞뒤에 무엇을 붙여 넣는지
+순서대로 설명한다.
 
 먼저 반드시 `src` 아래 파일을 수정한다. IDE에 열려 있는
 `ros2_ws/build/construct_robot/...` 파일은 빌드 생성물이므로 수정하지
@@ -336,7 +336,7 @@ ros2 launch construct_robot weld_action_gui.launch.py \
 
 1. `Generate circle`
 2. `1 · Plan Preview`
-3. RViz와 `http://localhost:8080` Viser에서 원과 관절 궤적 확인
+3. RViz에서 원과 관절 궤적 확인
 4. 속도 5–10% 설정
 5. 다시 `Plan Preview`
 6. `Execute Approved Plan`
@@ -349,7 +349,7 @@ ros2 launch construct_robot weld_action_gui.launch.py \
 보장하지는 않는다.
 
 생산용 원형 용접에서 정확한 원과 일정한 TCP 속도가 필요하면 다음
-단계는 Pilz `CIRC` motion sequence다. 수정 위치는 GUI나 Viser가 아니라
+단계는 Pilz `CIRC` motion sequence다. 수정 위치는 GUI나 시각화 계층이 아니라
 `cartesian_path_server.py`의 `plan_with_moveit()`이며,
 `GetCartesianPath` 요청을 circle mode에서 Pilz `CIRC` 요청으로
 분기해야 한다.

@@ -15,7 +15,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/CartesianPath.action"
   "msg/ModbusTrace.msg"
   "msg/WelderStatus.msg"
-  "srv/SetRobotConnection.srv"
+  "srv/GetModbusRegisters.srv"
+  "srv/SetModbusServer.srv"
   "srv/SetWelderCommand.srv"
   DEPENDENCIES geometry_msgs std_msgs
 )

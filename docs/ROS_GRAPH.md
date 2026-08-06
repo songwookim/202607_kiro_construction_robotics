@@ -19,7 +19,6 @@ flowchart LR
   RSP["robot_state_publisher"]
   TF["/tf, /tf_static"]
   RVIZ["RViz"]
-  VISER["Viser"]
 
   GUI -->|"/cartesian_path action"| AS
   AS -->|"/compute_cartesian_path service"| MG
@@ -34,9 +33,7 @@ flowchart LR
   RSP --> TF
   JS --> RVIZ
   TF --> RVIZ
-  JS --> VISER
   AS -->|"/weld_6d_poses<br/>/weld_path_markers<br/>/display_planned_path"| RVIZ
-  AS -->|"/weld_6d_poses<br/>/display_planned_path"| VISER
 ```
 
 The normal MoveIt execution path does **not** call RB Podo `move_j` or `move_l`
@@ -51,7 +48,6 @@ the control box using `move_servo_j`.
 | `/weld_action_gui` | `World → right_manipulator_ee_point` TF; `/cartesian_path` feedback/result | `/cartesian_path` goals; `/weld_path_markers`; `/weld_6d_poses` | Acquire/generate/edit a weld path and request right-arm planning |
 | `/laser_weld_path_action_client` | TF for live scenarios; `/cartesian_path` feedback/result | `/cartesian_path` goal | Command-line scenario client |
 | `/cartesian_path_action_server` | `/cartesian_path` goals; `/compute_cartesian_path` response; `/execute_trajectory` result | weld visualization topics; `/display_planned_path`; MoveIt service/action requests | Validate, visualize, plan, optionally execute |
-| `/kiro_viser_debug_viewer` | `/joint_states`; `/weld_6d_poses`; `/display_planned_path` | Browser websocket/HTTP only | Browser robot/path debugging |
 | `/h600_modbus_bridge` | H600 Modbus FC03/06/16; `/h600/set_command` | `/h600/status`; Modbus responses | Safe H600 command register and feedback bridge |
 | `/h600_modbus_gui` | `/h600/status`; `/h600/traffic`; operator command form | `/h600/set_command` requests | Register dashboard and packet inspector |
 | `/robot_state_publisher` | `/joint_states`, `robot_description` | `/tf`, `/tf_static` | Joint state to link-frame transforms |
@@ -91,25 +87,22 @@ those generated endpoint names directly.
 
 | Topic | Type | Publisher | Consumers |
 |---|---|---|---|
-| `/joint_states` | `sensor_msgs/JointState` | `joint_state_broadcaster` | MoveIt, robot_state_publisher, RViz, Viser |
+| `/joint_states` | `sensor_msgs/JointState` | `joint_state_broadcaster` | MoveIt, robot_state_publisher, RViz |
+| `/right_rbpodo_hardware/system_state` | `rbpodo_msgs/SystemState` | Right RB hardware node | Weld GUI control-box DI/DO monitor |
+| `/left_rbpodo_hardware/system_state` | `rbpodo_msgs/SystemState` | Left RB hardware node | GUI REAL-connection confirmation and touch input |
 | `/tf` | `tf2_msgs/TFMessage` | robot_state_publisher and static publishers | RViz, GUI TF buffer |
 | `/weld_path_markers` | `visualization_msgs/MarkerArray` | GUI and action server | RViz |
-| `/weld_6d_poses` | `geometry_msgs/PoseArray` | GUI and action server | RViz and Viser |
-| `/display_planned_path` | `moveit_msgs/DisplayTrajectory` | action server, MoveIt/Tesseract demos | RViz and Viser |
+| `/weld_6d_poses` | `geometry_msgs/PoseArray` | GUI and action server | RViz |
+| `/display_planned_path` | `moveit_msgs/DisplayTrajectory` | action server, MoveIt/Tesseract demos | RViz |
 | `/monitored_planning_scene` | `moveit_msgs/PlanningScene` | move_group | RViz MotionPlanning display |
 | `/h600/status` | `construct_msgs/WelderStatus` | H600 bridge | GUI and diagnostic tools |
 | `/h600/traffic` | `construct_msgs/ModbusTrace` | H600 bridge | Wireshark-style H600 GUI |
+| `/h600/set_server` | `construct_msgs/SetModbusServer` | H600 GUI/CLI | Start/stop the fixed TCP/502 listener and select bind host |
+| `/h600/get_registers` | `construct_msgs/GetModbusRegisters` | H600 GUI/CLI | Snapshot up to 1000 holding registers |
 
-RViz and Viser are synchronized exactly when both display **live state**:
-both consume `/joint_states` and use `World`. An RViz MotionPlanning gizmo is
-a local goal-state interactive marker; it is not robot state and is therefore
-not mirrored to Viser. For plan preview, Viser automatically selects and plays
-new `/display_planned_path` messages. Select `Live joint states` in Viser to
-compare actual/fake-controller state with RViz.
-
-The two viewers have independent cameras and animation clocks. Equal camera
-position or frame-perfect preview animation is not a ROS synchronization
-contract.
+RViz displays live state from `/joint_states` in the `World` frame. Its
+MotionPlanning gizmo is a local goal-state interactive marker, while plan
+previews arrive separately on `/display_planned_path`.
 
 ## MoveIt and controller interfaces
 
@@ -138,8 +131,8 @@ ros2 control list_hardware_interfaces
 
 ## RB hardware layer
 
-With `use_fake_right_hardware:=false`, the right ros2_control system loads
-`rbpodo_hardware/RBPodoHardwareInterface` with:
+The normal GUI launch loads `rbpodo_hardware/RBPodoHardwareInterface` for
+both arms. The right system uses:
 
 ```text
 hardware_namespace = right
@@ -158,12 +151,18 @@ The left robot uses the equivalent `/left_rbpodo_hardware/*` names.
 
 ## Commands for self-debugging
 
-Start a safe fake-hardware stack:
+Start the normal physical dual-arm stack:
 
 ```bash
 source /home/irs/ros2_ws/install/setup.bash
-ros2 launch construct_robot viser_debug.launch.py
+ros2 launch construct_robot weld_action_gui.launch.py \
+  execute_motion:=false use_h600_bridge:=false use_h600_gui:=false
 ```
+
+This still connects both physical RB controllers. `execute_motion:=false`
+prevents MoveIt trajectory execution but is not a fake-hardware mode and the
+driver can still perform connection-time configuration. Use only with the
+robot workcell in a safe state.
 
 Inspect the runtime graph:
 
@@ -205,10 +204,6 @@ ros2 control list_hardware_interfaces
 
 For actual hardware, verify the controller list, TCP reachability, operation
 mode, and a low velocity scale before enabling `execute_motion:=true`.
-
-Viser renders two robot instances. The solid robot follows the selected source
-(live, planned trajectory, or manual joints); the cyan transparent robot always
-follows the latest physical/fake `/joint_states`.
 
 ## H600 Modbus/ARC
 

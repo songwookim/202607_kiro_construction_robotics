@@ -1,0 +1,18 @@
+# Plan-only mode exposes no physical-arm controller.  The launch file also
+# sets allow_trajectory_execution=false and does not activate either arm
+# trajectory controller.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  # ROS 2 Humble cannot encode an empty string-array parameter through launch.
+  # Keep only the virtual head here so no physical-arm action client is made.
+  controller_names:
+    - robot_head_controller
+
+  robot_head_controller:
+    type: FollowJointTrajectory
+    joints:
+      - robot_head_rev_joint1
+      - robot_head_rev_joint2
+    action_ns: follow_joint_trajectory
+    default: false

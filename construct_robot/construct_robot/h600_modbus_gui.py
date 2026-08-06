@@ -3,14 +3,27 @@ import signal
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 from construct_msgs.msg import ModbusTrace, WelderStatus
-from construct_msgs.srv import SetWelderCommand
+from construct_msgs.srv import (
+    GetModbusRegisters,
+    SetModbusServer,
+    SetWelderCommand,
+)
+
+
+H600_PORT = 502
+TRACE_QOS = QoSProfile(
+    depth=200,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
 
 
 class H600GuiNode(Node):
@@ -23,6 +36,14 @@ class H600GuiNode(Node):
             SetWelderCommand,
             "/h600/set_command",
         )
+        self.server_client = self.create_client(
+            SetModbusServer,
+            "/h600/set_server",
+        )
+        self.register_client = self.create_client(
+            GetModbusRegisters,
+            "/h600/get_registers",
+        )
         self.create_subscription(
             WelderStatus,
             "/h600/status",
@@ -33,7 +54,7 @@ class H600GuiNode(Node):
             ModbusTrace,
             "/h600/traffic",
             self._trace,
-            100,
+            TRACE_QOS,
         )
 
     def _status(self, message):
@@ -53,7 +74,11 @@ class H600GuiNode(Node):
         request = SetWelderCommand.Request()
         (
             request.robot_ready,
+            request.robot_error,
+            request.touch,
             request.gas,
+            request.reverse_inching,
+            request.inching,
             request.arc,
             request.allow_nonzero_setpoints,
             request.current_raw,
@@ -62,6 +87,49 @@ class H600GuiNode(Node):
         ) = values
         future = self.command_client.call_async(request)
         future.add_done_callback(self._command_result)
+
+    def set_server(self, start, host, port):
+        if not self.server_client.wait_for_service(timeout_sec=2.0):
+            self.ui.post(self.ui.set_server_result, False, "/h600/set_server unavailable")
+            return
+        request = SetModbusServer.Request()
+        request.start = start
+        request.host = host
+        request.port = port
+        future = self.server_client.call_async(request)
+        future.add_done_callback(self._server_result)
+
+    def _server_result(self, future):
+        try:
+            response = future.result()
+            self.ui.post(self.ui.set_server_result, response.success, response.message)
+        except Exception as error:
+            self.ui.post(self.ui.set_server_result, False, str(error))
+
+    def get_registers(self, start, count):
+        if not self.register_client.wait_for_service(timeout_sec=1.0):
+            self.ui.post(self.ui.set_register_result, False, "/h600/get_registers unavailable")
+            return
+        request = GetModbusRegisters.Request()
+        request.start_address = start
+        request.count = count
+        future = self.register_client.call_async(request)
+        future.add_done_callback(
+            lambda result: self._register_result(result, start)
+        )
+
+    def _register_result(self, future, start):
+        try:
+            response = future.result()
+            self.ui.post(
+                self.ui.update_registers,
+                response.success,
+                response.message,
+                start,
+                list(response.values),
+            )
+        except Exception as error:
+            self.ui.post(self.ui.set_register_result, False, str(error))
 
     def _command_result(self, future):
         try:
@@ -93,19 +161,30 @@ class H600ModbusGui:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("H600 Modbus TCP Diagnostic Console")
-        self.root.geometry("1260x820")
+        self.root.geometry("1260x900")
         self._closing = False
         self.trace_rows = []
         self.trace_raw = {}
         self.paused = tk.BooleanVar(value=False)
         self.auto_scroll = tk.BooleanVar(value=True)
         self.robot_ready = tk.BooleanVar(value=False)
+        self.robot_error = tk.BooleanVar(value=False)
+        self.touch = tk.BooleanVar(value=False)
         self.gas = tk.BooleanVar(value=False)
+        self.reverse_inching = tk.BooleanVar(value=False)
+        self.inching = tk.BooleanVar(value=False)
         self.arc = tk.BooleanVar(value=False)
         self.nonzero_unlock = tk.BooleanVar(value=False)
         self.current_raw = tk.IntVar(value=0)
         self.voltage_raw = tk.IntVar(value=0)
         self.v_offset_raw = tk.IntVar(value=0)
+        self.bind_host = tk.StringVar(value="0.0.0.0")
+        self.register_start = tk.IntVar(value=201)
+        self.register_end = tk.IntVar(value=216)
+        self.register_nonzero = tk.BooleanVar(value=False)
+        self.register_auto = tk.BooleanVar(value=True)
+        self.previous_registers = {}
+        self._server_fields_synced = False
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -127,7 +206,30 @@ class H600ModbusGui:
             ),
         ).pack(anchor=tk.W, pady=(2, 10))
 
-        connection = ttk.LabelFrame(outer, text="Connection / feedback")
+        server = ttk.LabelFrame(outer, text="Modbus TCP server")
+        server.pack(fill=tk.X)
+        ttk.Label(server, text="Bind host").grid(row=0, column=0, padx=(8, 3), pady=7)
+        ttk.Entry(server, textvariable=self.bind_host, width=16).grid(row=0, column=1, padx=3)
+        ttk.Label(server, text="Port").grid(row=0, column=2, padx=(12, 3))
+        ttk.Label(
+            server,
+            text="502 (fixed)",
+            font=("Monospace", 10, "bold"),
+        ).grid(row=0, column=3, padx=3)
+        ttk.Button(
+            server,
+            text="Start listening",
+            command=lambda: self.control_server(True),
+        ).grid(row=0, column=4, padx=(12, 3))
+        ttk.Button(
+            server,
+            text="Stop listening",
+            command=lambda: self.control_server(False),
+        ).grid(row=0, column=5, padx=3)
+        self.server_result = ttk.Label(server, text="Waiting for bridge status")
+        self.server_result.grid(row=0, column=6, padx=12, sticky=tk.W)
+
+        connection = ttk.LabelFrame(outer, text="H600 connection / feedback")
         connection.pack(fill=tk.X)
         self.connection_label = ttk.Label(
             connection,
@@ -144,9 +246,12 @@ class H600ModbusGui:
         self.status_fields = {}
         labels = (
             ("201 Ready", "ready"),
+            ("202 Command raw", "control_raw"),
             ("202 Gas", "gas"),
             ("202 ARC", "arc"),
             ("211 Status raw", "status"),
+            ("211 Heartbeat", "heartbeat"),
+            ("211 Info bits1..0", "info"),
             ("211 Error bit7", "error"),
             ("211 Welding bit5", "welding"),
             ("211 Touch bit4", "touch"),
@@ -170,28 +275,39 @@ class H600ModbusGui:
             self.status_fields[key] = value
             connection.columnconfigure(column, weight=1)
 
-        command = ttk.LabelFrame(outer, text="Command register image")
+        command = ttk.LabelFrame(outer, text="Command registers 201..210")
         command.pack(fill=tk.X, pady=(10, 0))
         ttk.Checkbutton(
             command,
             text="201 robot ready",
             variable=self.robot_ready,
+            command=self.send,
         ).grid(row=0, column=0, padx=8, pady=8, sticky=tk.W)
-        ttk.Checkbutton(
-            command,
-            text="202 bit3 gas",
-            variable=self.gas,
-        ).grid(row=0, column=1, padx=8, pady=8, sticky=tk.W)
-        ttk.Checkbutton(
-            command,
-            text="202 bit0 ARC",
-            variable=self.arc,
-        ).grid(row=0, column=2, padx=8, pady=8, sticky=tk.W)
+        controls = (
+            ("202 b7 robot error", self.robot_error),
+            ("202 b4 touch", self.touch),
+            ("202 b3 gas", self.gas),
+            ("202 b2 reverse inch", self.reverse_inching),
+            ("202 b1 inch", self.inching),
+            ("202 b0 ARC", self.arc),
+        )
+        for index, (text, variable) in enumerate(controls, start=1):
+            name = "reverse" if variable is self.reverse_inching else (
+                "forward" if variable is self.inching else "other"
+            )
+            ttk.Checkbutton(
+                command,
+                text=text,
+                variable=variable,
+                command=lambda selected=name: self.control_toggled(selected),
+            ).grid(
+                row=0, column=index, padx=5, pady=8, sticky=tk.W
+            )
         ttk.Checkbutton(
             command,
             text="I understand nonzero setpoints",
             variable=self.nonzero_unlock,
-        ).grid(row=0, column=3, padx=8, pady=8, sticky=tk.W)
+        ).grid(row=1, column=3, columnspan=2, padx=8, pady=8, sticky=tk.W)
 
         for column, (label, variable, address) in enumerate(
             (
@@ -214,7 +330,7 @@ class H600ModbusGui:
             ).pack(anchor=tk.W)
 
         buttons = ttk.Frame(command)
-        buttons.grid(row=1, column=3, padx=8, pady=4, sticky=tk.W)
+        buttons.grid(row=1, column=5, columnspan=2, padx=8, pady=4, sticky=tk.W)
         ttk.Button(
             buttons,
             text="Send register image",
@@ -232,11 +348,68 @@ class H600ModbusGui:
         self.command_result.grid(
             row=2,
             column=0,
-            columnspan=4,
+            columnspan=7,
             padx=8,
             pady=(3, 8),
             sticky=tk.W,
         )
+
+        register_header = ttk.Frame(outer)
+        register_header.pack(fill=tk.X, pady=(10, 3))
+        ttk.Label(
+            register_header,
+            text="Holding register monitor",
+            style="Section.TLabel",
+        ).pack(side=tk.LEFT)
+        ttk.Label(register_header, text="Start").pack(side=tk.LEFT, padx=(18, 3))
+        ttk.Spinbox(
+            register_header, from_=0, to=65535,
+            textvariable=self.register_start, width=7,
+        ).pack(side=tk.LEFT)
+        ttk.Label(register_header, text="End").pack(side=tk.LEFT, padx=(8, 3))
+        ttk.Spinbox(
+            register_header, from_=0, to=65535,
+            textvariable=self.register_end, width=7,
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            register_header,
+            text="Refresh",
+            command=self.refresh_registers,
+        ).pack(side=tk.LEFT, padx=8)
+        ttk.Checkbutton(
+            register_header,
+            text="Auto",
+            variable=self.register_auto,
+        ).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            register_header,
+            text="Nonzero only",
+            variable=self.register_nonzero,
+            command=self.refresh_registers,
+        ).pack(side=tk.LEFT, padx=6)
+        self.register_result = ttk.Label(register_header, text="201..216")
+        self.register_result.pack(side=tk.RIGHT)
+
+        register_frame = ttk.Frame(outer)
+        register_frame.pack(fill=tk.X)
+        self.register_table = ttk.Treeview(
+            register_frame,
+            columns=("address", "decimal", "hex", "meaning"),
+            show="headings",
+            height=5,
+        )
+        for name, width in (("address", 90), ("decimal", 100), ("hex", 100), ("meaning", 650)):
+            self.register_table.heading(name, text=name.upper())
+            self.register_table.column(name, width=width, anchor=tk.W)
+        self.register_table.tag_configure("changed", background="#fff2a8")
+        register_scroll = ttk.Scrollbar(
+            register_frame,
+            orient=tk.VERTICAL,
+            command=self.register_table.yview,
+        )
+        self.register_table.configure(yscrollcommand=register_scroll.set)
+        self.register_table.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        register_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         trace_header = ttk.Frame(outer)
         trace_header.pack(fill=tk.X, pady=(12, 5))
@@ -318,6 +491,7 @@ class H600ModbusGui:
         )
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(200, self.check_ros)
+        self.root.after(500, self.auto_refresh_registers)
 
     def post(self, callback, *args):
         self.root.after(0, callback, *args)
@@ -327,16 +501,37 @@ class H600ModbusGui:
         return "ON" if value else "OFF"
 
     def update_status(self, message):
+        server_state = "LISTENING" if message.server_running else "STOPPED"
+        bind = message.bind_address or "not bound"
+        if message.server_running and not self._server_fields_synced:
+            try:
+                host, port = message.bind_address.rsplit(":", 1)
+                self.bind_host.set(host)
+                if int(port) != H600_PORT:
+                    raise ValueError("Unexpected H600 port")
+                self._server_fields_synced = True
+            except (ValueError, tk.TclError):
+                pass
+        self.server_result.configure(
+            text=f"{server_state} · {bind}",
+            foreground="#137333" if message.server_running else "#b3261e",
+        )
         state = "CONNECTED" if message.client_connected else "DISCONNECTED"
         address = message.client_address or "no Modbus client"
         self.connection_label.configure(text=f"{state} · {address}")
         values = {
             "ready": self._bool_text(message.robot_ready),
+            "control_raw": (
+                f"{self.control_word(message)} / "
+                f"0x{self.control_word(message):04X}"
+            ),
             "gas": self._bool_text(message.gas),
             "arc": self._bool_text(message.arc),
             "status": (
                 f"{message.status_raw} / 0x{message.status_raw:04X}"
             ),
+            "heartbeat": str(message.heartbeat),
+            "info": str(message.welder_info),
             "error": self._bool_text(message.welder_error),
             "welding": self._bool_text(message.welding),
             "touch": self._bool_text(message.touch_detect),
@@ -345,6 +540,17 @@ class H600ModbusGui:
         }
         for key, value in values.items():
             self.status_fields[key].configure(text=value)
+
+    @staticmethod
+    def control_word(message):
+        return (
+            (int(message.command_robot_error) << 7)
+            | (int(message.command_touch) << 4)
+            | (int(message.gas) << 3)
+            | (int(message.reverse_inching) << 2)
+            | (int(message.inching) << 1)
+            | int(message.arc)
+        )
 
     def command_values(self):
         try:
@@ -359,16 +565,28 @@ class H600ModbusGui:
             raise ValueError("Raw setpoints must be in 0..65535")
         return (
             bool(self.robot_ready.get()),
+            bool(self.robot_error.get()),
+            bool(self.touch.get()),
             bool(self.gas.get()),
+            bool(self.reverse_inching.get()),
+            bool(self.inching.get()),
             bool(self.arc.get()),
             bool(self.nonzero_unlock.get()),
         ) + raw_values
 
-    def send(self):
+    def send(self, confirm_arc=True):
         try:
             values = self.command_values()
         except ValueError as error:
             self.set_result(False, str(error))
+            return
+        if confirm_arc and values[6] and not messagebox.askyesno(
+            "Confirm ARC output",
+            "ARC command is ON. Send this command to the H600 register image?",
+        ):
+            self.arc.set(False)
+            self.set_result(False, "ARC command cancelled; forcing ARC OFF")
+            self.send(confirm_arc=False)
             return
         self.command_result.configure(text="Sending…")
         threading.Thread(
@@ -377,15 +595,110 @@ class H600ModbusGui:
             daemon=True,
         ).start()
 
+    def control_toggled(self, selected):
+        # Forward and reverse wire feed must never be commanded together.
+        if selected == "reverse" and self.reverse_inching.get():
+            self.inching.set(False)
+        elif selected == "forward" and self.inching.get():
+            self.reverse_inching.set(False)
+        self.send()
+
     def force_off(self):
         self.robot_ready.set(False)
+        self.robot_error.set(False)
+        self.touch.set(False)
         self.gas.set(False)
+        self.reverse_inching.set(False)
+        self.inching.set(False)
         self.arc.set(False)
         self.current_raw.set(0)
         self.voltage_raw.set(0)
         self.v_offset_raw.set(0)
         self.nonzero_unlock.set(False)
         self.send()
+
+    def control_server(self, start):
+        host = self.bind_host.get().strip() or "0.0.0.0"
+        self.server_result.configure(text="Starting…" if start else "Stopping…")
+        threading.Thread(
+            target=self.node.set_server,
+            args=(start, host, H600_PORT),
+            daemon=True,
+        ).start()
+
+    def set_server_result(self, success, message):
+        self.server_result.configure(
+            text=message,
+            foreground="#137333" if success else "#b3261e",
+        )
+
+    @staticmethod
+    def register_meaning(address):
+        meanings = {
+            201: "Command: robot ready (bit0)",
+            202: "Command: error/touch/gas/reverse inch/inch/ARC (b7/b4/b3/b2/b1/b0)",
+            204: "Command: weld current setpoint",
+            205: "Command: weld voltage setpoint",
+            206: "Command: voltage offset",
+            211: "Status: heartbeat/error/welding/touch/info",
+            212: "Status: weld current feedback",
+            213: "Status: weld voltage feedback",
+            216: "Status: single candidate",
+        }
+        return meanings.get(address, "Holding register")
+
+    def refresh_registers(self):
+        try:
+            start = int(self.register_start.get())
+            end = int(self.register_end.get())
+        except (ValueError, tk.TclError):
+            self.set_register_result(False, "Addresses must be integers")
+            return
+        count = end - start + 1
+        if start < 0 or end > 65535 or count < 1 or count > 1000:
+            self.set_register_result(False, "Select 1..1000 registers in 0..65535")
+            return
+        threading.Thread(
+            target=self.node.get_registers,
+            args=(start, count),
+            daemon=True,
+        ).start()
+
+    def auto_refresh_registers(self):
+        if not self._closing and self.register_auto.get():
+            self.refresh_registers()
+        if not self._closing:
+            self.root.after(500, self.auto_refresh_registers)
+
+    def update_registers(self, success, message, start, values):
+        if not success:
+            self.set_register_result(False, message)
+            return
+        self.register_table.delete(*self.register_table.get_children())
+        nonzero_only = self.register_nonzero.get()
+        changed_count = 0
+        for offset, value in enumerate(values):
+            address = start + offset
+            old = self.previous_registers.get(address)
+            changed = old is not None and old != value
+            self.previous_registers[address] = value
+            if nonzero_only and value == 0:
+                continue
+            if changed:
+                changed_count += 1
+            self.register_table.insert(
+                "",
+                tk.END,
+                values=(address, value, f"0x{value:04X}", self.register_meaning(address)),
+                tags=("changed",) if changed else (),
+            )
+        self.register_result.configure(text=f"{message} · {changed_count} changed")
+
+    def set_register_result(self, success, message):
+        self.register_result.configure(
+            text=message,
+            foreground="#137333" if success else "#b3261e",
+        )
 
     def set_result(self, success, message):
         prefix = "OK" if success else "REJECTED"

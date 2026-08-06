@@ -33,6 +33,11 @@
              compound planning group and create one RViz gizmo per arm. -->
         <group name="left_manipulator"/>
         <group name="right_manipulator"/>
+    </group>
+    <group name="whole_robot">
+        <!-- Keep the head independently controllable.  The RViz dual-arm
+             group must contain exactly the twelve physical arm joints. -->
+        <group name="dual_arm"/>
         <group name="robot_head"/>
     </group>
     <end_effector name="left_end_effector"
@@ -102,12 +107,12 @@
     <disable_collisions link1="left_D435_link" link2="robot_head_base_link" reason="Never"/>
     <disable_collisions link1="left_D435_link" link2="robot_head_rev_link2" reason="Never"/>
     <disable_collisions link1="left_D435_link" link2="zed_bracket_link" reason="Never"/>
+    <!-- Keep each arm's internal ACM aligned with rbpodo_moveit_config.
+         Disabling additional non-adjacent pairs lets MoveIt generate paths
+         that the RB controller rejects with "self collision..!". -->
     <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link1" reason="Adjacent"/>
     <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link2" reason="Never"/>
     <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link3" reason="Never"/>
-    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="left_manipulator_base_link" link2="left_manipulator_link6" reason="Never"/>
     <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_base_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_link1" reason="Never"/>
     <disable_collisions link1="left_manipulator_base_link" link2="right_manipulator_link3" reason="Never"/>
@@ -120,9 +125,6 @@
     <disable_collisions link1="left_manipulator_base_link" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link2" reason="Adjacent"/>
     <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link3" reason="Never"/>
-    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link6" reason="Never"/>
     <disable_collisions link1="left_manipulator_link1" link2="left_manipulator_link_ee" reason="Never"/>
     <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_base_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_link1" link2="right_manipulator_link1" reason="Never"/>
@@ -135,9 +137,6 @@
     <disable_collisions link1="left_manipulator_link1" link2="zed2i_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_link1" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link3" reason="Adjacent"/>
-    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link6" reason="Never"/>
     <disable_collisions link1="left_manipulator_link2" link2="left_manipulator_link_ee" reason="Never"/>
     <disable_collisions link1="left_manipulator_link2" link2="testbed_link" reason="Never"/>
     <disable_collisions link1="left_manipulator_link3" link2="left_manipulator_link4" reason="Adjacent"/>
@@ -174,12 +173,10 @@
     <disable_collisions link1="right_D435_link" link2="right_manipulator_link6" reason="Never"/>
     <disable_collisions link1="right_D435_link" link2="right_manipulator_link_ee" reason="Adjacent"/>
     <disable_collisions link1="right_D435_link" link2="robot_head_rev_link2" reason="Never"/>
+    <!-- Same Rainbow internal self-collision matrix for the right arm. -->
     <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link1" reason="Adjacent"/>
     <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link2" reason="Never"/>
     <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link3" reason="Never"/>
-    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="right_manipulator_base_link" link2="right_manipulator_link6" reason="Never"/>
     <disable_collisions link1="right_manipulator_base_link" link2="robot_base_link" reason="Adjacent"/>
     <disable_collisions link1="right_manipulator_base_link" link2="robot_head_base_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_base_link" link2="robot_head_rev_link1" reason="Never"/>
@@ -189,9 +186,6 @@
     <disable_collisions link1="right_manipulator_base_link" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link2" reason="Adjacent"/>
     <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link3" reason="Never"/>
-    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="right_manipulator_link1" link2="right_manipulator_link6" reason="Never"/>
     <disable_collisions link1="right_manipulator_link1" link2="robot_base_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link1" link2="robot_head_base_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link1" link2="robot_head_rev_link1" reason="Never"/>
@@ -200,9 +194,6 @@
     <disable_collisions link1="right_manipulator_link1" link2="zed2i_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link1" link2="zed_bracket_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link3" reason="Adjacent"/>
-    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link4" reason="Never"/>
-    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link5" reason="Never"/>
-    <disable_collisions link1="right_manipulator_link2" link2="right_manipulator_link6" reason="Never"/>
     <disable_collisions link1="right_manipulator_link2" link2="testbed_link" reason="Never"/>
     <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link4" reason="Adjacent"/>
     <disable_collisions link1="right_manipulator_link3" link2="right_manipulator_link5" reason="Never"/>

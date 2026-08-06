@@ -6,7 +6,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Point, Pose, PoseArray
 from moveit_msgs.action import ExecuteTrajectory
-from moveit_msgs.msg import DisplayTrajectory
+from moveit_msgs.msg import DisplayTrajectory, RobotState
 from moveit_msgs.srv import GetCartesianPath
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -16,6 +16,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
+from construct_msgs.msg import WelderStatus
 from construct_msgs.srv import SetWelderCommand
 from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
@@ -191,12 +192,15 @@ class CartesianPathActionServer(Node):
     def __init__(self) -> None:
         super().__init__("cartesian_path_action_server")
         self.declare_parameter("use_moveit", False)
-        self.declare_parameter("execute_motion", False)
+        self.declare_parameter("execute_motion", True)
         self.declare_parameter("planning_frame", "World")
         self.declare_parameter("use_h600_modbus", False)
         self._approved_plan_lock = threading.Lock()
         self._approved_plan_signature = None
         self._approved_plan_response = None
+        self._welder_condition = threading.Condition()
+        self._welder_status = None
+        self._welder_status_at = None
         callback_group = ReentrantCallbackGroup()
         marker_qos = QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL
@@ -224,6 +228,13 @@ class CartesianPathActionServer(Node):
         self._welder_client = self.create_client(
             SetWelderCommand,
             "/h600/set_command",
+            callback_group=callback_group,
+        )
+        self.create_subscription(
+            WelderStatus,
+            "/h600/status",
+            self._welder_status_callback,
+            10,
             callback_group=callback_group,
         )
         self._server = ActionServer(
@@ -265,15 +276,26 @@ class CartesianPathActionServer(Node):
             time.sleep(FUTURE_POLL_PERIOD)
         return future.result()
 
-    def plan_with_moveit(self, request):
+    def plan_with_moveit(
+        self,
+        request,
+        waypoints=None,
+        start_state=None,
+        publish=True,
+    ):
         if not self._cartesian_client.wait_for_service(timeout_sec=5.0):
             raise RuntimeError("/compute_cartesian_path service unavailable")
         cartesian = GetCartesianPath.Request()
         cartesian.header.frame_id = self.get_parameter("planning_frame").value
-        cartesian.start_state.is_diff = True
+        if start_state is None:
+            cartesian.start_state.is_diff = True
+        else:
+            cartesian.start_state = copy.deepcopy(start_state)
         cartesian.group_name = request.planning_group
         cartesian.link_name = tip_link_for_group(request.planning_group)
-        cartesian.waypoints = request.waypoints
+        cartesian.waypoints = (
+            request.waypoints if waypoints is None else waypoints
+        )
         cartesian.max_step = request.interpolation_step
         cartesian.jump_threshold = 0.0
         cartesian.avoid_collisions = True
@@ -286,17 +308,59 @@ class CartesianPathActionServer(Node):
             raise RuntimeError("MoveIt Cartesian service returned no response")
         scale_trajectory_speed(response.solution, request.velocity_scale)
 
-        display = DisplayTrajectory()
-        display.model_id = "construct_robot_0528"
-        display.trajectory_start = response.start_state
-        display.trajectory.append(response.solution)
-        self._display_publisher.publish(display)
+        if publish:
+            self.publish_trajectories(
+                response.start_state,
+                [response.solution],
+            )
         self.get_logger().info(
             f"MoveIt path fraction={response.fraction:.3f}, "
             f"points={len(response.solution.joint_trajectory.points)}, "
             f"velocity_scale={request.velocity_scale:.2f}"
         )
         return response
+
+    def publish_trajectories(self, start_state, trajectories):
+        display = DisplayTrajectory()
+        display.model_id = "construct_robot_0528"
+        display.trajectory_start = copy.deepcopy(start_state)
+        display.trajectory.extend(copy.deepcopy(trajectories))
+        self._display_publisher.publish(display)
+
+    @staticmethod
+    def trajectory_end_state(response):
+        trajectory = response.solution.joint_trajectory
+        if not trajectory.points:
+            raise RuntimeError("Approach trajectory contains no points")
+        state = RobotState()
+        state.is_diff = True
+        state.joint_state.name = list(trajectory.joint_names)
+        state.joint_state.position = list(trajectory.points[-1].positions)
+        return state
+
+    def plan_weld_sequence(self, request):
+        if len(request.waypoints) < 2:
+            raise RuntimeError("A weld sequence requires TCP1 and TCP2")
+        approach = self.plan_with_moveit(
+            request,
+            waypoints=[request.waypoints[0]],
+            publish=False,
+        )
+        if approach.fraction < 0.999:
+            raise RuntimeError(
+                f"TCP1 approach planned only {approach.fraction:.1%}"
+            )
+        seam = self.plan_with_moveit(
+            request,
+            waypoints=request.waypoints[1:],
+            start_state=self.trajectory_end_state(approach),
+            publish=False,
+        )
+        self.publish_trajectories(
+            approach.start_state,
+            [approach.solution, seam.solution],
+        )
+        return approach, seam
 
     @staticmethod
     def plan_signature(request):
@@ -318,6 +382,7 @@ class CartesianPathActionServer(Node):
             request.planning_group,
             request.interpolation_step,
             request.velocity_scale,
+            request.enable_arc,
             tuple(pose_values),
         )
 
@@ -344,30 +409,113 @@ class CartesianPathActionServer(Node):
             self._approved_plan_signature = None
             self._approved_plan_response = None
 
-    def set_welder(self, request, enabled):
-        """Set safe H600 command state around trajectory execution."""
+    def _welder_status_callback(self, message):
+        with self._welder_condition:
+            self._welder_status = message
+            self._welder_status_at = time.monotonic()
+            self._welder_condition.notify_all()
+
+    def require_h600_connection(self):
+        with self._welder_condition:
+            fresh = (
+                self._welder_status_at is not None
+                and time.monotonic() - self._welder_status_at < 1.0
+            )
+            connected = (
+                fresh
+                and self._welder_status.server_running
+                and self._welder_status.client_connected
+            )
+            address = (
+                self._welder_status.client_address if connected else ""
+            )
+        if not connected:
+            raise RuntimeError(
+                "H600 is not connected on TCP/502; welding motion blocked"
+            )
+        return address
+
+    def wait_for_welding_feedback(self, expected, timeout=5.0):
+        deadline = time.monotonic() + timeout
+        with self._welder_condition:
+            while time.monotonic() < deadline:
+                if (
+                    self._welder_status is not None
+                    and self._welder_status.client_connected
+                    and self._welder_status.welding == expected
+                ):
+                    return
+                self._welder_condition.wait(
+                    timeout=min(0.1, max(0.0, deadline - time.monotonic()))
+                )
+        state = "ON" if expected else "OFF"
+        raise RuntimeError(f"H600 welding feedback did not become {state}")
+
+    def set_welder(self, request, ready, gas, arc, setpoints):
+        """Write one safe H600 command phase and wait for bridge acceptance."""
         if not self.get_parameter("use_h600_modbus").value:
             raise RuntimeError("ARC requested but use_h600_modbus is false")
         if not self._welder_client.wait_for_service(timeout_sec=3.0):
             raise RuntimeError("/h600/set_command service unavailable")
         command = SetWelderCommand.Request()
-        command.robot_ready = enabled
-        command.gas = enabled
-        command.arc = enabled
-        command.allow_nonzero_setpoints = enabled
-        if enabled:
+        command.robot_ready = ready
+        command.gas = gas
+        command.arc = arc
+        command.allow_nonzero_setpoints = setpoints
+        if setpoints:
             command.current_raw = request.weld_current_raw
             command.voltage_raw = request.weld_voltage_raw
             command.v_offset_raw = request.weld_v_offset_raw
         response = self._wait_for_future(
             self._welder_client.call_async(command),
             5.0,
-            f"H600 ARC {'ON' if enabled else 'OFF'}",
+            f"H600 ARC {'ON' if arc else 'OFF'}",
         )
         if response is None or not response.success:
             message = response.message if response is not None else "no response"
             raise RuntimeError(f"H600 command rejected: {message}")
         self.get_logger().info(response.message)
+
+    @staticmethod
+    def publish_phase(goal_handle, request, phase, progress):
+        feedback = CartesianPath.Feedback()
+        feedback.current_pose = request.waypoints[0]
+        feedback.waypoint_index = 0
+        feedback.progress = float(progress)
+        feedback.phase = phase
+        goal_handle.publish_feedback(feedback)
+
+    def start_welding(self, goal_handle, request):
+        address = self.require_h600_connection()
+        self.publish_phase(
+            goal_handle,
+            request,
+            f"H600 PRE-FLOW · {address}",
+            0.45,
+        )
+        self.set_welder(request, True, True, False, True)
+        time.sleep(request.weld_preflow_seconds)
+        self.publish_phase(goal_handle, request, "H600 ARC ON", 0.49)
+        self.set_welder(request, True, True, True, True)
+        if request.require_welding_feedback:
+            self.publish_phase(
+                goal_handle,
+                request,
+                "WAIT H600 WELDING FEEDBACK",
+                0.50,
+            )
+            self.wait_for_welding_feedback(True)
+
+    def stop_welding(self, goal_handle, request):
+        self.publish_phase(goal_handle, request, "H600 ARC OFF", 0.95)
+        self.set_welder(request, True, True, False, False)
+        try:
+            if request.require_welding_feedback:
+                self.wait_for_welding_feedback(False)
+            time.sleep(request.weld_postflow_seconds)
+        finally:
+            self.set_welder(request, False, False, False, False)
+            self.publish_phase(goal_handle, request, "H600 SAFE OFF", 0.99)
 
     def execute_moveit_trajectory(self, trajectory):
         if not self._execute_client.wait_for_server(timeout_sec=5.0):
@@ -402,6 +550,12 @@ class CartesianPathActionServer(Node):
             or not math.isfinite(goal_request.velocity_scale)
             or goal_request.velocity_scale <= 0.0
             or goal_request.velocity_scale > 1.0
+            or not math.isfinite(goal_request.weld_preflow_seconds)
+            or goal_request.weld_preflow_seconds < 0.0
+            or goal_request.weld_preflow_seconds > 10.0
+            or not math.isfinite(goal_request.weld_postflow_seconds)
+            or goal_request.weld_postflow_seconds < 0.0
+            or goal_request.weld_postflow_seconds > 10.0
         ):
             self.get_logger().warning(
                 "Rejected empty path, interpolation step, or velocity scale"
@@ -423,27 +577,39 @@ class CartesianPathActionServer(Node):
             request.visualize_path,
         )
 
-        moveit_response = None
+        moveit_plan = None
         if self.get_parameter("use_moveit").value:
             try:
                 if request.reuse_approved_plan:
-                    moveit_response = self.approved_plan(request)
+                    moveit_plan = self.approved_plan(request)
                     self.get_logger().info(
                         "Using the exact matching GUI-approved trajectory"
                     )
+                elif request.enable_arc:
+                    moveit_plan = self.plan_weld_sequence(request)
                 else:
-                    moveit_response = self.plan_with_moveit(request)
-                if moveit_response.fraction < 0.999:
+                    moveit_plan = self.plan_with_moveit(request)
+                responses = (
+                    moveit_plan
+                    if isinstance(moveit_plan, tuple)
+                    else (moveit_plan,)
+                )
+                incomplete = [
+                    response.fraction
+                    for response in responses
+                    if response.fraction < 0.999
+                ]
+                if incomplete:
                     goal_handle.abort()
                     result.success = False
                     result.message = (
-                        f"MoveIt planned only {moveit_response.fraction:.1%} "
+                        f"MoveIt planned only {min(incomplete):.1%} "
                         "of the scanner path"
                     )
                     result.final_pose = request.waypoints[-1]
                     return result
                 if not request.execute_requested:
-                    self.approve_plan(request, moveit_response)
+                    self.approve_plan(request, moveit_plan)
             except RuntimeError as error:
                 goal_handle.abort()
                 result.success = False
@@ -478,12 +644,13 @@ class CartesianPathActionServer(Node):
                 feedback.progress = float(
                     (waypoint_index + sample_index / samples) / segment_count
                 )
+                feedback.phase = "PLAN PREVIEW"
                 goal_handle.publish_feedback(feedback)
                 time.sleep(0.01 / request.velocity_scale)
             start = target
 
         executed = False
-        if moveit_response is not None and request.execute_requested:
+        if moveit_plan is not None and request.execute_requested:
             if not self.get_parameter("execute_motion").value:
                 goal_handle.abort()
                 result.success = False
@@ -496,14 +663,39 @@ class CartesianPathActionServer(Node):
                 return result
             if request.reuse_approved_plan:
                 self.consume_approved_plan()
-            arc_started = False
+            welder_touched = False
             try:
                 if request.enable_arc:
-                    self.set_welder(request, True)
-                    arc_started = True
-                execute_result = self.execute_moveit_trajectory(
-                    moveit_response.solution
-                )
+                    approach, seam = moveit_plan
+                    self.publish_phase(
+                        goal_handle,
+                        request,
+                        "MOVE TO TCP1 · ARC OFF",
+                        0.20,
+                    )
+                    execute_result = self.execute_moveit_trajectory(
+                        approach.solution
+                    )
+                    if execute_result.error_code.val != 1:
+                        raise RuntimeError(
+                            "TCP1 approach failed with MoveIt code "
+                            f"{execute_result.error_code.val}"
+                        )
+                    welder_touched = True
+                    self.start_welding(goal_handle, request)
+                    self.publish_phase(
+                        goal_handle,
+                        request,
+                        "WELD MOVE TCP1 → TCP2",
+                        0.55,
+                    )
+                    execute_result = self.execute_moveit_trajectory(
+                        seam.solution
+                    )
+                else:
+                    execute_result = self.execute_moveit_trajectory(
+                        moveit_plan.solution
+                    )
                 if execute_result.error_code.val != 1:
                     goal_handle.abort()
                     result.success = False
@@ -523,9 +715,9 @@ class CartesianPathActionServer(Node):
                 result.sampled_path = sampled_path
                 return result
             finally:
-                if arc_started:
+                if welder_touched:
                     try:
-                        self.set_welder(request, False)
+                        self.stop_welding(goal_handle, request)
                     except RuntimeError as error:
                         self.get_logger().error(
                             f"Failed to confirm H600 ARC OFF: {error}"
@@ -535,7 +727,7 @@ class CartesianPathActionServer(Node):
         result.success = True
         if executed:
             completion = "planned and executed on the active controller"
-        elif moveit_response is not None:
+        elif moveit_plan is not None:
             completion = (
                 "planned preview approved for matching path and speed"
             )
@@ -554,13 +746,20 @@ class CartesianPathActionServer(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = CartesianPathActionServer()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        executor = MultiThreadedExecutor(num_threads=4)
-        executor.add_node(node)
         executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        # Stop worker threads before destroying actions, services and
+        # publishers.  Otherwise a reconnect SIGINT can interrupt
+        # destroy_node() while an executor thread still owns an entity.
+        executor.shutdown(timeout_sec=2.0)
+        executor.remove_node(node)
+        try:
+            node.destroy_node()
+        except KeyboardInterrupt:
+            pass
+        rclpy.try_shutdown()

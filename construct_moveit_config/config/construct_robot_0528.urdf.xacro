@@ -3,12 +3,8 @@
     <xacro:arg name="right_robot_ip" default="192.168.1.10" />
     <xacro:arg name="left_robot_ip" default="192.168.1.11" />
     <xacro:arg name="cb_simulation" default="false" />
-    <xacro:arg name="use_fake_left_hardware" default="true" />
+    <xacro:arg name="use_fake_left_hardware" default="false" />
     <xacro:arg name="use_fake_right_hardware" default="false" />
-    <xacro:arg name="use_initial_left_positions" default="true" />
-    <xacro:arg name="use_initial_right_positions" default="true" />
-    <xacro:arg name="initial_positions_file"
-               default="$(find construct_description)/config/initial_positions.yaml" />
     <xacro:arg name="fake_sensor_commands" default="false" />
 
     <!-- Import construct_robot_0528 urdf file -->
@@ -23,9 +19,6 @@
         cb_simulation="$(arg cb_simulation)"
         use_fake_left_hardware="$(arg use_fake_left_hardware)"
         use_fake_right_hardware="$(arg use_fake_right_hardware)"
-        use_initial_left_positions="$(arg use_initial_left_positions)"
-        use_initial_right_positions="$(arg use_initial_right_positions)"
-        initial_positions_file="$(arg initial_positions_file)"
         fake_sensor_commands="$(arg fake_sensor_commands)" />
 
 </robot>
