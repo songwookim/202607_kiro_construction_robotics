@@ -1315,7 +1315,7 @@
     <child
       link="robot_head_rev_link2" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
       lower="-3.1416"
       upper="3.1416"

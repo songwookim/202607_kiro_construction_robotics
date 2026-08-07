@@ -103,6 +103,11 @@ def generate_launch_description():
     # discoverable endpoints but no live topics/services. Keep every process
     # in this launch on the same UDP transport, including ros2_control, MoveIt,
     # RViz and the GUI.
+    """
+        export ROS_LOCALHOST_ONLY=1
+        export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+        export ROS_DOMAIN_ID=0
+    """
     force_udp_transport = SetEnvironmentVariable(
         "FASTDDS_BUILTIN_TRANSPORTS",
         "UDPv4",
