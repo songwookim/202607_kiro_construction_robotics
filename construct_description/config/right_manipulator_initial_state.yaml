@@ -1,0 +1,27 @@
+format_version: 1
+planning_group: right_manipulator
+joint_state:
+  names:
+  - right_manipulator_joint1
+  - right_manipulator_joint2
+  - right_manipulator_joint3
+  - right_manipulator_joint4
+  - right_manipulator_joint5
+  - right_manipulator_joint6
+  positions_rad:
+  - 4.86002717436763
+  - 1.4176716214922291
+  - 1.6633439709942948
+  - 3.2580915702108735
+  - 1.016702692239509
+  - -2.0332345426950895
+tcp_pose_world:
+  position_m:
+    x: -0.10493828090665669
+    y: -1.8929659299356354
+    z: 0.7228261712171986
+  orientation_xyzw:
+    x: 0.6172941317064207
+    y: 0.5966463510742167
+    z: -0.34320709305531516
+    w: 0.3810117819532081

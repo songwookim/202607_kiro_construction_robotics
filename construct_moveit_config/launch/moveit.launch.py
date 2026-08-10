@@ -15,6 +15,9 @@ from moveit_configs_utils import MoveItConfigsBuilder
 right_robot_ip = LaunchConfiguration("right_robot_ip")
 left_robot_ip = LaunchConfiguration("left_robot_ip")
 fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
+use_fake_left_hardware = LaunchConfiguration("use_fake_left_hardware")
+use_fake_right_hardware = LaunchConfiguration("use_fake_right_hardware")
+use_fake_head_hardware = LaunchConfiguration("use_fake_head_hardware")
 cb_simulation = LaunchConfiguration("cb_simulation")
 use_rviz = LaunchConfiguration("use_rviz")
 execute_motion = LaunchConfiguration("execute_motion")
@@ -42,6 +45,9 @@ def generate_launch_description():
             default_value="false",
             description="True when use fake sensor commands",
         ),
+        DeclareLaunchArgument("use_fake_left_hardware", default_value="false"),
+        DeclareLaunchArgument("use_fake_right_hardware", default_value="false"),
+        DeclareLaunchArgument("use_fake_head_hardware", default_value="false"),
         DeclareLaunchArgument(
             "use_rviz",
             default_value="true",
@@ -75,6 +81,9 @@ def launch_setup(_context):
         "right_robot_ip": right_robot_ip,
         "fake_sensor_commands": fake_sensor_commands,
         "cb_simulation": cb_simulation,
+        "use_fake_left_hardware": use_fake_left_hardware,
+        "use_fake_right_hardware": use_fake_right_hardware,
+        "use_fake_head_hardware": use_fake_head_hardware,
     }
 
     moveit_builder = (

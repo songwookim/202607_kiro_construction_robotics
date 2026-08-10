@@ -11,6 +11,7 @@ from launch.actions import (
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -26,6 +27,13 @@ def generate_launch_description():
         "rviz_config",
         "allow_arc_output",
         "allow_nonzero_setpoints",
+        "debug_gui",
+        "debug_gui_port",
+        "debug_cartesian_server",
+        "debug_cartesian_server_port",
+        "use_fake_left_hardware",
+        "use_fake_right_hardware",
+        "use_fake_head_hardware",
     )
     defaults = {
         "right_robot_ip": "192.168.1.10",
@@ -37,6 +45,13 @@ def generate_launch_description():
         "rviz_config": "moveit.rviz",
         "allow_arc_output": "false",
         "allow_nonzero_setpoints": "false",
+        "debug_gui": "false",
+        "debug_gui_port": "5678",
+        "debug_cartesian_server": "false",
+        "debug_cartesian_server_port": "5679",
+        "use_fake_left_hardware": "false",
+        "use_fake_right_hardware": "false",
+        "use_fake_head_hardware": "false",
     }
     arguments = [
         DeclareLaunchArgument(name, default_value=defaults[name])
@@ -59,6 +74,11 @@ def generate_launch_description():
                 "execute_motion",
                 "use_rviz",
                 "rviz_config",
+                "debug_cartesian_server",
+                "debug_cartesian_server_port",
+                "use_fake_left_hardware",
+                "use_fake_right_hardware",
+                "use_fake_head_hardware",
             )
         }.items(),
     )
@@ -84,6 +104,13 @@ def generate_launch_description():
         package="construct_robot",
         executable="weld_action_gui",
         output="screen",
+        prefix=PythonExpression([
+            "'python3 -m debugpy --listen 127.0.0.1:",
+            LaunchConfiguration("debug_gui_port"),
+            " --wait-for-client' if '",
+            LaunchConfiguration("debug_gui"),
+            "' == 'true' else ''",
+        ]),
         parameters=[{
             "expected_execute_motion": ParameterValue(
                 LaunchConfiguration("execute_motion"),

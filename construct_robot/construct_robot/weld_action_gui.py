@@ -1,17 +1,20 @@
 import copy
 import math
+from pathlib import Path
 import queue
 import signal
+import tempfile
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import rclpy
+import yaml
 from geometry_msgs.msg import Pose, PoseArray
 from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.srv import ListControllers
-from moveit_msgs.action import MoveGroup
+from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import Constraints, DisplayTrajectory, JointConstraint
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -48,6 +51,133 @@ ARM_JOINT_NAMES = {
 }
 
 
+def _finite_float(value, description):
+    """Return a finite float while rejecting YAML booleans and bad values."""
+    if isinstance(value, bool):
+        raise ValueError(f"{description} must be a number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{description} must be a number") from error
+    if not math.isfinite(result):
+        raise ValueError(f"{description} must be finite")
+    return result
+
+
+def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp):
+    """Atomically save a captured joint state and its TCP pose as YAML."""
+    path = Path(path)
+    document = {
+        "format_version": 1,
+        "planning_group": planning_group,
+        "joint_state": {
+            "names": list(joint_names),
+            "positions_rad": [float(value) for value in positions],
+        },
+        "tcp_pose_world": {
+            "position_m": {
+                "x": float(tcp.position.x),
+                "y": float(tcp.position.y),
+                "z": float(tcp.position.z),
+            },
+            "orientation_xyzw": {
+                "x": float(tcp.orientation.x),
+                "y": float(tcp.orientation.y),
+                "z": float(tcp.orientation.z),
+                "w": float(tcp.orientation.w),
+            },
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            yaml.safe_dump(document, stream, sort_keys=False)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
+def load_initial_state_yaml(path):
+    """Load and validate a TCP teaching YAML file."""
+    with Path(path).open("r", encoding="utf-8") as stream:
+        document = yaml.safe_load(stream)
+    if not isinstance(document, dict):
+        raise ValueError("YAML root must be a mapping")
+    if document.get("format_version") != 1:
+        raise ValueError("unsupported or missing format_version (expected 1)")
+
+    planning_group = document.get("planning_group")
+    if planning_group not in ("left_manipulator", "right_manipulator"):
+        raise ValueError(
+            "planning_group must be left_manipulator or right_manipulator"
+        )
+    arm = planning_group.removesuffix("_manipulator")
+
+    joint_state = document.get("joint_state")
+    if not isinstance(joint_state, dict):
+        raise ValueError("joint_state must be a mapping")
+    names = joint_state.get("names")
+    positions = joint_state.get("positions_rad")
+    if not isinstance(names, list) or not all(
+        isinstance(name, str) for name in names
+    ):
+        raise ValueError("joint_state.names must be a list of joint names")
+    if set(names) != ARM_JOINT_NAMES[arm] or len(names) != 6:
+        raise ValueError(
+            f"joint_state.names must contain the six {arm} arm joints"
+        )
+    if not isinstance(positions, list) or len(positions) != len(names):
+        raise ValueError(
+            "joint_state.positions_rad must match joint_state.names"
+        )
+    positions = tuple(
+        _finite_float(value, f"position for {name}")
+        for name, value in zip(names, positions)
+    )
+
+    tcp_data = document.get("tcp_pose_world")
+    if not isinstance(tcp_data, dict):
+        raise ValueError("tcp_pose_world must be a mapping")
+    position = tcp_data.get("position_m")
+    orientation = tcp_data.get("orientation_xyzw")
+    if not isinstance(position, dict) or not isinstance(orientation, dict):
+        raise ValueError(
+            "TCP position_m and orientation_xyzw must be mappings"
+        )
+    tcp = Pose()
+    for field in ("x", "y", "z"):
+        setattr(
+            tcp.position,
+            field,
+            _finite_float(position.get(field), f"TCP position {field}"),
+        )
+    for field in ("x", "y", "z", "w"):
+        setattr(
+            tcp.orientation,
+            field,
+            _finite_float(orientation.get(field), f"TCP orientation {field}"),
+        )
+    norm = math.sqrt(
+        tcp.orientation.x ** 2
+        + tcp.orientation.y ** 2
+        + tcp.orientation.z ** 2
+        + tcp.orientation.w ** 2
+    )
+    if norm < 1e-9:
+        raise ValueError("TCP orientation quaternion must be non-zero")
+    return planning_group, tuple(names), positions, tcp
+
+
 class WeldActionNode(Node):
     """ROS interface used by the editable weld-path GUI."""
 
@@ -63,6 +193,11 @@ class WeldActionNode(Node):
             self,
             MoveGroup,
             "/move_action",
+        )
+        self.execute_trajectory_client = ActionClient(
+            self,
+            ExecuteTrajectory,
+            "/execute_trajectory",
         )
         self.trajectory_clients = {
             "left": ActionClient(
@@ -87,6 +222,7 @@ class WeldActionNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.goal_handle = None
+        self.initial_planned_trajectory = None
         self.request_execution = False
         self.execute_motion_enabled = self.get_parameter(
             "expected_execute_motion"
@@ -539,7 +675,14 @@ class WeldActionNode(Node):
             tcp,
         )
 
-    def plan_to_initial_state(self, planning_group, joint_names, positions):
+    def plan_initial_state(
+        self,
+        planning_group,
+        joint_names,
+        positions,
+        velocity_scale,
+    ):
+        self.initial_planned_trajectory = None
         try:
             current_positions = [
                 self.latest_joint_positions[name] for name in joint_names
@@ -568,6 +711,8 @@ class WeldActionNode(Node):
         goal.request.num_planning_attempts = 5
         goal.request.allowed_planning_time = 5.0
         goal.request.start_state.is_diff = True
+        goal.request.max_velocity_scaling_factor = velocity_scale
+        goal.request.max_acceleration_scaling_factor = velocity_scale
         constraints = Constraints()
         for name, position in zip(joint_names, positions):
             constraint = JointConstraint()
@@ -581,38 +726,149 @@ class WeldActionNode(Node):
         goal.planning_options.plan_only = True
         goal.planning_options.look_around = False
         goal.planning_options.replan = False
-        self.ui.post(self.ui.pipeline_waiting, "Planning to captured initial joint angles")
+        self.ui.post(
+            self.ui.pipeline_waiting,
+            "Planning to captured initial joint angles",
+        )
         future = self.move_group_client.send_goal_async(goal)
-        future.add_done_callback(self._initial_plan_goal_response)
+        target_positions = tuple(positions)
+        future.add_done_callback(
+            lambda result: self._initial_plan_goal_response(
+                result,
+                planning_group,
+                target_positions,
+                velocity_scale,
+            )
+        )
 
-    def _initial_plan_goal_response(self, future):
+    def _initial_plan_goal_response(
+        self,
+        future,
+        planning_group,
+        target_positions,
+        velocity_scale,
+    ):
         try:
             goal_handle = future.result()
         except Exception as error:
-            self.ui.post(self.ui.error, f"Initial-position plan failed: {error}")
+            self.ui.post(
+                self.ui.error,
+                f"Initial-position plan failed: {error}",
+            )
             return
         if not goal_handle.accepted:
             self.ui.post(self.ui.error, "Initial-position plan was rejected")
             return
-        goal_handle.get_result_async().add_done_callback(self._initial_plan_result)
+        goal_handle.get_result_async().add_done_callback(
+            lambda result: self._initial_plan_result(
+                result,
+                planning_group,
+                target_positions,
+                velocity_scale,
+            )
+        )
 
-    def _initial_plan_result(self, future):
+    def _initial_plan_result(
+        self,
+        future,
+        planning_group,
+        target_positions,
+        velocity_scale,
+    ):
         try:
             result = future.result().result
         except Exception as error:
-            self.ui.post(self.ui.error, f"Initial-position plan failed: {error}")
+            self.ui.post(
+                self.ui.error,
+                f"Initial-position plan failed: {error}",
+            )
             return
         if result.error_code.val != 1:
             self.ui.post(
                 self.ui.error,
-                f"Initial-position plan failed (MoveIt code {result.error_code.val})",
+                "Initial-position plan failed "
+                f"(MoveIt code {result.error_code.val})",
             )
             return
         display = DisplayTrajectory()
         display.trajectory_start = result.trajectory_start
         display.trajectory.append(result.planned_trajectory)
+        self.initial_planned_trajectory = copy.deepcopy(
+            result.planned_trajectory
+        )
         self.display_trajectory_publisher.publish(display)
-        self.ui.post(self.ui.pipeline_result, "Initial-position plan shown in RViz")
+        self.ui.post(
+            self.ui.initial_position_plan_ready,
+            planning_group,
+            target_positions,
+            velocity_scale,
+            "Initial-position plan shown in RViz · ready to execute",
+        )
+
+    def execute_initial_plan(self):
+        if not self.execute_motion_enabled:
+            self.ui.post(
+                self.ui.error,
+                "Initial-position execution is disabled by launch "
+                "configuration",
+            )
+            return
+        trajectory = self.initial_planned_trajectory
+        if trajectory is None:
+            self.ui.post(self.ui.error, "Plan the initial position first")
+            return
+        if not self.execute_trajectory_client.wait_for_server(timeout_sec=3.0):
+            self.ui.post(
+                self.ui.error,
+                "ExecuteTrajectory action server unavailable",
+            )
+            return
+        self.initial_planned_trajectory = None
+        goal = ExecuteTrajectory.Goal()
+        goal.trajectory = trajectory
+        self.ui.post(
+            self.ui.pipeline_waiting,
+            "Executing the approved initial-position plan",
+        )
+        future = self.execute_trajectory_client.send_goal_async(goal)
+        future.add_done_callback(self._initial_execute_goal_response)
+
+    def _initial_execute_goal_response(self, future):
+        try:
+            goal_handle = future.result()
+        except Exception as error:
+            self.ui.post(
+                self.ui.error,
+                f"Initial-position execution failed: {error}",
+            )
+            return
+        if not goal_handle.accepted:
+            self.ui.post(self.ui.error, "Initial-position execution rejected")
+            return
+        goal_handle.get_result_async().add_done_callback(
+            self._initial_execute_result
+        )
+
+    def _initial_execute_result(self, future):
+        try:
+            result = future.result().result
+        except Exception as error:
+            self.ui.post(
+                self.ui.error,
+                f"Initial-position execution failed: {error}",
+            )
+            return
+        if result.error_code.val != 1:
+            self.ui.post(
+                self.ui.error,
+                "Initial-position execution failed "
+                f"(MoveIt code {result.error_code.val})",
+            )
+            return
+        self.ui.post(
+            self.ui.initial_position_execution_finished,
+            "Robot reached the captured initial position",
+        )
 
     def generate_weave(
         self,
@@ -847,6 +1103,7 @@ class WeldActionGui:
         self.plan_approved = False
         self.linear_tcp_endpoints = [None, None]
         self.initial_joint_state = None
+        self.initial_plan_ready = False
         self.pose_variables = {
             name: tk.StringVar(value="0.0") for name in self.POSE_FIELDS
         }
@@ -1094,11 +1351,23 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=3)
         self.plan_initial_button = ttk.Button(
             teaching,
-            text="Plan to initial position",
-            command=self.plan_to_initial_state,
+            text="1 · Plan initial position",
+            command=self.plan_initial_state,
             state=tk.DISABLED,
         )
         self.plan_initial_button.pack(side=tk.LEFT, padx=3)
+        self.execute_initial_button = ttk.Button(
+            teaching,
+            text="2 · Execute initial plan",
+            command=self.execute_initial_plan,
+            state=tk.DISABLED,
+        )
+        self.execute_initial_button.pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            teaching,
+            text="Load from YAML",
+            command=self.load_initial_state,
+        ).pack(side=tk.LEFT, padx=3)
         self.initial_state_status = ttk.Label(teaching, text="not captured")
         self.initial_state_status.pack(side=tk.LEFT, padx=(12, 0))
         self.path_summary = ttk.Label(teaching, text="empty path")
@@ -1416,7 +1685,9 @@ class WeldActionGui:
         self.weave_source = []
         self.weave_base_paths = {"linear": [], "circle": []}
         self.initial_joint_state = None
+        self.initial_plan_ready = False
         self.plan_initial_button.configure(state=tk.DISABLED)
+        self.execute_initial_button.configure(state=tk.DISABLED)
         self.initial_state_status.configure(text="not captured")
         self.set_points([])
         self.node.publish_points([], self.show_path.get())
@@ -1458,6 +1729,27 @@ class WeldActionGui:
                 )
                 else tk.DISABLED
             )
+        )
+        self._refresh_initial_position_controls()
+
+    def _refresh_initial_position_controls(self):
+        if not hasattr(self, "plan_initial_button"):
+            return
+        can_plan = (
+            self.initial_joint_state is not None
+            and self._selected_robot_connected()
+        )
+        self.plan_initial_button.configure(
+            state=tk.NORMAL if can_plan else tk.DISABLED
+        )
+        can_execute = (
+            self.initial_plan_ready
+            and self.initial_joint_state is not None
+            and self.execution_allowed
+            and self._selected_robot_connected()
+        )
+        self.execute_initial_button.configure(
+            state=tk.NORMAL if can_execute else tk.DISABLED
         )
 
     def log(self, text):
@@ -1557,6 +1849,8 @@ class WeldActionGui:
     def robot_feedback_lost(self, arm, detail="measured joint feedback timeout"):
         self.robot_connected[arm] = False
         self.invalidate_approved_plan()
+        if self._selected_arm() == arm:
+            self.initial_plan_ready = False
         self._refresh_execution_controls()
         if self._selected_arm() == arm:
             self.plan_button.configure(state=tk.DISABLED)
@@ -1795,40 +2089,166 @@ class WeldActionGui:
             daemon=True,
         ).start()
 
+# /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config
+    def _initial_state_yaml_path(self, planning_group=None):
+        group = planning_group or self.planning_group.get()
+        return (
+            Path.home()
+            / "ros2_ws"
+            / "src"
+            / "construct_robot_ros2"
+            / "construct_description"
+            / "config"
+            / f"{group}_initial_state.yaml"
+        )
+
+    def load_initial_state(self):
+        default_path = self._initial_state_yaml_path()
+        path = filedialog.askopenfilename(
+            title="Load TCP teaching state",
+            initialdir=str(default_path.parent),
+            initialfile=default_path.name,
+            filetypes=(("YAML", "*.yaml *.yml"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            planning_group, joint_names, positions, tcp = (
+                load_initial_state_yaml(path)
+            )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Failed to load initial state YAML: {error}")
+            return
+        if planning_group != self.planning_group.get():
+            self.error(
+                f"YAML is for {planning_group}; selected arm is "
+                f"{self.planning_group.get()}"
+            )
+            return
+        self.apply_initial_state(
+            planning_group,
+            joint_names,
+            positions,
+            tcp,
+            save_to_yaml=False,
+        )
+        self.log(f"Loaded TCP teaching state from {path}")
+
     def apply_initial_state(
         self,
         planning_group,
         joint_names,
         positions,
         tcp,
+        save_to_yaml=True,
     ):
         self.initial_joint_state = (
             planning_group,
             tuple(joint_names),
             tuple(positions),
         )
+        self.initial_plan_ready = False
         angles = ", ".join(f"{math.degrees(value):.1f}°" for value in positions)
         self.initial_state_status.configure(text=f"captured joints: {angles}")
-        self.plan_initial_button.configure(state=tk.NORMAL)
+        self._refresh_initial_position_controls()
         values = self._pose_values(tcp)
+        saved_message = ""
+        save_error = None
+        if save_to_yaml:
+            path = self._initial_state_yaml_path(planning_group)
+            try:
+                save_initial_state_yaml(
+                    path,
+                    planning_group,
+                    joint_names,
+                    positions,
+                    tcp,
+                )
+                saved_message = f" · saved to {path}"
+            except (OSError, ValueError, yaml.YAMLError) as error:
+                save_error = error
         self.pipeline_result(
             f"Initial state captured · TCP World XYZ="
             f"({values[0]:.4f}, {values[1]:.4f}, {values[2]:.4f}) m"
+            f"{saved_message}"
         )
+        if save_error is not None:
+            self.error(
+                f"Initial state captured, but YAML save failed: {save_error}"
+            )
 
-    def plan_to_initial_state(self):
+    def plan_initial_state(self):
         if self.initial_joint_state is None:
             self.error("Capture an initial position first")
+            return
+        if not self._selected_robot_connected():
+            self.error("Connect the selected REAL RB robot first")
             return
         group, joint_names, positions = self.initial_joint_state
         if group != self.planning_group.get():
             self.error("Captured initial position belongs to another arm")
             return
+        self.initial_plan_ready = False
+        self._refresh_initial_position_controls()
         threading.Thread(
-            target=self.node.plan_to_initial_state,
-            args=(group, joint_names, positions),
+            target=self.node.plan_initial_state,
+            args=(
+                group,
+                joint_names,
+                positions,
+                max(0.01, min(1.0, self.velocity_percent.get() / 100.0)),
+            ),
             daemon=True,
         ).start()
+
+    def initial_position_plan_ready(
+        self,
+        planning_group,
+        target_positions,
+        velocity_scale,
+        message,
+    ):
+        if self.initial_joint_state is None:
+            return
+        group, _joint_names, positions = self.initial_joint_state
+        if (
+            group != planning_group
+            or tuple(positions) != tuple(target_positions)
+            or group != self.planning_group.get()
+            or not math.isclose(
+                velocity_scale,
+                max(0.01, min(1.0, self.velocity_percent.get() / 100.0)),
+            )
+        ):
+            self.log("Discarded stale initial-position plan")
+            return
+        self.initial_plan_ready = True
+        self._refresh_initial_position_controls()
+        self.pipeline_result(message)
+
+    def execute_initial_plan(self):
+        if not self.initial_plan_ready:
+            self.error(
+                "Plan and inspect the initial-position trajectory first"
+            )
+            return
+        if not self.execution_allowed:
+            self.error("Robot execution is disabled by launch configuration")
+            return
+        if not self._selected_robot_connected():
+            self.error("Connect the selected REAL RB robot first")
+            return
+        self.initial_plan_ready = False
+        self._refresh_initial_position_controls()
+        threading.Thread(
+            target=self.node.execute_initial_plan,
+            daemon=True,
+        ).start()
+
+    def initial_position_execution_finished(self, message):
+        self.initial_plan_ready = False
+        self._refresh_initial_position_controls()
+        self.pipeline_result(message)
 
     def capture_linear_tcp(self, endpoint_index):
         self.log(
@@ -1946,6 +2366,8 @@ class WeldActionGui:
 
     def update_speed_label(self, _value=None):
         self.invalidate_approved_plan()
+        self.initial_plan_ready = False
+        self._refresh_initial_position_controls()
         self.speed_label.configure(
             text=f"{self.velocity_percent.get():.0f}%"
         )

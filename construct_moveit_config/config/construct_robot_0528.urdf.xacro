@@ -5,6 +5,7 @@
     <xacro:arg name="cb_simulation" default="false" />
     <xacro:arg name="use_fake_left_hardware" default="false" />
     <xacro:arg name="use_fake_right_hardware" default="false" />
+    <xacro:arg name="use_fake_head_hardware" default="false" />
     <xacro:arg name="fake_sensor_commands" default="false" />
 
     <!-- Import construct_robot_0528 urdf file -->
@@ -19,6 +20,7 @@
         cb_simulation="$(arg cb_simulation)"
         use_fake_left_hardware="$(arg use_fake_left_hardware)"
         use_fake_right_hardware="$(arg use_fake_right_hardware)"
+        use_fake_head_hardware="$(arg use_fake_head_hardware)"
         fake_sensor_commands="$(arg fake_sensor_commands)" />
 
 </robot>
