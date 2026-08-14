@@ -5,8 +5,8 @@ The wire format follows the successful Rainbow ARC capture used by
 deliberately does not depend on ROS or a GUI toolkit.
 """
 
-from dataclasses import dataclass, replace
 from collections import deque
+from dataclasses import dataclass, replace
 import select
 import socket
 import threading
@@ -310,7 +310,11 @@ class HiCommWelderClient:
             daemon=True,
         )
         self._callback_thread.start()
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(
+            target=self._run,
+            name="HiCommIO",
+            daemon=True,
+        )
         self._thread.start()
 
     def stop(self, timeout=2.5):
@@ -328,6 +332,8 @@ class HiCommWelderClient:
             and callback_thread is not threading.current_thread()
         ):
             callback_thread.join(timeout=timeout)
+        self._thread = None
+        self._callback_thread = None
 
     def update_setpoints(self, current_a, voltage_tenths):
         candidate = replace(
@@ -410,32 +416,48 @@ class HiCommWelderClient:
             lambda _status: self.comm_alive(), timeout, "cyclic RX"
         )
 
-    def wait_arc_established(self, timeout=5.0, command_generation=None):
-        """Wait for WCR + main-weld + nonzero wire feed."""
+    def _wait_for_arc_status(
+        self,
+        predicate,
+        timeout,
+        description,
+        command_generation,
+    ):
+        """Wait for one ARC stage, aborting when its ARC command is cleared."""
         deadline = time.monotonic() + max(0.0, float(timeout))
         with self._status_condition:
-            if command_generation is None:
-                command_generation = self._arc_command_generation
             while True:
                 if (
                     command_generation != self._arc_command_generation
                     or not self._state.command & BIT_ARC
                 ):
-                    raise RuntimeError("ARC OFF during establishment")
+                    raise RuntimeError(f"ARC OFF while waiting for {description}")
                 status = self._latest_status
-                if status is not None and status["arc_established"]:
+                if status is not None and predicate(status):
                     return dict(status)
                 if not self._connected:
                     raise RuntimeError(
-                        "disconnected while waiting for ARC ESTABLISHED "
-                        "(WCR + feed)"
+                        f"disconnected while waiting for {description}"
                     )
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError(
-                        "timeout waiting for ARC ESTABLISHED (WCR + feed)"
-                    )
+                    raise TimeoutError(f"timeout waiting for {description}")
                 self._status_condition.wait(timeout=min(0.05, remaining))
+
+    def wait_arc_established(self, timeout=5.0, command_generation=None):
+        """Wait for WCR + main-weld + nonzero wire feed."""
+        with self._lock:
+            generation = (
+                self._arc_command_generation
+                if command_generation is None
+                else command_generation
+            )
+        return self._wait_for_arc_status(
+            lambda status: status["arc_established"],
+            timeout,
+            "ARC ESTABLISHED (WCR + feed)",
+            generation,
+        )
 
     def arc_on(
         self,
@@ -468,21 +490,23 @@ class HiCommWelderClient:
 
         status = None
         if wait_recognition:
-            status = self.wait_for_status(
+            status = self._wait_for_arc_status(
                 lambda value: value["arc_ack"],
                 timeout,
                 "ARC/Torch recognition",
+                command_generation,
             )
             self.log_callback(
                 "ARC ON recognized by Hi-COMM (RX Byte0.Bit0=1)"
             )
         if wait_welding:
-            status = self.wait_for_status(
+            status = self._wait_for_arc_status(
                 lambda value: (
                     value["output_state"] == OUTPUT_STATE_MAIN_WELD
                 ),
                 timeout,
                 "main welding output state",
+                command_generation,
             )
             self.log_callback("MAIN-WELD STATE (RX Byte1=01)")
         if wait_established:
@@ -772,7 +796,6 @@ class HiCommWelderClient:
 
     def _run_connected_session(self):
         rx_buffer = bytearray()
-        cycles = 0
         self._last_tx_monotonic = None
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             self._socket = sock
@@ -807,12 +830,6 @@ class HiCommWelderClient:
                             f"(target={PERIOD_SECONDS * 1000.0:.1f} ms)"
                         )
                 self._send_full(sock, build_request(state))
-                cycles += 1
-                # if cycles == 1 or cycles % 25 == 0:
-                #     self.log_callback(
-                #         f"Hi-COMM cycle={cycles} TX0=0x{state.command:02X} "
-                #         f"I={state.current_a}A V={state.voltage_tenths / 10:.1f}V"
-                #     )
                 next_tick += PERIOD_SECONDS
                 self._drain_rx(sock, rx_buffer, next_tick)
                 delay = next_tick - time.monotonic()

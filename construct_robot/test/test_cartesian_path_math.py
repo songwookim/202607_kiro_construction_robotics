@@ -40,14 +40,17 @@ from construct_robot.hicomm_welder import (
     decode_response,
 )
 from construct_robot.weld_action_gui import (
+    DEFAULT_DIGITAL_WELD_SETTINGS,
     aligned_wait_pose,
     corner_seam_from_touches,
     corner_endpoint_from_two_touches,
     corrected_corner_seam_from_four_touches,
+    digital_weld_recipe,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
     touch_midpoint_wait_pose,
     two_touch_corner_seam,
+    validate_digital_weld_settings,
 )
 
 
@@ -304,6 +307,31 @@ def test_hicomm_response_decodes_arc_feedback_and_error():
     assert decoded["welder_error"] == 7
 
 
+def test_digital_weld_defaults_match_captured_welding_profile():
+    settings = validate_digital_weld_settings(
+        DEFAULT_DIGITAL_WELD_SETTINGS
+    )
+    assert settings["current_a"] == 100
+    assert settings["voltage_tenths"] == 100
+    assert settings["voltage"] == 10.0
+    assert build_request(TxState(**digital_weld_recipe(settings))) == (
+        CAPTURED_IDLE_REQUEST
+    )
+
+
+def test_digital_weld_recipe_excludes_gui_timing_metadata():
+    settings = validate_digital_weld_settings({
+        "current_a": "150",
+        "voltage_tenths": "205",
+        "preflow_seconds": "1.5",
+    })
+    recipe = digital_weld_recipe(settings)
+    assert settings["voltage"] == 20.5
+    assert settings["preflow_seconds"] == 1.5
+    assert "voltage" not in recipe
+    assert "preflow_seconds" not in recipe
+
+
 def test_hicomm_inching_directions_are_mutually_exclusive():
     client = HiCommWelderClient("127.0.0.1", "127.0.0.1")
     client._connected = True
@@ -372,7 +400,9 @@ def test_hicomm_arc_off_cancels_establishment_wait_immediately():
 
     assert not waiter.is_alive()
     assert len(outcome) == 1
-    assert str(outcome[0]) == "ARC OFF during establishment"
+    assert str(outcome[0]) == (
+        "ARC OFF while waiting for ARC ESTABLISHED (WCR + feed)"
+    )
 
 
 def test_hicomm_status_callback_is_coalesced_on_callback_thread():

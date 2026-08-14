@@ -94,6 +94,61 @@ TEACHING_POSES = {
     "weld_end": "6 · Weld goal pose",
 }
 
+DIGITAL_WELD_RECIPE_KEYS = (
+    "current_a",
+    "voltage_tenths",
+    "material",
+    "diameter_mm",
+    "mode",
+    "gas",
+    "synergic",
+    "correction",
+    "pre_gas_s",
+    "post_gas_s",
+)
+DIGITAL_WELD_COMMANDS = frozenset(("set", "on", "off"))
+
+DEFAULT_DIGITAL_WELD_SETTINGS = {
+    "current_a": 100,
+    "voltage_tenths": 100,
+    "voltage": 10.0,
+    "material": "FE-SOLID",
+    "diameter_mm": 1.2,
+    "mode": "LSM",
+    "gas": "CO2",
+    "synergic": False,
+    "correction": 0.0,
+    "pre_gas_s": 0.0,
+    "post_gas_s": 0.0,
+    # Sequence timing metadata. It is intentionally not part of TX Byte1..11.
+    "preflow_seconds": 0.0,
+}
+
+
+def digital_weld_recipe(settings):
+    """Return only the values encoded into the Hi-COMM welding frame."""
+    return {key: settings[key] for key in DIGITAL_WELD_RECIPE_KEYS}
+
+
+def validate_digital_weld_settings(settings):
+    """Normalize and validate GUI/sequence digital-welding settings."""
+    normalized = copy.deepcopy(DEFAULT_DIGITAL_WELD_SETTINGS)
+    normalized.update(settings)
+    normalized["current_a"] = int(round(float(normalized["current_a"])))
+    normalized["voltage_tenths"] = int(round(
+        float(normalized["voltage_tenths"])
+    ))
+    normalized["voltage"] = normalized["voltage_tenths"] / 10.0
+    normalized["diameter_mm"] = float(normalized["diameter_mm"])
+    normalized["synergic"] = bool(normalized["synergic"])
+    for key in ("correction", "pre_gas_s", "post_gas_s", "preflow_seconds"):
+        normalized[key] = float(normalized[key])
+    if not 0.0 <= normalized["preflow_seconds"] <= 10.0:
+        raise ValueError("pre-weld gas flow must be in 0..10 seconds")
+    # build_request is the protocol's single source of range/enum validation.
+    build_request(TxState(**digital_weld_recipe(normalized)))
+    return normalized
+
 
 def midpoint_pose(first, second):
     """Return the 1:1 internal division point, keeping the first TCP attitude."""
@@ -166,10 +221,8 @@ def corner_endpoint_from_two_touches(
     result = copy.deepcopy(taught_pose)
     if axis == "x":
         lateral_wall = wall_touch.position.y
-        lateral_floor = floor_touch.position.y
     else:
         lateral_wall = wall_touch.position.x
-        lateral_floor = floor_touch.position.x
 
     # The wall touch measures the lateral wall coordinate; the floor touch
     # measures the floor height.  A perpendicular-bisector construction only
@@ -1610,11 +1663,6 @@ class WeldActionNode(Node):
                 if not activated:
                     raise RuntimeError(activation_message)
                 self.touch_probe_controller_deactivated = False
-            distance = math.sqrt(
-                (start.position.x - touched.position.x) ** 2
-                + (start.position.y - touched.position.y) ** 2
-                + (start.position.z - touched.position.z) ** 2
-            )
             points = linear_pose_waypoints(touched, start, 2)
             success, message = self.run_sequence_motion(
                 {
@@ -2539,19 +2587,26 @@ class WeldActionGui:
         self.unlock_all_do_ports = tk.BooleanVar(value=False)
         # Reproduce the successful v5.2 Rainbow capture byte-for-byte by
         # default.  Operators can apply a different recipe explicitly.
-        self.weld_current_raw = tk.IntVar(value=100)
-        self.weld_voltage_raw = tk.IntVar(value=100)
-        self.weld_material = tk.StringVar(value="FE-SOLID")
-        self.weld_diameter_mm = tk.DoubleVar(value=1.2)
-        self.weld_mode = tk.StringVar(value="LSM")
-        self.weld_gas = tk.StringVar(value="CO2")
-        self.weld_synergic = tk.BooleanVar(value=False)
-        self.weld_correction = tk.DoubleVar(value=0.0)
-        self.weld_pre_gas_s = tk.DoubleVar(value=0.0)
-        self.weld_post_gas_s = tk.DoubleVar(value=0.0)
-        self.weld_preflow_seconds = tk.DoubleVar(value=0.0)
+        weld_defaults = DEFAULT_DIGITAL_WELD_SETTINGS
+        self.weld_current_raw = tk.IntVar(value=weld_defaults["current_a"])
+        self.weld_voltage_raw = tk.IntVar(
+            value=weld_defaults["voltage_tenths"]
+        )
+        self.weld_material = tk.StringVar(value=weld_defaults["material"])
+        self.weld_diameter_mm = tk.DoubleVar(
+            value=weld_defaults["diameter_mm"]
+        )
+        self.weld_mode = tk.StringVar(value=weld_defaults["mode"])
+        self.weld_gas = tk.StringVar(value=weld_defaults["gas"])
+        self.weld_synergic = tk.BooleanVar(value=weld_defaults["synergic"])
+        self.weld_correction = tk.DoubleVar(value=weld_defaults["correction"])
+        self.weld_pre_gas_s = tk.DoubleVar(value=weld_defaults["pre_gas_s"])
+        self.weld_post_gas_s = tk.DoubleVar(value=weld_defaults["post_gas_s"])
+        self.weld_preflow_seconds = tk.DoubleVar(
+            value=weld_defaults["preflow_seconds"]
+        )
         self.robot_ips = {
-            "left": "1192.168.1.12",
+            "left": "192.168.1.12",
             "right": "192.168.1.19",
         }
 
@@ -3958,13 +4013,7 @@ class WeldActionGui:
         except ValueError as error:
             self.error(str(error))
             return
-        self.hicomm_client.arc_set(
-            **{
-                key: value
-                for key, value in settings.items()
-                if key not in ("voltage", "preflow_seconds")
-            }
-        )
+        self.hicomm_client.arc_set(**digital_weld_recipe(settings))
         self.log(
             f"Hi-COMM SET applied · {settings['current_a']} A / "
             f"{settings['voltage']:.1f} V"
@@ -4001,57 +4050,36 @@ class WeldActionGui:
 
     def _digital_weld_settings(self):
         try:
-            current_a = int(round(float(self.weld_current_raw.get())))
-            voltage_tenths = int(round(float(self.weld_voltage_raw.get())))
-            settings = {
-                "current_a": current_a,
-                "voltage_tenths": voltage_tenths,
-                "voltage": voltage_tenths / 10.0,
+            return validate_digital_weld_settings({
+                "current_a": self.weld_current_raw.get(),
+                "voltage_tenths": self.weld_voltage_raw.get(),
                 "material": self.weld_material.get(),
-                "diameter_mm": float(self.weld_diameter_mm.get()),
+                "diameter_mm": self.weld_diameter_mm.get(),
                 "mode": self.weld_mode.get(),
                 "gas": self.weld_gas.get(),
-                "synergic": bool(self.weld_synergic.get()),
-                "correction": float(self.weld_correction.get()),
-                "pre_gas_s": float(self.weld_pre_gas_s.get()),
-                "post_gas_s": float(self.weld_post_gas_s.get()),
-                "preflow_seconds": float(self.weld_preflow_seconds.get()),
-            }
+                "synergic": self.weld_synergic.get(),
+                "correction": self.weld_correction.get(),
+                "pre_gas_s": self.weld_pre_gas_s.get(),
+                "post_gas_s": self.weld_post_gas_s.get(),
+                "preflow_seconds": self.weld_preflow_seconds.get(),
+            })
         except (ValueError, tk.TclError) as error:
-            raise ValueError("digital weld settings contain an invalid number") from error
-        if not 30 <= settings["current_a"] <= 400:
-            raise ValueError("digital welding current must be in 30..400 A")
-        if not 100 <= settings["voltage_tenths"] <= 400:
-            raise ValueError("digital welding voltage must be in 10.0..40.0 V")
-        if not 0.0 <= settings["preflow_seconds"] <= 10.0:
-            raise ValueError("pre-weld gas flow must be in 0..10 seconds")
-        # Validate Byte1..11 independently of the connection/current TX state.
-        # Sequence editing must also work before Hi-COMM is connected.
-        candidate = TxState(**{
-            key: value
-            for key, value in settings.items()
-            if key not in ("voltage", "preflow_seconds")
-        })
-        build_request(candidate)
-        return settings
+            raise ValueError(
+                f"digital weld settings are invalid: {error}"
+            ) from error
 
     def _execute_hicomm_weld(self, kind, settings):
         client = self.hicomm_client
         if client is None or not client.connected:
             return False, "Hi-COMM disconnected"
+        if kind not in DIGITAL_WELD_COMMANDS:
+            return False, f"unsupported D-WELD command: {kind}"
         try:
             if kind == "set":
-                client.arc_set(
-                    **{
-                        key: value
-                        for key, value in settings.items()
-                        if key not in ("voltage", "preflow_seconds")
-                    }
-                )
-            if kind == "set":
+                client.arc_set(**digital_weld_recipe(settings))
                 echo = client.setting_echo()
                 return True, f"recipe applied · RX echo={echo}"
-            if kind == "on":
+            elif kind == "on":
                 status = client.arc_on(
                     wait_recognition=True,
                     wait_welding=True,
@@ -5353,7 +5381,12 @@ class WeldActionGui:
             self.sequence_edit_touch_guard.set(False)
             self.sequence_edit_continue_after_touch.set(False)
         if step["type"] == "digital_weld" and step.get("settings"):
-            settings = step["settings"]
+            try:
+                settings = validate_digital_weld_settings(step["settings"])
+            except ValueError as error:
+                self.error(f"Invalid D-WELD sequence settings: {error}")
+                return
+            step["settings"] = settings
             self.weld_current_raw.set(settings["current_a"])
             self.weld_voltage_raw.set(settings["voltage_tenths"])
             self.weld_material.set(settings["material"])
@@ -5490,20 +5523,9 @@ class WeldActionGui:
             )
         elif step["type"] == "digital_weld":
             choice("command", "D-WELD command", step["command"], ("on", "off", "set"))
-            settings = step.get("settings") or {
-                "current_a": 200,
-                "voltage_tenths": 250,
-                "voltage": 25.0,
-                "material": "FE-SOLID",
-                "diameter_mm": 1.2,
-                "mode": "LSM",
-                "gas": "CO2",
-                "synergic": False,
-                "correction": 0.0,
-                "pre_gas_s": 0.0,
-                "post_gas_s": 0.0,
-                "preflow_seconds": 0.0,
-            }
+            settings = step.get("settings") or copy.deepcopy(
+                DEFAULT_DIGITAL_WELD_SETTINGS
+            )
             entry("current_a", "Current (A)", settings["current_a"])
             entry("voltage", "Voltage (V)", settings["voltage"])
             choice("material", "Wire material", settings["material"], MATERIAL_CODES)
@@ -5570,32 +5592,21 @@ class WeldActionGui:
                         voltage_tenths = int(round(
                             float(variables["voltage"].get()) * 10.0
                         ))
-                        settings = {
+                        settings = validate_digital_weld_settings({
                             "current_a": current,
                             "voltage_tenths": voltage_tenths,
-                            "voltage": voltage_tenths / 10.0,
                             "material": variables["material"].get(),
-                            "diameter_mm": float(variables["diameter_mm"].get()),
+                            "diameter_mm": variables["diameter_mm"].get(),
                             "mode": variables["mode"].get(),
                             "gas": variables["gas"].get(),
                             "synergic": variables["synergic"].get(),
-                            "correction": float(variables["correction"].get()),
-                            "pre_gas_s": float(variables["pre_gas_s"].get()),
-                            "post_gas_s": float(variables["post_gas_s"].get()),
-                            "preflow_seconds": float(
-                                variables["preflow_seconds"].get()
-                            ),
-                        }
-                        if not 30 <= current <= 400:
-                            raise ValueError("Current must be in 30..400 A")
-                        if not 100 <= voltage_tenths <= 400:
-                            raise ValueError("Voltage must be in 10.0..40.0 V")
-                        if not 0.0 <= settings["preflow_seconds"] <= 10.0:
-                            raise ValueError("ARC ON pre-flow must be in 0..10 seconds")
-                        build_request(TxState(**{
-                            key: value for key, value in settings.items()
-                            if key not in ("voltage", "preflow_seconds")
-                        }))
+                            "correction": variables["correction"].get(),
+                            "pre_gas_s": variables["pre_gas_s"].get(),
+                            "post_gas_s": variables["post_gas_s"].get(),
+                            "preflow_seconds": variables[
+                                "preflow_seconds"
+                            ].get(),
+                        })
                         updated["settings"] = settings
                 elif updated["type"] == "gas":
                     updated["enabled"] = variables["enabled"].get() == "on"
