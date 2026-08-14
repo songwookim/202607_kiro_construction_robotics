@@ -281,7 +281,7 @@ RViz Goal State 갱신용 Empty 메시지는 표시 상태만 바꾸며 trajecto
 이 사용자 launch는 ros2_control, MoveIt, RViz와 GUI의 Fast DDS transport를
 모두 `UDPv4`로 통일하고 `ROS_LOCALHOST_ONLY=1`로 loopback에 고정한다.
 shared-memory lock 장애와 유선·Wi-Fi NIC 분산으로 endpoint만 발견되고 실제
-topic/service 데이터가 멎는 상태를 방지한다. RB/H600의 별도 TCP에는 영향을
+topic/service 데이터가 멎는 상태를 방지한다. RB/Hi-COMM의 별도 TCP에는 영향을
 주지 않는다.
 
 ## 8. 통신 경계와 고장 해석

@@ -1,5 +1,4 @@
 import math
-import struct
 import threading
 import time
 from types import SimpleNamespace
@@ -26,7 +25,6 @@ from construct_robot.cartesian_path_server import (
     rotate_vector,
 )
 from construct_msgs.action import CartesianPath
-from construct_robot.h600_modbus_bridge import H600Protocol, H600State
 from construct_robot.hicomm_welder import (
     BIT_ARC,
     BIT_FORWARD,
@@ -706,14 +704,18 @@ def test_approved_plan_signature_changes_with_path_or_speed():
     goal.waypoints = [make_pose(x=0.1), make_pose(x=0.2)]
     original = CartesianPathActionServer.plan_signature(goal)
 
-    goal.enable_arc = True
-    assert CartesianPathActionServer.plan_signature(goal) != original
-    goal.enable_arc = False
     goal.velocity_scale = 0.1
     assert CartesianPathActionServer.plan_signature(goal) != original
     goal.velocity_scale = 0.2
     goal.waypoints[1].position.y = 0.001
     assert CartesianPathActionServer.plan_signature(goal) != original
+
+
+def test_cartesian_action_is_motion_only():
+    goal = CartesianPath.Goal()
+    assert not hasattr(goal, "enable_arc")
+    assert not hasattr(goal, "weld_current_a")
+    assert not hasattr(goal, "require_welding_feedback")
 
 
 class _TestLogger:
@@ -738,79 +740,3 @@ def test_cartesian_cancel_is_forwarded_to_active_moveit_execution():
 
     assert response == CancelResponse.ACCEPT
     assert execute_handle.canceled
-
-
-def test_h600_modbus_command_read_and_feedback_write():
-    state = H600State(
-        robot_ready=True,
-        command_robot_error=True,
-        command_touch=True,
-        gas=True,
-        reverse_inching=True,
-        inching=True,
-        arc=True,
-        current_raw=120,
-        voltage_raw=240,
-    )
-    protocol = H600Protocol(state, _TestLogger())
-    response = protocol.process_pdu(struct.pack(">BHH", 0x03, 201, 10))
-    values = struct.unpack(">10H", response[2:])
-    assert values[0] == 1
-    assert values[1] == 0x009F
-    assert values[3:5] == (120, 240)
-
-    state.command_robot_error = False
-    state.command_touch = False
-    state.gas = False
-    state.reverse_inching = False
-    state.inching = True
-    state.arc = False
-    assert state.command_registers()[1] == 0x0002
-    state.reverse_inching = True
-    state.inching = False
-    assert state.command_registers()[1] == 0x0004
-
-    write = (
-        struct.pack(">BHHB", 0x10, 211, 3, 6)
-        + struct.pack(">3H", 0x0020, 111, 222)
-    )
-    assert protocol.process_pdu(write) == struct.pack(">BHH", 0x10, 211, 3)
-    assert state.registers[211] == 0x0020
-    assert state.registers[212] == 111
-    assert state.registers[213] == 222
-
-
-class _WeldSequenceFake:
-    def __init__(self):
-        self.events = []
-        self._arc_on_client = object()
-        self._arc_off_client = object()
-
-    def require_rbpodo_welder(self):
-        self.events.append(("connected",))
-
-    def publish_phase(self, _goal_handle, _request, phase, _progress):
-        self.events.append(("phase", phase))
-
-    def call_arc_service(self, _client, command, description):
-        self.events.append(("command", description, command))
-
-    def wait_for_welding_feedback(self, expected):
-        self.events.append(("feedback", expected))
-
-
-def test_rbpodo_tcp1_to_tcp2_weld_command_sequence():
-    fake = _WeldSequenceFake()
-    goal = CartesianPath.Goal()
-    goal.waypoints = [make_pose(), make_pose(x=0.1)]
-    goal.weld_initial_wait = 0.0
-    goal.weld_finish_wait = 0.0
-    goal.require_welding_feedback = True
-
-    CartesianPathActionServer.start_welding(fake, object(), goal)
-    CartesianPathActionServer.stop_welding(fake, object(), goal)
-
-    commands = [event[1] for event in fake.events if event[0] == "command"]
-    assert commands == ["RBPodo arc_on", "RBPodo arc_off"]
-    feedback = [event for event in fake.events if event[0] == "feedback"]
-    assert feedback == [("feedback", True), ("feedback", False)]

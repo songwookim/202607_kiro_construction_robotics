@@ -90,63 +90,19 @@ the measured robot pose; no configured initial pose is selected or executed.
 Once both arms and MoveGroup are ready, the GUI asks RViz to copy its current
 PlanningScene state into the orange Goal State.
 
-The GUI launch also starts the H600 Modbus bridge derived from `~/test.py`.
-It serves the 201/202/204/205/206 command registers and publishes decoded
-211–213 feedback on `/h600/status`. Its configured H600 port is 502, ARC
-disabled, and nonzero setpoints disabled:
+Welding uses the direct Hi-COMM TCP client integrated into `weld_action_gui`.
+The Cartesian action server is motion-only; D-WELD SET/ON/OFF and welding
+feedback are handled by `hicomm_welder.py` and explicit Sequence Builder steps.
 
 ```bash
-# Physical right RB; keep ARC disabled for the first motion test
 ros2 launch construct_robot weld_action_gui.launch.py \
   right_robot_ip:=192.168.1.12 \
   execute_motion:=true
-
-# Enable welding only after motion and the H600 map are verified
-ros2 launch construct_robot weld_action_gui.launch.py \
-  right_robot_ip:=192.168.1.12 \
-  execute_motion:=true \
-  allow_arc_output:=true \
-  allow_nonzero_setpoints:=true
 ```
-
-With **H600 ARC during execution** enabled, planning creates two separately
-approved trajectories. Execution approaches TCP1 with ARC OFF, performs H600
-pre-flow and ARC ON, optionally waits for register-211 welding feedback, welds
-TCP1→TCP2, then commands ARC OFF, post-flow, and safe output reset. A failure or
-disconnect blocks the weld move and forces outputs off.
-
-The independent Wireshark-style H600 console now controls the TCP listener
-itself. It shows separate **LISTENING** and **H600 CONNECTED** states, editable
-bind host with fixed TCP port 502, all documented register-202 bits, decoded register-211
-heartbeat/status, a live holding-register browser with change highlighting,
-RX/TX MBAP+PDU frames, raw HEX, and CSV export:
-
-```bash
-# Start bridge and diagnostic GUI
-ros2 launch construct_robot h600_console.launch.py
-
-# When weld_action_gui.launch.py already owns the bridge/port
-ros2 launch construct_robot h600_console.launch.py start_bridge:=false
-```
-
-The GUI buttons call `/h600/set_server`; stopping the listener or losing the
-H600 client immediately clears ready/gas/ARC and all setpoints. Register
-monitoring uses `/h600/get_registers` and is intentionally limited to 1000
-registers per request. The default 201..216 view covers the H600 command and
-feedback area.
-
-This project uses H600 Modbus TCP port 502 only. Linux does not allow a normal
-process to bind that privileged port, so give the H600 bridge the deployment's
-approved bind capability/privilege. Do not run the entire RViz/robot stack as
-root just to obtain that port.
-
-See [`docs/H600_MODBUS_BRIDGE.md`](docs/H600_MODBUS_BRIDGE.md) for a
-beginner-oriented explanation of the TCP roles, MBAP/PDU packet format,
-register map, ROS interfaces, and inching diagnostics.
 
 See [`docs/RAINBOW_CONTROL_BOX_IO.md`](docs/RAINBOW_CONTROL_BOX_IO.md) for the
 live DI monitor, guarded DO controls, and a safe procedure for identifying
-H600 wiring.
+control-box wiring.
 
 See [`docs/ADD_LEFT_RB11_CONNECTION.md`](docs/ADD_LEFT_RB11_CONNECTION.md) for
 the atomic `.11` left + `.10` right connection controls, always-on fake RViz

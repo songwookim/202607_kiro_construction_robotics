@@ -76,10 +76,6 @@ class CartesianPathActionClient(Node):
         goal.execute_requested = not self._options.plan_only
         goal.reuse_approved_plan = self._options.execute_approved
         goal.visualize_path = not self._options.hide_path
-        goal.enable_arc = self._options.enable_arc
-        goal.weld_current_a = float(self._options.current_raw)
-        goal.weld_voltage_out_condition = 1
-        goal.weld_voltage = float(self._options.voltage_raw) / 10.0
         if self._scenario == "laser-live-straight":
             try:
                 goal.waypoints = self.scanner_path_from_current_tcp()
@@ -194,16 +190,9 @@ def main(args=None):
     execution.add_argument("--plan-only", action="store_true")
     execution.add_argument("--execute-approved", action="store_true")
     parser.add_argument("--hide-path", action="store_true")
-    parser.add_argument("--enable-arc", action="store_true")
-    parser.add_argument("--current-raw", type=int, default=0)
-    parser.add_argument("--voltage-raw", type=int, default=0)
-    parser.add_argument("--v-offset-raw", type=int, default=0)
     parsed, ros_args = parser.parse_known_args(args=args)
     if not 0.0 < parsed.velocity_scale <= 1.0:
         parser.error("--velocity-scale must be in (0, 1]")
-    for name in ("current_raw", "voltage_raw", "v_offset_raw"):
-        if not 0 <= getattr(parsed, name) <= 65535:
-            parser.error(f"--{name.replace('_', '-')} must be 0..65535")
     rclpy.init(args=ros_args)
     node = CartesianPathActionClient(
         parsed.planning_group,

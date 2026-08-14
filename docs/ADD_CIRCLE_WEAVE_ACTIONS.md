@@ -188,6 +188,6 @@ self.weave_client = ActionClient(self, WeavePath, "weave_path")
 5. FAKE/Plan-only 테스트
 6. REAL RB는 낮은 속도, ARC OFF, 감시 환경에서 확인
 
-중요: Circle/Weave action server에서 ARC를 직접 제어하지 말고,
-기존 `CartesianPath` server의 Plan → Approved Execute → H600 interlock 순서를
-그대로 재사용한다.
+중요: Circle/Weave action server에서 ARC를 직접 제어하지 않는다. 모션은
+`CartesianPath`로 처리하고 용접은 Sequence Builder의 Hi-COMM D-WELD 단계로
+분리한다.

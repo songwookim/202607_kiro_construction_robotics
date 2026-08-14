@@ -57,8 +57,6 @@ one internal action helper.
 | `/weld_action_gui` | `World → right_manipulator_ee_point` TF; `/cartesian_path` feedback/result | `/cartesian_path` goals; `/weld_path_markers`; `/weld_6d_poses` | Acquire/generate/edit a weld path and request right-arm planning |
 | `/laser_weld_path_action_client` | TF for live scenarios; `/cartesian_path` feedback/result | `/cartesian_path` goal | Command-line scenario client |
 | `/cartesian_path_action_server` | `/cartesian_path` goals; `/compute_cartesian_path` response; `/execute_trajectory` result | weld visualization topics; `/display_planned_path`; MoveIt service/action requests | Validate, visualize, plan, optionally execute |
-| `/h600_modbus_bridge` | H600 Modbus FC03/06/16; `/h600/set_command` | `/h600/status`; Modbus responses | Safe H600 command register and feedback bridge |
-| `/h600_modbus_gui` | `/h600/status`; `/h600/traffic`; operator command form | `/h600/set_command` requests | Register dashboard and packet inspector |
 | `/robot_state_publisher` | `/joint_states`, `robot_description` | `/tf`, `/tf_static` | Joint state to link-frame transforms |
 | `/move_group` | `/joint_states`, planning scene and requests | planning services/actions, `/display_planned_path`, monitored scene | MoveIt planning and execution coordinator |
 
@@ -82,8 +80,6 @@ Goal:
 | `execute_requested` | `false` previews/approves; `true` requests controller execution |
 | `reuse_approved_plan` | Execute only the last exactly matching path/speed plan |
 | `visualize_path` | Show/hide compact 6D waypoint markers and connecting line |
-| `enable_arc` | Request H600 ARC only around actual trajectory execution |
-| `weld_*_raw` | H600 current, voltage, and V-offset raw register values |
 
 Feedback contains `current_pose`, `waypoint_index`, and `progress`. Result
 contains `success`, `message`, `final_pose`, and `sampled_path`.
@@ -104,10 +100,6 @@ those generated endpoint names directly.
 | `/weld_6d_poses` | `geometry_msgs/PoseArray` | GUI and action server | RViz |
 | `/display_planned_path` | `moveit_msgs/DisplayTrajectory` | action server, MoveIt/Tesseract demos | RViz |
 | `/monitored_planning_scene` | `moveit_msgs/PlanningScene` | move_group | RViz MotionPlanning display |
-| `/h600/status` | `construct_msgs/WelderStatus` | H600 bridge | GUI and diagnostic tools |
-| `/h600/traffic` | `construct_msgs/ModbusTrace` | H600 bridge | Wireshark-style H600 GUI |
-| `/h600/set_server` | `construct_msgs/SetModbusServer` | H600 GUI/CLI | Start/stop the fixed TCP/502 listener and select bind host |
-| `/h600/get_registers` | `construct_msgs/GetModbusRegisters` | H600 GUI/CLI | Snapshot up to 1000 holding registers |
 
 RViz displays live state from `/joint_states` in the `World` frame. Its
 MotionPlanning gizmo is a local goal-state interactive marker, while plan
@@ -165,7 +157,7 @@ Start the normal physical dual-arm stack:
 ```bash
 source /home/irs/ros2_ws/install/setup.bash
 ros2 launch construct_robot weld_action_gui.launch.py \
-  execute_motion:=false use_h600_bridge:=false use_h600_gui:=false
+  execute_motion:=false
 ```
 
 This still connects both physical RB controllers. `execute_motion:=false`
@@ -214,31 +206,8 @@ ros2 control list_hardware_interfaces
 For actual hardware, verify the controller list, TCP reachability, operation
 mode, and a low velocity scale before enabling `execute_motion:=true`.
 
-## H600 Modbus/ARC
+## Hi-COMM welding
 
-The bridge implements the register behavior prototyped in `~/test.py`:
-
-- command: 201 ready, 202 bit3 gas/bit0 ARC, 204 current, 205 voltage,
-  206 V-offset
-- feedback: 211 status, 212 current, 213 voltage
-- Modbus functions: FC03, FC06, FC16
-- ROS service: `/h600/set_command`
-- ROS status topic: `/h600/status`
-
-ARC ON requires all of these conditions:
-
-1. `allow_arc_output:=true` on the bridge.
-2. An H600 Modbus client is currently connected.
-3. `robot_ready` is true.
-4. For nonzero values, launch `allow_nonzero_setpoints:=true` and send the
-   request safety flag.
-5. MoveIt planning completed fully and `execute_motion` is true.
-
-Inspect it with:
-
-```bash
-ros2 topic echo /h600/status
-ros2 topic echo /h600/traffic
-ros2 service type /h600/set_command
-ros2 node info /h600_modbus_bridge
-```
+The weld GUI connects directly to the digital welder over TCP using
+`hicomm_welder.py`. Welding commands are explicit Sequence Builder D-WELD
+SET/ON/OFF steps and are intentionally separate from `/cartesian_path` motion.

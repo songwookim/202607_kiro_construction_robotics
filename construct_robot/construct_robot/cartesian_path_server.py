@@ -6,7 +6,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Point, Pose, PoseArray
 from moveit_msgs.action import ExecuteTrajectory
-from moveit_msgs.msg import DisplayTrajectory, RobotState
+from moveit_msgs.msg import DisplayTrajectory
 from moveit_msgs.srv import GetCartesianPath
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -14,8 +14,6 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
-from rbpodo_msgs.msg import SystemState
-from rbpodo_msgs.srv import ArcOff, ArcOn
 
 from construct_msgs.action import CartesianPath
 from construct_robot.cartesian_path_common import (
@@ -187,7 +185,7 @@ def make_weld_visualization(waypoints, frame, stamp):
 
 
 class CartesianPathActionServer(Node):
-    """Visualize, plan, and optionally execute Cartesian weld paths."""
+    """Visualize, plan, and optionally execute Cartesian paths."""
 
     def __init__(self) -> None:
         super().__init__("cartesian_path_action_server")
@@ -199,9 +197,6 @@ class CartesianPathActionServer(Node):
         self._approved_plan_response = None
         self._execute_handle_lock = threading.Lock()
         self._active_execute_handle = None
-        self._welder_condition = threading.Condition()
-        self._right_system_state = None
-        self._right_system_state_at = None
         callback_group = ReentrantCallbackGroup()
         marker_qos = QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL
@@ -224,23 +219,6 @@ class CartesianPathActionServer(Node):
             self,
             ExecuteTrajectory,
             "/execute_trajectory",
-            callback_group=callback_group,
-        )
-        self._arc_on_client = self.create_client(
-            ArcOn,
-            "/right_rbpodo_hardware/arc_on",
-            callback_group=callback_group,
-        )
-        self._arc_off_client = self.create_client(
-            ArcOff,
-            "/right_rbpodo_hardware/arc_off",
-            callback_group=callback_group,
-        )
-        self.create_subscription(
-            SystemState,
-            "/right_rbpodo_hardware/system_state",
-            self._right_system_state_callback,
-            10,
             callback_group=callback_group,
         )
         self._server = ActionServer(
@@ -334,41 +312,6 @@ class CartesianPathActionServer(Node):
         self._display_publisher.publish(display)
 
     @staticmethod
-    def trajectory_end_state(response):
-        trajectory = response.solution.joint_trajectory
-        if not trajectory.points:
-            raise RuntimeError("Approach trajectory contains no points")
-        state = RobotState()
-        state.is_diff = True
-        state.joint_state.name = list(trajectory.joint_names)
-        state.joint_state.position = list(trajectory.points[-1].positions)
-        return state
-
-    def plan_weld_sequence(self, request):
-        if len(request.waypoints) < 2:
-            raise RuntimeError("A weld sequence requires TCP1 and TCP2")
-        approach = self.plan_with_moveit(
-            request,
-            waypoints=[request.waypoints[0]],
-            publish=False,
-        )
-        if approach.fraction < 0.999:
-            raise RuntimeError(
-                f"TCP1 approach planned only {approach.fraction:.1%}"
-            )
-        seam = self.plan_with_moveit(
-            request,
-            waypoints=request.waypoints[1:],
-            start_state=self.trajectory_end_state(approach),
-            publish=False,
-        )
-        self.publish_trajectories(
-            approach.start_state,
-            [approach.solution, seam.solution],
-        )
-        return approach, seam
-
-    @staticmethod
     def plan_signature(request):
         """Return the path/planning values which define an approved plan."""
         pose_values = []
@@ -388,7 +331,6 @@ class CartesianPathActionServer(Node):
             request.planning_group,
             request.interpolation_step,
             request.velocity_scale,
-            request.enable_arc,
             tuple(pose_values),
         )
 
@@ -414,112 +356,6 @@ class CartesianPathActionServer(Node):
         with self._approved_plan_lock:
             self._approved_plan_signature = None
             self._approved_plan_response = None
-
-    def _right_system_state_callback(self, message):
-        with self._welder_condition:
-            self._right_system_state = message
-            self._right_system_state_at = time.monotonic()
-            self._welder_condition.notify_all()
-
-    def require_rbpodo_welder(self):
-        with self._welder_condition:
-            fresh = (
-                self._right_system_state_at is not None
-                and time.monotonic() - self._right_system_state_at < 1.0
-            )
-            connected = (
-                fresh
-                and self._arc_on_client.service_is_ready()
-                and self._arc_off_client.service_is_ready()
-            )
-        if not connected:
-            raise RuntimeError(
-                "right RBPodo controller or arc services are unavailable"
-            )
-
-    def wait_for_welding_feedback(self, expected, timeout=5.0):
-        deadline = time.monotonic() + timeout
-        with self._welder_condition:
-            while time.monotonic() < deadline:
-                if (
-                    self._right_system_state is not None
-                    and bool(
-                        (int(self._right_system_state.information_chunk_4)
-                         >> 14) & 0x01
-                    ) == bool(expected)
-                ):
-                    return
-                self._welder_condition.wait(
-                    timeout=min(0.1, max(0.0, deadline - time.monotonic()))
-                )
-        state = "ON" if expected else "OFF"
-        raise RuntimeError(f"RBPodo welding feedback did not become {state}")
-
-    def call_arc_service(self, client, command, description):
-        if not client.wait_for_service(timeout_sec=3.0):
-            raise RuntimeError(f"{description} service unavailable")
-        response = self._wait_for_future(
-            client.call_async(command), 10.0, description
-        )
-        if response is None or not response.success:
-            message = response.message if response is not None else "no response"
-            raise RuntimeError(f"{description} rejected: {message}")
-        self.get_logger().info(response.message)
-
-    @staticmethod
-    def publish_phase(goal_handle, request, phase, progress):
-        feedback = CartesianPath.Feedback()
-        feedback.current_pose = request.waypoints[0]
-        feedback.waypoint_index = 0
-        feedback.progress = float(progress)
-        feedback.phase = phase
-        goal_handle.publish_feedback(feedback)
-
-    def start_welding(self, goal_handle, request):
-        self.require_rbpodo_welder()
-        self.publish_phase(
-            goal_handle,
-            request,
-            "RBPodo ARC ON",
-            0.45,
-        )
-        command = ArcOn.Request()
-        command.initial_wait = request.weld_initial_wait
-        command.speed = 10.0
-        command.acceleration = 50.0
-        command.welding_current = request.weld_current_a
-        command.voltage_out_condition = request.weld_voltage_out_condition
-        command.voltage = request.weld_voltage
-        command.wait_wcr = request.require_welding_feedback
-        command.arc_timeout = 5.0
-        command.wait_after_arc = 0.0
-        command.when_pause = 1
-        command.speed_bar_under_arc = False
-        command.arc_retries = 0
-        command.retries_interval = 0.5
-        self.call_arc_service(self._arc_on_client, command, "RBPodo arc_on")
-        if request.require_welding_feedback:
-            self.publish_phase(
-                goal_handle,
-                request,
-                "WAIT RBPodo ARC FEEDBACK",
-                0.50,
-            )
-            self.wait_for_welding_feedback(True)
-
-    def stop_welding(self, goal_handle, request):
-        self.publish_phase(goal_handle, request, "RBPodo ARC OFF", 0.95)
-        command = ArcOff.Request()
-        command.initial_wait = 0.0
-        command.welding_current = request.weld_current_a
-        command.voltage_out_condition = request.weld_voltage_out_condition
-        command.voltage = request.weld_voltage
-        command.wait_welding_finishing = request.weld_finish_wait
-        command.wait_after_finishing = 0.0
-        self.call_arc_service(self._arc_off_client, command, "RBPodo arc_off")
-        if request.require_welding_feedback:
-            self.wait_for_welding_feedback(False)
-        self.publish_phase(goal_handle, request, "RBPodo ARC OFF CONFIRMED", 0.99)
 
     def execute_moveit_trajectory(self, trajectory):
         if not self._execute_client.wait_for_server(timeout_sec=5.0):
@@ -561,12 +397,6 @@ class CartesianPathActionServer(Node):
             or not math.isfinite(goal_request.velocity_scale)
             or goal_request.velocity_scale <= 0.0
             or goal_request.velocity_scale > 1.0
-            or not math.isfinite(goal_request.weld_initial_wait)
-            or goal_request.weld_initial_wait < 0.0
-            or goal_request.weld_initial_wait > 10.0
-            or not math.isfinite(goal_request.weld_finish_wait)
-            or goal_request.weld_finish_wait < 0.0
-            or goal_request.weld_finish_wait > 10.0
         ):
             self.get_logger().warning(
                 "Rejected empty path, interpolation step, or velocity scale"
@@ -574,18 +404,6 @@ class CartesianPathActionServer(Node):
             return GoalResponse.REJECT
         if not all(pose_is_valid(pose) for pose in goal_request.waypoints):
             self.get_logger().warning("Rejected non-finite pose or zero quaternion")
-            return GoalResponse.REJECT
-        if goal_request.enable_arc and (
-            goal_request.planning_group != "right_manipulator"
-            or not math.isfinite(goal_request.weld_current_a)
-            or goal_request.weld_current_a <= 0.0
-            or not math.isfinite(goal_request.weld_voltage)
-            or goal_request.weld_voltage <= 0.0
-            or goal_request.weld_voltage_out_condition not in (0, 1)
-        ):
-            self.get_logger().warning(
-                "Rejected invalid RBPodo arc settings or non-right arm"
-            )
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
@@ -620,25 +438,13 @@ class CartesianPathActionServer(Node):
                     self.get_logger().info(
                         "Using the exact matching GUI-approved trajectory"
                     )
-                elif request.enable_arc:
-                    moveit_plan = self.plan_weld_sequence(request)
                 else:
                     moveit_plan = self.plan_with_moveit(request)
-                responses = (
-                    moveit_plan
-                    if isinstance(moveit_plan, tuple)
-                    else (moveit_plan,)
-                )
-                incomplete = [
-                    response.fraction
-                    for response in responses
-                    if response.fraction < 0.999
-                ]
-                if incomplete:
+                if moveit_plan.fraction < 0.999:
                     goal_handle.abort()
                     result.success = False
                     result.message = (
-                        f"MoveIt planned only {min(incomplete):.1%} "
+                        f"MoveIt planned only {moveit_plan.fraction:.1%} "
                         "of the Cartesian path"
                     )
                     result.final_pose = request.waypoints[-1]
@@ -697,39 +503,10 @@ class CartesianPathActionServer(Node):
                 return result
             if request.reuse_approved_plan:
                 self.consume_approved_plan()
-            welder_touched = False
             try:
-                if request.enable_arc:
-                    approach, seam = moveit_plan
-                    self.publish_phase(
-                        goal_handle,
-                        request,
-                        "MOVE TO TCP1 · ARC OFF",
-                        0.20,
-                    )
-                    execute_result = self.execute_moveit_trajectory(
-                        approach.solution
-                    )
-                    if execute_result.error_code.val != 1:
-                        raise RuntimeError(
-                            "TCP1 approach failed with MoveIt code "
-                            f"{execute_result.error_code.val}"
-                        )
-                    welder_touched = True
-                    self.start_welding(goal_handle, request)
-                    self.publish_phase(
-                        goal_handle,
-                        request,
-                        "WELD MOVE TCP1 → TCP2",
-                        0.55,
-                    )
-                    execute_result = self.execute_moveit_trajectory(
-                        seam.solution
-                    )
-                else:
-                    execute_result = self.execute_moveit_trajectory(
-                        moveit_plan.solution
-                    )
+                execute_result = self.execute_moveit_trajectory(
+                    moveit_plan.solution
+                )
                 if goal_handle.is_cancel_requested:
                     goal_handle.canceled()
                     result.success = False
@@ -755,14 +532,6 @@ class CartesianPathActionServer(Node):
                 result.final_pose = request.waypoints[-1]
                 result.sampled_path = sampled_path
                 return result
-            finally:
-                if welder_touched:
-                    try:
-                        self.stop_welding(goal_handle, request)
-                    except RuntimeError as error:
-                        self.get_logger().error(
-                            f"Failed to confirm RBPodo ARC OFF: {error}"
-                        )
 
         goal_handle.succeed()
         result.success = True

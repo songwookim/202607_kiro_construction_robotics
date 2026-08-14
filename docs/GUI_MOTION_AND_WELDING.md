@@ -66,14 +66,14 @@ limits. Calling this a trapezoidal profile would be inaccurate. If motion is
 still jerky, compare plans at 5, 2, and 1 mm while keeping velocity fixed, and
 inspect the planned joint trajectory for joint-space jumps before execution.
 
-## Recommended welding scenario integration
+## Welding scenario integration
 
-Keep H600 setpoints and manual ARC controls out of the path GUI. Add a separate
-`WeldingScenario` action/state machine that consumes an already approved path:
+Keep welding state separate from the Cartesian action. The Sequence Builder
+combines approved motion steps with direct Hi-COMM D-WELD commands:
 
 ```text
 READY
-  -> validate robot + H600 feedback + path
+  -> validate robot + Hi-COMM feedback + path
   -> approach TCP1 with ARC OFF
   -> gas pre-flow
   -> ARC ON and confirm welding feedback

@@ -1,7 +1,0 @@
-uint16 start_address
-uint16 count
----
-bool success
-string message
-uint16[] values
-

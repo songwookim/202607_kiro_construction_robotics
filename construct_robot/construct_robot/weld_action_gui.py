@@ -1373,13 +1373,6 @@ class WeldGuiNode(Node):
             velocity_scale,
             interpolation_step,
             True,
-            False,
-            0.0,
-            0.0,
-            0,
-            0.0,
-            0.0,
-            False,
             True,
             False,
             planning_group,
@@ -2091,13 +2084,6 @@ class WeldGuiNode(Node):
         velocity_scale,
         interpolation_step,
         visualize_path,
-        enable_arc,
-        current_a,
-        voltage,
-        voltage_out_condition,
-        preflow_seconds,
-        postflow_seconds,
-        require_welding_feedback,
         execute_requested,
         reuse_approved_plan,
         planning_group,
@@ -2118,13 +2104,6 @@ class WeldGuiNode(Node):
         goal.execute_requested = execute_requested
         goal.reuse_approved_plan = reuse_approved_plan
         goal.visualize_path = visualize_path
-        goal.enable_arc = enable_arc
-        goal.weld_current_a = current_a
-        goal.weld_voltage = voltage
-        goal.weld_voltage_out_condition = voltage_out_condition
-        goal.weld_initial_wait = preflow_seconds
-        goal.weld_finish_wait = postflow_seconds
-        goal.require_welding_feedback = require_welding_feedback
         goal.waypoints = points
         self.request_execution = execute_requested
         self.ui.post(
@@ -2148,8 +2127,6 @@ class WeldGuiNode(Node):
         goal.execute_requested = bool(execute_requested)
         goal.reuse_approved_plan = False
         goal.visualize_path = True
-        # Welding is represented by explicit D_WELD ON/OFF sequence steps.
-        goal.enable_arc = False
         goal.waypoints = copy.deepcopy(step["points"])
         touch_guarded = bool(execute_requested and step.get("touch_guard", False))
         arm = step["planning_group"].removesuffix("_manipulator")
@@ -6852,13 +6829,6 @@ class WeldActionGui:
                 speed,
                 interpolation_step,
                 self.show_path.get(),
-                False,
-                0.0,
-                0.0,
-                0,
-                0.0,
-                0.0,
-                False,
                 execute_requested,
                 execute_requested,
                 planning_group,

@@ -1,7 +1,0 @@
-bool start
-string host
-uint16 port
----
-bool success
-string message
-

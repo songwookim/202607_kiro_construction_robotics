@@ -42,13 +42,11 @@
 사용자 launch 아래의 ros2_control, MoveIt, RViz와 GUI는 모두 Fast DDS
 `UDPv4` transport와 `ROS_LOCALHOST_ONLY=1`을 사용한다. SHM lock 문제와
 유선·Wi-Fi NIC가 동시에 선택되어 로컬 ROS graph가 갈라지는 현상을 피하기
-위한 설정이다. RB 명령/상태와 H600 Modbus는 ROS DDS가 아닌 별도 TCP이므로
-이 설정의 영향을 받지 않는다.
+위한 설정이다. RB 명령/상태와 Hi-COMM은 ROS DDS가 아닌 별도 TCP이므로 이
+설정의 영향을 받지 않는다.
 
 ```bash
-ros2 launch construct_robot weld_action_gui.launch.py \
-  use_h600_bridge:=false \
-  use_h600_gui:=false
+ros2 launch construct_robot weld_action_gui.launch.py
 ```
 
 ### 2.2 진단 목적으로 연결과 Plan만 검사할 때
@@ -58,10 +56,7 @@ cd /home/irs/ros2_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch construct_robot weld_action_gui.launch.py \
-  execute_motion:=false \
-  use_h600_bridge:=false \
-  use_h600_gui:=false
+ros2 launch construct_robot weld_action_gui.launch.py execute_motion:=false
 ```
 
 `execute_motion:=false`는 통신 또는 planning만 분리해서 진단할 때 명시적으로 사용하는 선택 모드다.
@@ -81,10 +76,7 @@ ros2 launch construct_robot weld_action_gui.launch.py \
 작업자가 로봇 앞에 있고 두 펜던트의 안전 상태, TCP/tool/payload, 비상 정지, 저속 설정을 확인한 경우에만 다음처럼 실행한다.
 
 ```bash
-ros2 launch construct_robot weld_action_gui.launch.py \
-  execute_motion:=true \
-  use_h600_bridge:=false \
-  use_h600_gui:=false
+ros2 launch construct_robot weld_action_gui.launch.py execute_motion:=true
 ```
 
 처음에는 현재 자세에서 매우 작은 목표, 낮은 MoveIt velocity/acceleration scaling, 한 팔씩의 dry run, 양팔 순서로 확인한다. 이번 점검에서는 이 명령으로 실제 Execute를 수행하지 않았다.
@@ -109,7 +101,6 @@ Plan 성공은 실제 Execute 성공을 보장하지 않는다. Plan은 MoveIt�
 
 ```text
 weld_action_gui.launch.py
-├─ h600_modbus_bridge/gui        (선택, 기본 OFF)
 ├─ weld_action_gui               (LEFT/RIGHT O/X 표시)
 └─ weld_stack.launch.py          (양팔 REAL 고정)
    ├─ moveit.launch.py
@@ -139,7 +130,7 @@ RViz 표준 `/rviz/moveit/update_goal_state` Empty 이벤트를 한 번 보내�
 
 관련 launch 파일은 다음과 같다.
 
-- [weld_action_gui.launch.py](../construct_robot/launch/weld_action_gui.launch.py): GUI, 선택적 H600, 양팔 stack을 직접 함께 시작한다.
+- [weld_action_gui.launch.py](../construct_robot/launch/weld_action_gui.launch.py): GUI와 양팔 stack을 직접 함께 시작한다.
 - [weld_stack.launch.py](../construct_robot/launch/weld_stack.launch.py): 양팔 REAL RViz, MoveIt/ros2_control과 Cartesian server를 시작한다.
 - [moveit.launch.py](../construct_moveit_config/launch/moveit.launch.py): RViz, 로봇 모델, controller manager, controller spawner, MoveGroup을 시작한다.
 
@@ -186,7 +177,7 @@ RViz MotionPlanning
   → planned trajectory를 RViz에 표시
 ```
 
-Plan 단계에는 H600도 RBPodo 관절 명령도 필요하지 않다. 실제 로봇에 연결한 경우 `/joint_states`는 실제 측정 각도에서 온다.
+Plan 단계에는 Hi-COMM 용접 명령도 RBPodo 관절 명령도 필요하지 않다. 실제 로봇에 연결한 경우 `/joint_states`는 실제 측정 각도에서 온다.
 
 ### Execute
 
@@ -276,7 +267,7 @@ MoveIt이 controller action 이름과 관절을 찾는 설정은 [moveit_control
 | GUI feedback stale 기준 | 5초 | 이보다 오래되면 `connection lost` |
 | GUI 전체 연결 deadline | 90초 | feedback 이후 MoveIt/controller startup 포함 |
 | controller service 응답 timeout | 90초 | Humble 기본 spawner의 짧은 load timeout 회피 |
-| H600 status | 0.2초마다, 5 Hz | H600를 켠 경우 상태 발행 |
+| Hi-COMM cyclic I/O | 40 ms, 25 Hz | 용접기 TX55/RX71 교환 |
 
 RBPodo joint position streaming의 기본 파라미터는 `t1`이 실제 controller period(통상 0.01초, 최소 0.002초), `t2=0.03초`, `gain=0.5`, `alpha=0.5`이다. `t2`는 upstream 기본값을 그대로 유지한다. controller manager의 100 Hz를 무리하게 올리면 명령량과 Linux scheduling jitter가 함께 증가한다. 연결 속도 문제는 제어 주기를 올리기보다 startup timeout과 readiness 순서를 분리해 해결해야 한다.
 
@@ -288,9 +279,9 @@ RBPodo joint position streaming의 기본 파라미터는 `t1`이 실제 control
 | 왼팔 RB 상태 | `192.168.1.11:5001` | request/response 형태의 binary `SystemState` |
 | 오른팔 RB 명령 | `192.168.1.12:5000` | PC → RB, newline으로 끝나는 ASCII 명령 |
 | 오른팔 RB 상태 | `192.168.1.12:5001` | request/response 형태의 binary `SystemState` |
-| H600 Modbus | PC `0.0.0.0:502` listen | PC가 Modbus TCP server, H600가 client |
+| Hi-COMM 용접기 | 설정된 용접기 IP `:60000` | PC가 TCP client, 용접기가 server |
 
-양팔과 H600 통신은 독립적이다. RViz에서 양팔 Plan을 하는 데 H600 bridge, `sudo`, TCP 502가 필요하지 않다. 로봇 연결/계획을 점검할 때 H600를 꺼 두면 원인 범위를 줄일 수 있다.
+양팔과 Hi-COMM 통신은 독립적이다. RViz에서 양팔 Plan을 하는 데 용접기 연결은 필요하지 않다.
 
 ## 11. 주요 ROS 인터페이스
 
@@ -306,9 +297,9 @@ RBPodo joint position streaming의 기본 파라미터는 `t1`이 실제 control
 | action | `/cartesian_path` | weld GUI → 사용자 Cartesian path server |
 | service | `/compute_cartesian_path` | 사용자 Cartesian server → MoveGroup |
 | service | `/right_rbpodo_hardware/set_digital_output` | weld GUI의 오른팔 control-box DO |
-| service/topic | `/h600/*` | 선택적인 용접기 Modbus 경로 |
+| TCP | Hi-COMM `TX55/RX71` | weld GUI ↔ 디지털 용접기 |
 
-RViz의 일반 Plan/Execute 경로는 `/cartesian_path`와 H600를 거치지 않는다. weld GUI의 직선/원호/위빙 기능만 사용자 Cartesian server를 거친다.
+RViz의 일반 Plan/Execute 경로는 `/cartesian_path`와 Hi-COMM을 거치지 않는다. weld GUI의 직선/원호/위빙 기능만 사용자 Cartesian server를 거친다.
 
 ## 12. Joint limit과 collision의 위치
 
