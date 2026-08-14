@@ -1,96 +1,64 @@
-"""User-facing weld GUI which connects both physical RB arms at startup."""
+"""User-facing welding application with the complete motion stack."""
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch.substitutions import PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+from construct_robot.launch_support import (
+    configured_arguments,
+    debugpy_prefix,
+    declare_arguments,
+)
+
+
+MOTION_ARGUMENTS = (
+    "left_robot_ip",
+    "right_robot_ip",
+    "execute_motion",
+    "use_rviz",
+    "rviz_config",
+    "cb_simulation",
+    "fake_sensor_commands",
+    "use_fake_left_hardware",
+    "use_fake_right_hardware",
+    "use_fake_head_hardware",
+    "debug_cartesian_server",
+    "debug_cartesian_server_port",
+)
+GUI_ARGUMENTS = (
+    "debug_gui",
+    "debug_gui_port",
+    "hicomm_source_ip",
+    "hicomm_welder_ip",
+    "hicomm_port",
+)
+
 
 def generate_launch_description():
-    argument_names = (
-        "right_robot_ip",
-        "left_robot_ip",
-        "execute_motion",
-        "use_rviz",
-        "rviz_config",
-        "debug_gui",
-        "debug_gui_port",
-        "debug_cartesian_server",
-        "debug_cartesian_server_port",
-        "use_fake_left_hardware",
-        "use_fake_right_hardware",
-        "use_fake_head_hardware",
-        "hicomm_source_ip",
-        "hicomm_welder_ip",
-        "hicomm_port",
-    )
-    defaults = {
-        "right_robot_ip": "192.168.1.12",
-        "left_robot_ip": "192.168.1.11",
-        "execute_motion": "true",
-        "use_rviz": "true",
-        "rviz_config": "moveit.rviz",
-        "debug_gui": "false",
-        "debug_gui_port": "5678",
-        "debug_cartesian_server": "false",
-        "debug_cartesian_server_port": "5679",
-        "use_fake_left_hardware": "false",
-        "use_fake_right_hardware": "false",
-        "use_fake_head_hardware": "false",
-        "hicomm_source_ip": "192.168.1.2",
-        "hicomm_welder_ip": "192.168.1.10",
-        "hicomm_port": "60000",
-    }
-    arguments = [
-        DeclareLaunchArgument(name, default_value=defaults[name])
-        for name in argument_names
-    ]
     package_share = get_package_share_directory("construct_robot")
-    stack = IncludeLaunchDescription(
+    motion_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(
-                package_share,
-                "launch",
-                "weld_stack.launch.py",
-            )
+            os.path.join(package_share, "launch", "motion_stack.launch.py")
         ),
-        launch_arguments={
-            name: LaunchConfiguration(name)
-            for name in (
-                "right_robot_ip",
-                "left_robot_ip",
-                "execute_motion",
-                "use_rviz",
-                "rviz_config",
-                "debug_cartesian_server",
-                "debug_cartesian_server_port",
-                "use_fake_left_hardware",
-                "use_fake_right_hardware",
-                "use_fake_head_hardware",
-            )
-        }.items(),
+        launch_arguments=configured_arguments(MOTION_ARGUMENTS).items(),
     )
     gui = Node(
         package="construct_robot",
         executable="weld_action_gui",
         output="screen",
-        prefix=PythonExpression([
-            "'/usr/bin/python3 -m debugpy --listen 127.0.0.1:",
-            LaunchConfiguration("debug_gui_port"),
-            " --wait-for-client' if '",
+        prefix=debugpy_prefix(
             LaunchConfiguration("debug_gui"),
-            "' == 'true' else ''",
-        ]),
+            LaunchConfiguration("debug_gui_port"),
+        ),
         parameters=[{
             "expected_execute_motion": ParameterValue(
                 LaunchConfiguration("execute_motion"),
@@ -122,15 +90,8 @@ def generate_launch_description():
             ),
         }],
     )
-    # Fast DDS shared-memory lock files have repeatedly left this stack with
-    # discoverable endpoints but no live topics/services. Keep every process
-    # in this launch on the same UDP transport, including ros2_control, MoveIt,
-    # RViz and the GUI.
-    """
-        export ROS_LOCALHOST_ONLY=1
-        export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-        export ROS_DOMAIN_ID=0
-    """
+    # Avoid stale Fast DDS shared-memory locks by keeping the complete launch
+    # on localhost UDP. These actions must precede all included nodes.
     force_udp_transport = SetEnvironmentVariable(
         "FASTDDS_BUILTIN_TRANSPORTS",
         "UDPv4",
@@ -141,6 +102,6 @@ def generate_launch_description():
     )
     return LaunchDescription(
         [force_udp_transport, local_ros_graph]
-        + arguments
-        + [stack, gui]
+        + declare_arguments(MOTION_ARGUMENTS + GUI_ARGUMENTS)
+        + [motion_stack, gui]
     )

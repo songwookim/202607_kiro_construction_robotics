@@ -1,6 +1,6 @@
-# Dual REAL RB startup
+# Dual RB startup
 
-The user-facing launch always starts both physical RB arms:
+The user-facing launch uses both physical RB arms by default:
 
 - left control box: `192.168.1.11`
 - right control box: `192.168.1.12`
@@ -9,10 +9,10 @@ The user-facing launch always starts both physical RB arms:
 ros2 launch construct_robot weld_action_gui.launch.py
 ```
 
-There is no runtime REAL/FAKE switch, connection service, or
-Connect/Disconnect button. The launch starts `weld_stack.launch.py` directly,
-and that stack constructs both arm hardware components with
-`rbpodo_hardware/RBPodoHardwareInterface`.
+There is no connection service or Connect/Disconnect button. The launch starts
+`motion_stack.launch.py` directly and defaults both arm components to
+`rbpodo_hardware/RBPodoHardwareInterface`. Diagnostic launch profiles can set
+`use_fake_left_hardware` and `use_fake_right_hardware` to `true` explicitly.
 
 ## Startup sequence
 

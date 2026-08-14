@@ -102,7 +102,7 @@ Plan 성공은 실제 Execute 성공을 보장하지 않는다. Plan은 MoveIt�
 ```text
 weld_action_gui.launch.py
 ├─ weld_action_gui               (LEFT/RIGHT O/X 표시)
-└─ weld_stack.launch.py          (양팔 REAL 고정)
+└─ motion_stack.launch.py        (MoveIt/ros2_control + Cartesian server)
    ├─ moveit.launch.py
    │  ├─ rviz2
    │  ├─ ros2_control_node / controller_manager
@@ -113,9 +113,10 @@ weld_action_gui.launch.py
    └─ cartesian_path_action_server
 ```
 
-REAL/FAKE runtime 교체와 connection supervisor는 제거했다. 사용자 launch는 항상
-왼팔 `.11`, 오른팔 `.10`의 실제 hardware를 한 번 시작하고, 종료할 때 전체
-launch가 함께 종료된다. 설정된 initial pose와 fake fallback은 사용하지 않는다.
+기본값은 왼팔 `.11`, 오른팔 `.12`의 실제 hardware이며 connection supervisor나
+GUI Connect/Disconnect 단계는 없다. 진단 시에는 각
+`use_fake_*_hardware` launch 인자로 mock hardware를 명시할 수 있고, 종료할 때
+전체 launch가 함께 종료된다. 설정된 initial pose는 자동 실행하지 않는다.
 
 ROS 2 Humble의 MoveIt RViz에 timestamp가 있는 custom RobotState를 직접
 주입했을 때 다음 crash가 재현된 적이 있다.
@@ -131,7 +132,7 @@ RViz 표준 `/rviz/moveit/update_goal_state` Empty 이벤트를 한 번 보내�
 관련 launch 파일은 다음과 같다.
 
 - [weld_action_gui.launch.py](../construct_robot/launch/weld_action_gui.launch.py): GUI와 양팔 stack을 직접 함께 시작한다.
-- [weld_stack.launch.py](../construct_robot/launch/weld_stack.launch.py): 양팔 REAL RViz, MoveIt/ros2_control과 Cartesian server를 시작한다.
+- [motion_stack.launch.py](../construct_robot/launch/motion_stack.launch.py): RViz, MoveIt/ros2_control과 Cartesian server를 시작한다.
 - [moveit.launch.py](../construct_moveit_config/launch/moveit.launch.py): RViz, 로봇 모델, controller manager, controller spawner, MoveGroup을 시작한다.
 
 ## 5. 시작 및 동기화 순서

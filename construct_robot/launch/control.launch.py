@@ -1,10 +1,23 @@
+"""Standalone ros2_control stack without MoveIt or the welding GUI."""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration
 from launch_ros.actions import Node
+
+from construct_robot.launch_support import declare_arguments
+
+
+CONTROL_ARGUMENTS = (
+    "left_robot_ip",
+    "right_robot_ip",
+    "use_fake_left_hardware",
+    "use_fake_right_hardware",
+    "fake_sensor_commands",
+    "cb_simulation",
+)
 
 
 def generate_launch_description():
@@ -41,22 +54,13 @@ def generate_launch_description():
         ])
     }
 
-    arguments = [
-        DeclareLaunchArgument(
-            "left_robot_ip", default_value="192.168.1.11",
-            description="Left RB Control Box IP"),
-        DeclareLaunchArgument(
-            "right_robot_ip", default_value="192.168.1.12",
-            description="Right RB Control Box IP"),
-        DeclareLaunchArgument(
-            "use_fake_left_hardware", default_value="true"),
-        DeclareLaunchArgument(
-            "use_fake_right_hardware", default_value="true"),
-        DeclareLaunchArgument(
-            "fake_sensor_commands", default_value="false"),
-        DeclareLaunchArgument(
-            "cb_simulation", default_value="false"),
-    ]
+    arguments = declare_arguments(
+        CONTROL_ARGUMENTS,
+        default_overrides={
+            "use_fake_left_hardware": "true",
+            "use_fake_right_hardware": "true",
+        },
+    )
 
     robot_state_publisher = Node(
         package="robot_state_publisher",

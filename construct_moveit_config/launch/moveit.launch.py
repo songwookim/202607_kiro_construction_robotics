@@ -2,7 +2,11 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    OpaqueFunction,
+    RegisterEventHandler,
+)
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -46,7 +50,10 @@ def generate_launch_description():
             description="True when use fake sensor commands",
         ),
         DeclareLaunchArgument("use_fake_left_hardware", default_value="false"),
-        DeclareLaunchArgument("use_fake_right_hardware", default_value="false"),
+        DeclareLaunchArgument(
+            "use_fake_right_hardware",
+            default_value="false",
+        ),
         DeclareLaunchArgument("use_fake_head_hardware", default_value="false"),
         DeclareLaunchArgument(
             "use_rviz",
@@ -95,9 +102,12 @@ def launch_setup(_context):
             file_path="config/construct_robot_0528.urdf.xacro",
             mappings=mappings,
         )
-        .robot_description_semantic(file_path="config/construct_robot_0528.srdf")
+        .robot_description_semantic(
+            file_path="config/construct_robot_0528.srdf"
+        )
         .planning_scene_monitor(
-            publish_robot_description=True, publish_robot_description_semantic=True
+            publish_robot_description=True,
+            publish_robot_description_semantic=True,
         )
         .planning_pipelines(
             pipelines=(
