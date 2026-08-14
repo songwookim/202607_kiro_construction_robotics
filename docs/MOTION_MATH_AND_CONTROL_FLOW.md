@@ -30,7 +30,7 @@ flowchart LR
     LH["Left RBPodoHardwareInterface"]
     RH["Right RBPodoHardwareInterface"]
     LRB["LEFT RB<br/>192.168.1.11"]
-    RRB["RIGHT RB<br/>192.168.1.10"]
+    RRB["RIGHT RB<br/>192.168.1.12"]
   end
 
   GUI -->|"/cartesian_path<br/>Pose[] in World"| AS

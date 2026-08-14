@@ -22,11 +22,7 @@ def generate_launch_description():
         "left_robot_ip",
         "execute_motion",
         "use_rviz",
-        "use_h600_gui",
-        "use_h600_bridge",
         "rviz_config",
-        "allow_arc_output",
-        "allow_nonzero_setpoints",
         "debug_gui",
         "debug_gui_port",
         "debug_cartesian_server",
@@ -34,17 +30,16 @@ def generate_launch_description():
         "use_fake_left_hardware",
         "use_fake_right_hardware",
         "use_fake_head_hardware",
+        "hicomm_source_ip",
+        "hicomm_welder_ip",
+        "hicomm_port",
     )
     defaults = {
-        "right_robot_ip": "192.168.1.10",
+        "right_robot_ip": "192.168.1.12",
         "left_robot_ip": "192.168.1.11",
         "execute_motion": "true",
         "use_rviz": "true",
-        "use_h600_gui": "false",
-        "use_h600_bridge": "false",
         "rviz_config": "moveit.rviz",
-        "allow_arc_output": "false",
-        "allow_nonzero_setpoints": "false",
         "debug_gui": "false",
         "debug_gui_port": "5678",
         "debug_cartesian_server": "false",
@@ -52,6 +47,9 @@ def generate_launch_description():
         "use_fake_left_hardware": "false",
         "use_fake_right_hardware": "false",
         "use_fake_head_hardware": "false",
+        "hicomm_source_ip": "192.168.1.2",
+        "hicomm_welder_ip": "192.168.1.10",
+        "hicomm_port": "60000",
     }
     arguments = [
         DeclareLaunchArgument(name, default_value=defaults[name])
@@ -82,24 +80,6 @@ def generate_launch_description():
             )
         }.items(),
     )
-    h600 = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                package_share,
-                "launch",
-                "h600_console.launch.py",
-            )
-        ),
-        launch_arguments={
-            "start_bridge": LaunchConfiguration("use_h600_bridge"),
-            "use_sudo": "true",
-            "use_gui": LaunchConfiguration("use_h600_gui"),
-            "allow_arc_output": LaunchConfiguration("allow_arc_output"),
-            "allow_nonzero_setpoints": LaunchConfiguration(
-                "allow_nonzero_setpoints"
-            ),
-        }.items(),
-    )
     gui = Node(
         package="construct_robot",
         executable="weld_action_gui",
@@ -124,6 +104,22 @@ def generate_launch_description():
                 LaunchConfiguration("right_robot_ip"),
                 value_type=str,
             ),
+            "use_fake_head_hardware": ParameterValue(
+                LaunchConfiguration("use_fake_head_hardware"),
+                value_type=bool,
+            ),
+            "hicomm_source_ip": ParameterValue(
+                LaunchConfiguration("hicomm_source_ip"),
+                value_type=str,
+            ),
+            "hicomm_welder_ip": ParameterValue(
+                LaunchConfiguration("hicomm_welder_ip"),
+                value_type=str,
+            ),
+            "hicomm_port": ParameterValue(
+                LaunchConfiguration("hicomm_port"),
+                value_type=int,
+            ),
         }],
     )
     # Fast DDS shared-memory lock files have repeatedly left this stack with
@@ -146,5 +142,5 @@ def generate_launch_description():
     return LaunchDescription(
         [force_udp_transport, local_ros_graph]
         + arguments
-        + [h600, stack, gui]
+        + [stack, gui]
     )

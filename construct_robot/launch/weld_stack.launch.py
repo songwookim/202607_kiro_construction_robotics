@@ -31,7 +31,7 @@ def generate_launch_description():
         DeclareLaunchArgument("rviz_config", default_value="moveit.rviz"),
         DeclareLaunchArgument(
             "right_robot_ip",
-            default_value="192.168.1.10",
+            default_value="192.168.1.12",
         ),
         DeclareLaunchArgument(
             "left_robot_ip",
@@ -81,7 +81,6 @@ def generate_launch_description():
                 value_type=bool,
             ),
             "planning_frame": "World",
-            "use_h600_modbus": True,
         }],
     )
     return LaunchDescription(arguments + [moveit, server])

@@ -14,7 +14,7 @@ flowchart LR
   RTC["right_manipulator_controller"]
   CM["controller_manager / ros2_control"]
   HW["RBPodoHardwareInterface"]
-  RB["RB Control Box<br/>192.168.1.10"]
+  RB["RB Control Box<br/>192.168.1.12"]
   JS["/joint_states"]
   RSP["robot_state_publisher"]
   TF["/tf, /tf_static"]
@@ -136,7 +136,7 @@ both arms. The right system uses:
 
 ```text
 hardware_namespace = right
-robot_ip = 192.168.1.10
+robot_ip = 192.168.1.12
 ```
 
 The hardware plugin exposes joint position/velocity/effort command interfaces

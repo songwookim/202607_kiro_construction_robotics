@@ -46,7 +46,7 @@ def generate_launch_description():
             "left_robot_ip", default_value="192.168.1.11",
             description="Left RB Control Box IP"),
         DeclareLaunchArgument(
-            "right_robot_ip", default_value="192.168.1.10",
+            "right_robot_ip", default_value="192.168.1.12",
             description="Right RB Control Box IP"),
         DeclareLaunchArgument(
             "use_fake_left_hardware", default_value="true"),

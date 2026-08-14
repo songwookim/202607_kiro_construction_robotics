@@ -3,7 +3,7 @@
 The user-facing launch always starts both physical RB arms:
 
 - left control box: `192.168.1.11`
-- right control box: `192.168.1.10`
+- right control box: `192.168.1.12`
 
 ```bash
 ros2 launch construct_robot weld_action_gui.launch.py

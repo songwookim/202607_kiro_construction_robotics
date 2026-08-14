@@ -21,7 +21,7 @@ def generate_launch_description():
     left_ip = LaunchConfiguration("left_robot_ip")
     execute_motion = LaunchConfiguration("execute_motion")
     arguments = [
-        DeclareLaunchArgument("right_robot_ip", default_value="192.168.1.10"),
+        DeclareLaunchArgument("right_robot_ip", default_value="192.168.1.12"),
         DeclareLaunchArgument("left_robot_ip", default_value="192.168.1.11"),
         DeclareLaunchArgument("execute_motion", default_value="false"),
         DeclareLaunchArgument("use_rviz", default_value="true"),

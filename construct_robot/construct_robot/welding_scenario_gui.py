@@ -113,7 +113,7 @@ class WeldingScenarioNode(Node):
         self.ui = ui
         self.declare_parameter("expected_execute_motion", True)
         self.declare_parameter("left_robot_ip", "192.168.1.11")
-        self.declare_parameter("right_robot_ip", "192.168.1.10")
+        self.declare_parameter("right_robot_ip", "192.168.1.12")
         self.latest_joint_positions = {}
         self.last_joint_state_at = {"left": None, "right": None}
         self.touch_states = {"left": None, "right": None}
@@ -270,11 +270,11 @@ class WeldingScenarioNode(Node):
         goal.reuse_approved_plan = execute_requested
         goal.visualize_path = True
         goal.enable_arc = True
-        goal.weld_current_raw = settings["current_raw"]
-        goal.weld_voltage_raw = settings["voltage_raw"]
-        goal.weld_v_offset_raw = settings["v_offset_raw"]
-        goal.weld_preflow_seconds = settings["preflow"]
-        goal.weld_postflow_seconds = settings["postflow"]
+        goal.weld_current_a = float(settings["current_raw"])
+        goal.weld_voltage_out_condition = 1
+        goal.weld_voltage = float(settings["voltage_raw"]) / 10.0
+        goal.weld_initial_wait = settings["preflow"]
+        goal.weld_finish_wait = settings["postflow"]
         goal.require_welding_feedback = settings["require_feedback"]
         self.weld_request_is_execution = execute_requested
         self.ui.post(

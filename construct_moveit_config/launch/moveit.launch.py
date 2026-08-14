@@ -37,7 +37,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "right_robot_ip",
-            default_value="192.168.1.10",
+            default_value="192.168.1.12",
             description="Right RB Cobot Control Box IP address",
         ),
         DeclareLaunchArgument(

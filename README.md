@@ -45,7 +45,7 @@ ros2 launch construct_robot weld_action_gui.launch.py
 ```
 
 This command is **not a fake-hardware test**. It targets LEFT
-`192.168.1.11` and RIGHT `192.168.1.10` and activates the arm trajectory
+`192.168.1.11` and RIGHT `192.168.1.12` and activates the arm trajectory
 controllers. Do not start it unattended around a motion-enabled robot.
 
 The pinned Tesseract dependency overlay lives at
@@ -80,7 +80,7 @@ starts MoveIt, RViz, and the GUI in one lifecycle:
 ```bash
 ros2 launch construct_robot weld_action_gui.launch.py \
   left_robot_ip:=192.168.1.11 \
-  right_robot_ip:=192.168.1.10
+  right_robot_ip:=192.168.1.12
 ```
 
 Connection success requires live left/right RBPodo `system_state`, not merely
@@ -98,12 +98,12 @@ disabled, and nonzero setpoints disabled:
 ```bash
 # Physical right RB; keep ARC disabled for the first motion test
 ros2 launch construct_robot weld_action_gui.launch.py \
-  right_robot_ip:=192.168.1.10 \
+  right_robot_ip:=192.168.1.12 \
   execute_motion:=true
 
 # Enable welding only after motion and the H600 map are verified
 ros2 launch construct_robot weld_action_gui.launch.py \
-  right_robot_ip:=192.168.1.10 \
+  right_robot_ip:=192.168.1.12 \
   execute_motion:=true \
   allow_arc_output:=true \
   allow_nonzero_setpoints:=true

@@ -13,7 +13,7 @@
 | 항목 | 결과 |
 | --- | --- |
 | 왼팔 REAL 연결 | `192.168.1.11`, 명령/상태 TCP 성공 |
-| 오른팔 REAL 연결 | `192.168.1.10`, 명령/상태 TCP 성공 |
+| 오른팔 REAL 연결 | `192.168.1.12`, 명령/상태 TCP 성공 |
 | 양팔 실제 feedback | 양쪽 `system_state`의 지속 수신 확인 |
 | steady feedback | 5.09초 동안 왼팔 50회, 오른팔 47회 수신 |
 | command socket backlog | 양팔 TCP 5000 `Recv-Q=0` |
@@ -145,7 +145,7 @@ RViz 표준 `/rviz/moveit/update_goal_state` Empty 이벤트를 한 번 보내�
 
 ## 5. 시작 및 동기화 순서
 
-1. 왼팔 `192.168.1.11`, 오른팔 `192.168.1.10` hardware를 함께 생성한다.
+1. 왼팔 `192.168.1.11`, 오른팔 `192.168.1.12` hardware를 함께 생성한다.
 2. 각 arm이 명령/상태 TCP를 열고 measured `jnt_ang`을 읽는다.
 3. hardware activation이 position state와 첫 command를 측정값으로 맞춘다.
 4. controller spawner가 controller manager 응답을 최대 90초 기다린다.
@@ -286,8 +286,8 @@ RBPodo joint position streaming의 기본 파라미터는 `t1`이 실제 control
 | --- | --- | --- |
 | 왼팔 RB 명령 | `192.168.1.11:5000` | PC → RB, newline으로 끝나는 ASCII 명령 |
 | 왼팔 RB 상태 | `192.168.1.11:5001` | request/response 형태의 binary `SystemState` |
-| 오른팔 RB 명령 | `192.168.1.10:5000` | PC → RB, newline으로 끝나는 ASCII 명령 |
-| 오른팔 RB 상태 | `192.168.1.10:5001` | request/response 형태의 binary `SystemState` |
+| 오른팔 RB 명령 | `192.168.1.12:5000` | PC → RB, newline으로 끝나는 ASCII 명령 |
+| 오른팔 RB 상태 | `192.168.1.12:5001` | request/response 형태의 binary `SystemState` |
 | H600 Modbus | PC `0.0.0.0:502` listen | PC가 Modbus TCP server, H600가 client |
 
 양팔과 H600 통신은 독립적이다. RViz에서 양팔 Plan을 하는 데 H600 bridge, `sudo`, TCP 502가 필요하지 않다. 로봇 연결/계획을 점검할 때 H600를 꺼 두면 원인 범위를 줄일 수 있다.

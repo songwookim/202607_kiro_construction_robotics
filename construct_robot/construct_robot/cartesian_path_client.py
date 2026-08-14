@@ -77,9 +77,9 @@ class CartesianPathActionClient(Node):
         goal.reuse_approved_plan = self._options.execute_approved
         goal.visualize_path = not self._options.hide_path
         goal.enable_arc = self._options.enable_arc
-        goal.weld_current_raw = self._options.current_raw
-        goal.weld_voltage_raw = self._options.voltage_raw
-        goal.weld_v_offset_raw = self._options.v_offset_raw
+        goal.weld_current_a = float(self._options.current_raw)
+        goal.weld_voltage_out_condition = 1
+        goal.weld_voltage = float(self._options.voltage_raw) / 10.0
         if self._scenario == "laser-live-straight":
             try:
                 goal.waypoints = self.scanner_path_from_current_tcp()

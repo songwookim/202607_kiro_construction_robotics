@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="construct_robot_0528">
-    <xacro:arg name="right_robot_ip" default="192.168.1.10" />
+    <xacro:arg name="right_robot_ip" default="192.168.1.12" />
     <xacro:arg name="left_robot_ip" default="192.168.1.11" />
     <xacro:arg name="cb_simulation" default="false" />
     <xacro:arg name="use_fake_left_hardware" default="false" />
