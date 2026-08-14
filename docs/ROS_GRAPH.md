@@ -21,6 +21,8 @@ flowchart LR
   RVIZ["RViz"]
 
   GUI -->|"/cartesian_path action"| AS
+  GUI -->|"named-pose /move_action"| MG
+  GUI -->|"approved RViz /execute_trajectory"| ET
   AS -->|"/compute_cartesian_path service"| MG
   AS -->|"/execute_trajectory action"| ET
   ET -->|"/right_manipulator_controller/<br/>follow_joint_trajectory action"| RTC
@@ -40,6 +42,13 @@ The normal MoveIt execution path does **not** call RB Podo `move_j` or `move_l`
 actions. The joint trajectory controller writes ros2_control position command
 interfaces. `RBPodoHardwareInterface::write()` then streams those positions to
 the control box using `move_servo_j`.
+
+The GUI uses the custom `/cartesian_path` action for Cartesian seam motion.
+Named joint poses use MoveIt's standard `/move_action`, while execution of an
+already approved RViz trajectory uses `/execute_trajectory`. These interfaces
+have different request/result types, but the GUI routes their common goal
+submission, acceptance, timeout, cancellation, and result lifecycle through
+one internal action helper.
 
 ## Application nodes
 

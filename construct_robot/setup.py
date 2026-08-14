@@ -33,7 +33,7 @@ setup(
             'welding_scenario_gui = construct_robot.welding_scenario_gui:main',
             'h600_modbus_bridge = construct_robot.h600_modbus_bridge:main',
             'h600_modbus_gui = construct_robot.h600_modbus_gui:main',
-            'robust_controller_spawner = construct_robot.robust_controller_spawner:main',
+            'controller_spawner = construct_robot.controller_spawner:main',
         ],
     },
 )

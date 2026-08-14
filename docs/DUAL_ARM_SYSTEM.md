@@ -115,7 +115,7 @@ weld_action_gui.launch.py
    ├─ moveit.launch.py
    │  ├─ rviz2
    │  ├─ ros2_control_node / controller_manager
-   │  ├─ robust_controller_spawner
+   │  ├─ controller_spawner
    │  ├─ move_group              (spawner 완료 후 시작)
    │  ├─ robot_state_publisher
    │  └─ static TF: World→world, World→link0

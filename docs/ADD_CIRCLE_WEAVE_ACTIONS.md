@@ -152,7 +152,7 @@ weave_server = Node(
 
 ## 6. GUI client를 별도 action으로 바꾸기
 
-`weld_action_gui.py`의 `WeldActionNode.__init__()`에 client를 추가한다.
+`weld_action_gui.py`의 `WeldGuiNode.__init__()`에 client를 추가한다.
 
 ```python
 self.circle_client = ActionClient(self, CirclePath, "circle_path")

@@ -10,7 +10,7 @@ from controller_manager_msgs.srv import (
 from rclpy.utilities import remove_ros_args
 
 
-class RobustControllerSpawner:
+class ControllerSpawner:
     def __init__(self, node, manager, response_timeout):
         self.node = node
         self.response_timeout = response_timeout
@@ -94,8 +94,8 @@ def main(args=None):
     parsed = parser.parse_args(remove_ros_args(args=raw_args)[1:])
 
     rclpy.init(args=raw_args)
-    node = rclpy.create_node("robust_controller_spawner")
-    spawner = RobustControllerSpawner(
+    node = rclpy.create_node("controller_spawner")
+    spawner = ControllerSpawner(
         node,
         parsed.controller_manager,
         parsed.response_timeout,

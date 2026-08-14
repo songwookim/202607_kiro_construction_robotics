@@ -194,9 +194,9 @@ def launch_setup(_context):
         output="both",
     )
 
-    # Humble's stock spawner does not apply --service-call-timeout to its
-    # load_controller call. On this target a valid response can exceed its
-    # hard-coded 10 s default, causing a retry/"already loaded" failure.
+    # This package's controller spawner applies one configurable timeout to
+    # load, configure, and activate calls. Humble's stock executable does not
+    # apply --service-call-timeout consistently to all three operations.
     controllers = ["joint_state_broadcaster"]
     if execution_enabled:
         controllers.extend(
@@ -209,7 +209,7 @@ def launch_setup(_context):
 
     controllers_spawner = Node(
         package="construct_robot",
-        executable="robust_controller_spawner",
+        executable="controller_spawner",
         arguments=[
             *controllers,
             "--controller-manager",

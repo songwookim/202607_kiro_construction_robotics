@@ -2,6 +2,7 @@ import math
 import struct
 import threading
 import time
+from types import SimpleNamespace
 
 from geometry_msgs.msg import Pose
 from moveit_msgs.msg import RobotTrajectory
@@ -41,6 +42,7 @@ from construct_robot.hicomm_welder import (
 )
 from construct_robot.weld_action_gui import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
+    WeldGuiNode,
     aligned_wait_pose,
     corner_seam_from_touches,
     corner_endpoint_from_two_touches,
@@ -438,6 +440,46 @@ def test_hicomm_status_callback_is_coalesced_on_callback_thread():
     callback_thread.join(timeout=0.25)
 
     assert received == [1, 3]
+
+
+def test_weld_gui_action_waiter_returns_result_and_clears_active_goal():
+    expected_result = object()
+
+    class CompletedFuture:
+        def __init__(self, value):
+            self.value = value
+
+        def result(self):
+            return self.value
+
+        def add_done_callback(self, callback):
+            callback(self)
+
+    class GoalHandle:
+        accepted = True
+
+        @staticmethod
+        def get_result_async():
+            return CompletedFuture(SimpleNamespace(result=expected_result))
+
+    class ActionClient:
+        @staticmethod
+        def wait_for_server(timeout_sec):
+            return timeout_sec == 3.0
+
+        @staticmethod
+        def send_goal_async(_goal):
+            return CompletedFuture(GoalHandle())
+
+    node = SimpleNamespace(active_motion_goal=None)
+    result = WeldGuiNode._send_action_goal_and_wait(
+        node,
+        ActionClient(),
+        object(),
+        "test motion",
+    )
+    assert result is expected_result
+    assert node.active_motion_goal is None
 
 
 def test_interpolation_handles_antipodal_quaternions():

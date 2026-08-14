@@ -488,7 +488,7 @@ def load_initial_state_yaml(path):
     return planning_group, tuple(names), positions, tcp
 
 
-class WeldActionNode(Node):
+class WeldGuiNode(Node):
     """ROS interface used by the editable weld-path GUI."""
 
     def __init__(self, ui):
@@ -502,7 +502,9 @@ class WeldActionNode(Node):
         self.declare_parameter("hicomm_source_ip", "192.168.1.2")
         self.declare_parameter("hicomm_welder_ip", "192.168.1.10")
         self.declare_parameter("hicomm_port", 60000)
-        self.client = ActionClient(self, CartesianPath, "cartesian_path")
+        self.cartesian_motion_client = ActionClient(
+            self, CartesianPath, "cartesian_path"
+        )
         self.move_group_client = ActionClient(
             self,
             MoveGroup,
@@ -513,11 +515,11 @@ class WeldActionNode(Node):
             ExecuteTrajectory,
             "/execute_trajectory",
         )
-        self.cartesian_path_client = self.create_client(
+        self.cartesian_planning_client = self.create_client(
             GetCartesianPath,
             "/compute_cartesian_path",
         )
-        self.trajectory_clients = {
+        self.joint_trajectory_clients = {
             "left": ActionClient(
                 self,
                 FollowJointTrajectory,
@@ -534,7 +536,7 @@ class WeldActionNode(Node):
                 "/robot_head_controller/follow_joint_trajectory",
             ),
         }
-        self.trajectory_cancel_clients = {
+        self.joint_trajectory_cancel_clients = {
             arm: self.create_client(
                 CancelGoal,
                 f"/{CONTROLLER_NAMES[arm]}/follow_joint_trajectory/"
@@ -563,7 +565,7 @@ class WeldActionNode(Node):
         )
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.goal_handle = None
+        self.active_motion_goal = None
         self.active_touch_probe = None
         self.touch_probe_stop_requested = threading.Event()
         self.touch_probe_controller_deactivated = False
@@ -850,6 +852,65 @@ class WeldActionNode(Node):
             return False, f"{description} timed out"
         return outcome["value"]
 
+    def _send_action_goal_and_wait(
+        self,
+        client,
+        goal,
+        description,
+        *,
+        result_timeout=300.0,
+        on_accepted=None,
+    ):
+        """Submit an action goal and block only the calling worker thread."""
+        if not client.wait_for_server(timeout_sec=3.0):
+            raise RuntimeError(f"{description} action server unavailable")
+        accepted = threading.Event()
+        finished = threading.Event()
+        outcome = {}
+
+        def result_ready(future):
+            try:
+                outcome["result"] = future.result().result
+            except Exception as error:
+                outcome["error"] = str(error)
+            finished.set()
+
+        def goal_ready(future):
+            try:
+                handle = future.result()
+                if not handle.accepted:
+                    outcome["error"] = f"{description} goal rejected"
+                    finished.set()
+                    return
+                outcome["handle"] = handle
+                self.active_motion_goal = handle
+                if on_accepted is not None:
+                    on_accepted(handle)
+                handle.get_result_async().add_done_callback(result_ready)
+            except Exception as error:
+                outcome["error"] = str(error)
+                finished.set()
+            finally:
+                accepted.set()
+
+        client.send_goal_async(goal).add_done_callback(goal_ready)
+        if not accepted.wait(timeout=5.0):
+            raise TimeoutError(f"{description} goal response timed out")
+        if not finished.wait(timeout=result_timeout):
+            handle = outcome.get("handle")
+            if handle is not None:
+                try:
+                    handle.cancel_goal_async()
+                except Exception:
+                    pass
+            raise TimeoutError(f"{description} timed out")
+        handle = outcome.get("handle")
+        if handle is self.active_motion_goal:
+            self.active_motion_goal = None
+        if "error" in outcome:
+            raise RuntimeError(outcome["error"])
+        return outcome["result"]
+
     def _check_robot_feedback(self):
         self._request_controller_states()
         feedback_timeout = max(
@@ -868,7 +929,7 @@ class WeldActionNode(Node):
                 not self.execute_motion_enabled
                 or (
                     self.controller_states[arm] == "active"
-                    and self.trajectory_clients[arm].server_is_ready()
+                    and self.joint_trajectory_clients[arm].server_is_ready()
                 )
             )
             stack_ready = (
@@ -1027,7 +1088,7 @@ class WeldActionNode(Node):
         wait_name,
     ):
         """Resolve and return the joint state at a corrected teaching TCP."""
-        while rclpy.ok() and not self.cartesian_path_client.wait_for_service(
+        while rclpy.ok() and not self.cartesian_planning_client.wait_for_service(
             timeout_sec=1.0
         ):
             self.get_logger().warning(
@@ -1054,7 +1115,7 @@ class WeldActionNode(Node):
                 outcome["error"] = str(error)
             finished.set()
 
-        self.cartesian_path_client.call_async(request).add_done_callback(
+        self.cartesian_planning_client.call_async(request).add_done_callback(
             response_ready
         )
         while rclpy.ok() and not finished.wait(timeout=0.2):
@@ -1307,7 +1368,7 @@ class WeldActionNode(Node):
             self.ui.post(self.ui.touch_probe_failed, str(error))
             return
         self.publish_points(points, True)
-        self.send(
+        self.submit_cartesian_motion(
             points,
             velocity_scale,
             interpolation_step,
@@ -1339,7 +1400,7 @@ class WeldActionNode(Node):
         if probe is None:
             return
         arm, kind, planning_group, start, speed, interpolation = probe
-        handle = self.goal_handle
+        handle = self.active_motion_goal
         action_finished = threading.Event()
         if handle is not None:
             try:
@@ -1430,7 +1491,7 @@ class WeldActionNode(Node):
 
     def cancel_controller_goals(self, arm):
         """Cancel every active FollowJointTrajectory goal for one arm."""
-        client = self.trajectory_cancel_clients.get(arm)
+        client = self.joint_trajectory_cancel_clients.get(arm)
         if client is None or not client.wait_for_service(timeout_sec=0.25):
             return False, f"{arm} trajectory cancel service unavailable"
         request = CancelGoal.Request()
@@ -1493,7 +1554,7 @@ class WeldActionNode(Node):
             arm, pose_name = guard
             self.touch_guard_triggered.set()
             self.touch_guard_stop_success = False
-            handle = self.goal_handle
+            handle = self.active_motion_goal
             if handle is not None:
                 try:
                     handle.cancel_goal_async()
@@ -1664,7 +1725,7 @@ class WeldActionNode(Node):
                     raise RuntimeError(activation_message)
                 self.touch_probe_controller_deactivated = False
             points = linear_pose_waypoints(touched, start, 2)
-            success, message = self.run_sequence_motion(
+            success, message = self.run_sequence_cartesian_motion(
                 {
                     "planning_group": planning_group,
                     "interpolation_step": step,
@@ -1689,7 +1750,7 @@ class WeldActionNode(Node):
 
     def stop_auto_motion(self, arm):
         """Stop any auto-seam motion and restore an idle active controller."""
-        handle = self.goal_handle
+        handle = self.active_motion_goal
         if handle is not None:
             try:
                 handle.cancel_goal_async()
@@ -1917,7 +1978,7 @@ class WeldActionNode(Node):
                 self.active_touch_guard = None
             self.ui.post(self.ui.error, "Taught-pose execution rejected")
             return
-        self.goal_handle = goal_handle
+        self.active_motion_goal = goal_handle
         if touch_guarded and self.touch_guard_triggered.is_set():
             goal_handle.cancel_goal_async()
         goal_handle.get_result_async().add_done_callback(
@@ -2024,7 +2085,7 @@ class WeldActionNode(Node):
             f"distance={distance * 1000.0:.1f} mm · {count} poses",
         )
 
-    def send(
+    def submit_cartesian_motion(
         self,
         points,
         velocity_scale,
@@ -2044,7 +2105,7 @@ class WeldActionNode(Node):
         if not points:
             self.ui.post(self.ui.error, "Create weld points first")
             return
-        if not self.client.wait_for_server(timeout_sec=3.0):
+        if not self.cartesian_motion_client.wait_for_server(timeout_sec=3.0):
             self.ui.post(
                 self.ui.error,
                 "cartesian_path action server unavailable",
@@ -2071,17 +2132,15 @@ class WeldActionNode(Node):
             velocity_scale,
             execute_requested,
         )
-        self.goal_handle = None
-        future = self.client.send_goal_async(
+        self.active_motion_goal = None
+        future = self.cartesian_motion_client.send_goal_async(
             goal,
-            feedback_callback=self.feedback,
+            feedback_callback=self._cartesian_feedback_received,
         )
-        future.add_done_callback(self.goal_response)
+        future.add_done_callback(self._cartesian_goal_response)
 
-    def run_sequence_motion(self, step, execute_requested):
+    def run_sequence_cartesian_motion(self, step, execute_requested):
         """Plan or execute one stored path and block only the worker thread."""
-        if not self.client.wait_for_server(timeout_sec=3.0):
-            return False, "cartesian_path action server unavailable"
         goal = CartesianPath.Goal()
         goal.planning_group = step["planning_group"]
         goal.interpolation_step = step["interpolation_step"]
@@ -2106,46 +2165,23 @@ class WeldActionNode(Node):
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
             self.touch_guard_stop_success = False
-            self.goal_handle = None
+            self.active_motion_goal = None
             self.active_touch_guard = (arm, guard_name)
             self.ui.post(
                 self.ui.log,
                 f"DI8 stop guard armed only for {guard_name}",
             )
-        accepted = threading.Event()
-        finished = threading.Event()
-        outcome = {}
-
-        def result_ready(future):
-            try:
-                result = future.result().result
-                outcome["value"] = (bool(result.success), result.message)
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-            finished.set()
-
-        def goal_ready(future):
-            try:
-                handle = future.result()
-                if not handle.accepted:
-                    outcome["value"] = (False, "action goal rejected")
-                    finished.set()
-                else:
-                    self.goal_handle = handle
-                    if touch_guarded and self.touch_guard_triggered.is_set():
-                        handle.cancel_goal_async()
-                    handle.get_result_async().add_done_callback(result_ready)
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-                finished.set()
-            accepted.set()
-
         try:
-            self.client.send_goal_async(goal).add_done_callback(goal_ready)
-            if not accepted.wait(timeout=5.0):
-                return False, "action goal response timed out"
-            if not finished.wait(timeout=300.0):
-                return False, "sequence motion timed out"
+            result = self._send_action_goal_and_wait(
+                self.cartesian_motion_client,
+                goal,
+                "Cartesian motion",
+                on_accepted=(
+                    lambda handle: handle.cancel_goal_async()
+                    if touch_guarded and self.touch_guard_triggered.is_set()
+                    else None
+                ),
+            )
             if touch_guarded and self.touch_guard_triggered.is_set():
                 if not self.touch_guard_stop_complete.wait(timeout=5.0):
                     return False, f"{guard_name} DI8 stop confirmation timed out"
@@ -2162,15 +2198,15 @@ class WeldActionNode(Node):
                         else "sequence stopped"
                     )
                 )
-            return outcome["value"]
+            return bool(result.success), result.message
+        except (RuntimeError, TimeoutError) as error:
+            return False, str(error)
         finally:
             if touch_guarded and self.active_touch_guard == (arm, guard_name):
                 self.active_touch_guard = None
 
     def run_sequence_named_pose(self, step, execute_requested):
         """Plan or plan-and-execute one taught joint pose."""
-        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
-            return False, "MoveGroup action server unavailable"
         goal = MoveGroup.Goal()
         goal.request.group_name = step["planning_group"]
         goal.request.num_planning_attempts = int(
@@ -2213,54 +2249,17 @@ class WeldActionNode(Node):
                 self.ui.log,
                 "DI8 stop guard armed for Weld start pose approach",
             )
-        accepted = threading.Event()
-        finished = threading.Event()
-        outcome = {}
-
-        def result_ready(future):
-            try:
-                result = future.result().result
-                success = result.error_code.val == 1
-                if success and not execute_requested:
-                    display = DisplayTrajectory()
-                    display.trajectory_start = result.trajectory_start
-                    display.trajectory.append(result.planned_trajectory)
-                    self.display_trajectory_publisher.publish(display)
-                outcome["value"] = (
-                    success,
-                    (
-                        f"{step['pose_label']} "
-                        f"{'reached' if execute_requested else 'planned in RViz'}"
-                        if success
-                        else f"MoveIt code {result.error_code.val}"
-                    ),
-                )
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-            finished.set()
-
-        def goal_ready(future):
-            try:
-                handle = future.result()
-                if not handle.accepted:
-                    outcome["value"] = (False, "MoveGroup goal rejected")
-                    finished.set()
-                else:
-                    self.goal_handle = handle
-                    if touch_guarded and self.touch_guard_triggered.is_set():
-                        handle.cancel_goal_async()
-                    handle.get_result_async().add_done_callback(result_ready)
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-                finished.set()
-            accepted.set()
-
         try:
-            self.move_group_client.send_goal_async(goal).add_done_callback(goal_ready)
-            if not accepted.wait(timeout=5.0):
-                return False, "MoveGroup goal response timed out"
-            if not finished.wait(timeout=300.0):
-                return False, "named-pose motion timed out"
+            result = self._send_action_goal_and_wait(
+                self.move_group_client,
+                goal,
+                "MoveGroup",
+                on_accepted=(
+                    lambda handle: handle.cancel_goal_async()
+                    if touch_guarded and self.touch_guard_triggered.is_set()
+                    else None
+                ),
+            )
             if touch_guarded and self.touch_guard_triggered.is_set():
                 if not self.touch_guard_stop_complete.wait(timeout=5.0):
                     return False, "DI8 stop confirmation timed out"
@@ -2277,7 +2276,20 @@ class WeldActionNode(Node):
                         else "sequence stopped"
                     )
                 )
-            return outcome["value"]
+            success = result.error_code.val == 1
+            if success and not execute_requested:
+                display = DisplayTrajectory()
+                display.trajectory_start = result.trajectory_start
+                display.trajectory.append(result.planned_trajectory)
+                self.display_trajectory_publisher.publish(display)
+            return success, (
+                f"{step['pose_label']} "
+                f"{'reached' if execute_requested else 'planned in RViz'}"
+                if success
+                else f"MoveIt code {result.error_code.val}"
+            )
+        except (RuntimeError, TimeoutError) as error:
+            return False, str(error)
         finally:
             if touch_guarded and self.active_touch_guard == (
                 arm, step["pose_name"]
@@ -2296,56 +2308,28 @@ class WeldActionNode(Node):
                 f"stored RViz plan previewed · "
                 f"{len(display.trajectory)} trajectory(s)"
             )
-        if not self.execute_trajectory_client.wait_for_server(timeout_sec=3.0):
-            return False, "ExecuteTrajectory action server unavailable"
         for index, trajectory in enumerate(display.trajectory, start=1):
-            accepted = threading.Event()
-            finished = threading.Event()
-            outcome = {}
             goal = ExecuteTrajectory.Goal()
             goal.trajectory = copy.deepcopy(trajectory)
-
-            def result_ready(future):
-                try:
-                    result = future.result().result
-                    outcome["value"] = (
-                        result.error_code.val == 1,
-                        f"MoveIt code {result.error_code.val}",
-                    )
-                except Exception as error:
-                    outcome["value"] = (False, str(error))
-                finished.set()
-
-            def goal_ready(future):
-                try:
-                    handle = future.result()
-                    if not handle.accepted:
-                        outcome["value"] = (False, "trajectory goal rejected")
-                        finished.set()
-                    else:
-                        self.goal_handle = handle
-                        handle.get_result_async().add_done_callback(result_ready)
-                except Exception as error:
-                    outcome["value"] = (False, str(error))
-                    finished.set()
-                accepted.set()
-
-            self.execute_trajectory_client.send_goal_async(goal).add_done_callback(
-                goal_ready
-            )
-            if not accepted.wait(timeout=5.0):
-                return False, f"RViz trajectory {index} response timed out"
-            if not finished.wait(timeout=300.0):
-                return False, f"RViz trajectory {index} execution timed out"
-            success, message = outcome["value"]
-            if not success:
-                return False, f"RViz trajectory {index} failed · {message}"
+            try:
+                result = self._send_action_goal_and_wait(
+                    self.execute_trajectory_client,
+                    goal,
+                    f"RViz trajectory {index}",
+                )
+            except (RuntimeError, TimeoutError) as error:
+                return False, str(error)
+            if result.error_code.val != 1:
+                return False, (
+                    f"RViz trajectory {index} failed · "
+                    f"MoveIt code {result.error_code.val}"
+                )
         return True, (
             f"executed exact stored RViz plan · "
             f"{len(display.trajectory)} trajectory(s)"
         )
 
-    def feedback(self, message):
+    def _cartesian_feedback_received(self, message):
         feedback = message.feedback
         self.ui.post(
             self.ui.progress,
@@ -2355,13 +2339,15 @@ class WeldActionNode(Node):
             feedback.phase,
         )
 
-    def goal_response(self, future):
+    def _cartesian_goal_response(self, future):
         try:
-            self.goal_handle = future.result()
+            self.active_motion_goal = future.result()
         except Exception as error:
+            self.active_motion_goal = None
             self.ui.post(self.ui.error, str(error))
             return
-        if not self.goal_handle.accepted:
+        if not self.active_motion_goal.accepted:
+            self.active_motion_goal = None
             self.ui.post(self.ui.error, "Action goal rejected")
             return
         operation = (
@@ -2370,21 +2356,26 @@ class WeldActionNode(Node):
             else "MoveIt plan preview"
         )
         self.ui.post(self.ui.log, f"Action accepted · {operation}")
-        result = self.goal_handle.get_result_async()
+        result = self.active_motion_goal.get_result_async()
         result.add_done_callback(
-            lambda completed, handle=self.goal_handle: self.result(
-                completed, handle
+            lambda completed, handle=self.active_motion_goal: (
+                self._cartesian_result_received(completed, handle)
             )
         )
 
-    def result(self, future, goal_handle=None):
-        if goal_handle is not None and goal_handle is not self.goal_handle:
+    def _cartesian_result_received(self, future, goal_handle=None):
+        if (
+            goal_handle is not None
+            and goal_handle is not self.active_motion_goal
+        ):
             self.ui.post(
                 self.ui.log,
                 "Ignored completion from a superseded Cartesian goal",
             )
             return
         result = future.result().result
+        if goal_handle is self.active_motion_goal:
+            self.active_motion_goal = None
         if result.success:
             self.ui.post(
                 self.ui.finish,
@@ -2400,9 +2391,9 @@ class WeldActionNode(Node):
         else:
             self.ui.post(self.ui.error, result.message)
 
-    def cancel(self):
-        if self.goal_handle is not None:
-            self.goal_handle.cancel_goal_async()
+    def cancel_active_motion(self):
+        if self.active_motion_goal is not None:
+            self.active_motion_goal.cancel_goal_async()
             self.ui.post(self.ui.log, "Cancel requested")
 
 
@@ -3592,7 +3583,7 @@ class WeldActionGui:
         )
         self.pipeline_status.pack(fill=tk.X, ipady=5)
 
-        self.node = WeldActionNode(self)
+        self.node = WeldGuiNode(self)
         self.executor = MultiThreadedExecutor(num_threads=2)
         self.executor.add_node(self.node)
         self.executor_thread = threading.Thread(
@@ -5814,7 +5805,9 @@ class WeldActionGui:
 
     def _run_sequence_step(self, step, execute_requested):
         if step["type"] == "motion":
-            return self.node.run_sequence_motion(step, execute_requested)
+            return self.node.run_sequence_cartesian_motion(
+                step, execute_requested
+            )
         if step["type"] == "planned_trajectory":
             return self.node.run_sequence_planned_trajectory(
                 step, execute_requested
@@ -5931,7 +5924,7 @@ class WeldActionGui:
         self.hicomm_arc_unlocked.set(False)
         self.hicomm_arc_on_button.configure(state=tk.DISABLED)
         self.hicomm_test_status.configure(text="STOP NOW · ALL OUTPUTS INHIBITED")
-        self.node.cancel()
+        self.node.cancel_active_motion()
         arms = [
             arm for arm in ("left", "right")
             if self.robot_connected.get(arm, False)
@@ -6853,7 +6846,7 @@ class WeldActionGui:
             self.error("Cartesian interpolation step must be 0.5..20 mm")
             return
         threading.Thread(
-            target=self.node.send,
+            target=self.node.submit_cartesian_motion,
             args=(
                 copy.deepcopy(self.points),
                 speed,
@@ -6938,7 +6931,7 @@ class WeldActionGui:
             self.pipeline_waiting(
                 f"DI8 TOUCH DETECTED · stopping {kind} probe before capture"
             )
-            # WeldActionNode._system_state owns the stop trigger.  Starting a
+            # WeldGuiNode._system_state owns the stop trigger. Starting a
             # second worker here allowed a bounced DI8 edge to capture and
             # launch the return path twice.
             return
@@ -7195,7 +7188,7 @@ class WeldActionGui:
             self.pipeline_result(text)
 
     def cancel(self):
-        self.node.cancel()
+        self.node.cancel_active_motion()
 
     def close(self):
         if self._closing:

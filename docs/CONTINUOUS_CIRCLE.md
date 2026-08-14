@@ -148,7 +148,7 @@ if closed:
 construct_robot/construct_robot/weld_action_gui.py
 ```
 
-`class WeldActionNode`의 `send()` 안에서 다음 줄을 찾는다.
+`class WeldGuiNode`의 `submit_cartesian_motion()` 안에서 다음 줄을 찾는다.
 
 ```python
 goal.interpolation_step = 0.005
@@ -169,7 +169,7 @@ goal.interpolation_step = 0.002
 
 ```python
 goal.waypoints = points
-future = self.client.send_goal_async(
+future = self.cartesian_motion_client.send_goal_async(
     goal,
     feedback_callback=self.feedback,
 )
@@ -181,7 +181,7 @@ future = self.client.send_goal_async(
 # 잘못된 방식: 각 점 끝에서 별도 계획/정지가 생긴다.
 for pose in points:
     goal.waypoints = [pose]
-    self.client.send_goal_async(goal)
+    self.cartesian_motion_client.send_goal_async(goal)
 ```
 
 현재 프로젝트 코드는 이미 올바르게 원 전체를 한 goal로 보낸다.
@@ -271,7 +271,7 @@ def multi_lap_circle_waypoints(
     return points
 ```
 
-GUI의 `WeldActionNode.generate_circle()` 안에서 기존 호출:
+GUI의 `WeldGuiNode.generate_circle()` 안에서 기존 호출:
 
 ```python
 points = circle_waypoints(
