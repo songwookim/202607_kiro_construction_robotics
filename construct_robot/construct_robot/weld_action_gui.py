@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 import queue
 import signal
+import subprocess
 import tempfile
 import threading
 import time
@@ -16,8 +17,14 @@ from geometry_msgs.msg import Point, Pose, PoseArray
 from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
-from moveit_msgs.msg import Constraints, DisplayTrajectory, JointConstraint
-from moveit_msgs.srv import GetCartesianPath
+from moveit_msgs.msg import (
+    Constraints,
+    DisplayTrajectory,
+    JointConstraint,
+    OrientationConstraint,
+    PositionConstraint,
+)
+from moveit_msgs.srv import GetCartesianPath, GetPositionIK
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
@@ -26,6 +33,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rbpodo_msgs.msg import SystemState
 from rbpodo_msgs.srv import MoveStop, SetDigitalOutput
 from sensor_msgs.msg import JointState
+from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
@@ -35,6 +43,7 @@ from construct_robot.cartesian_path_common import (
     circle_waypoints,
     linear_pose_waypoints,
     pose_is_valid,
+    scale_trajectory_speed,
     straight_waypoints,
     tip_link_for_group,
     weaving_from_path,
@@ -89,10 +98,25 @@ TEACHING_POSES = {
     "robot_start": "1 · Initial pose",
     "weld_wait": "2 · Weld wait pose",
     "weld_start_wait": "3 · Weld start wait pose",
-    "weld_start": "4 · Weld start pose",
+    "weld_start": "4 · Reference TCP 1 / Weld start",
     "weld_goal_wait": "5 · Weld goal wait pose",
-    "weld_end": "6 · Weld goal pose",
+    "weld_end": "6 · Reference TCP 2 / Weld goal",
+    "weld_finish": "7 · Weld end pose",
 }
+
+# Every Named TCP Teaching execution is contact guarded.  Planning remains
+# unguarded because it does not command physical motion.
+DI8_GUARDED_TEACHING_POSES = frozenset(TEACHING_POSES)
+
+# Corrected seam teaching poses combine sensed/corrected XYZ with the
+# orientation originally captured for that individual named pose.
+TCP_POSE_TEACHING_POSES = frozenset((
+    "weld_start_wait",
+    "weld_start",
+    "weld_goal_wait",
+    "weld_end",
+    "weld_finish",
+))
 
 DIGITAL_WELD_RECIPE_KEYS = (
     "current_a",
@@ -182,18 +206,17 @@ def corrected_corner_seam_from_four_touches(
     missing = [name for name in CORNER_TOUCH_NAMES if touches.get(name) is None]
     if missing:
         raise ValueError("missing corner touches: " + ", ".join(missing))
-    axis = seam_axis.lower()
-    if axis not in ("x", "y"):
-        raise ValueError("0°/90° seam axis must be World X or Y")
+    if seam_axis.lower() != "x":
+        raise ValueError("Y/Z touch seam calculation requires World X axis")
     endpoints = []
     for endpoint in ("start", "goal"):
         floor = touches[f"{endpoint}_floor"]
         wall = touches[f"{endpoint}_wall"]
         pose = midpoint_pose(floor, wall)
-        if axis == "x":
-            pose.position.y = wall.position.y + wall_offset
-        else:
-            pose.position.x = wall.position.x + wall_offset
+        # Y/Z probing reconstructs the corner using only these components:
+        # X = common probe cross-section (1:1 mean), Y = wall, Z = floor.
+        pose.position.x = (wall.position.x + floor.position.x) * 0.5
+        pose.position.y = wall.position.y + wall_offset
         pose.position.z = floor.position.z + floor_offset
         endpoints.append(pose)
     return linear_pose_waypoints(endpoints[0], endpoints[1], count)
@@ -202,38 +225,36 @@ def corrected_corner_seam_from_four_touches(
 def corner_endpoint_from_two_touches(
     wall_touch,
     floor_touch,
-    taught_pose,
+    orientation_pose,
     seam_axis,
     wall_offset=0.0,
     floor_offset=0.0,
 ):
-    """Combine wall and floor measurements for a known 90-degree corner."""
+    """Reconstruct one seam XYZ from World-axis wall/floor probes.
+
+    Both probes start from the same cross-section and move only along the
+    configured World wall axis or World Z.  Their nominal seam-axis coordinate
+    is therefore the mean of the two measured TCP coordinates.  The taught
+    pose supplies orientation only; none of its XYZ values enter the result.
+    """
     for name, pose in (
         ("wall touch", wall_touch),
         ("floor touch", floor_touch),
-        ("taught endpoint", taught_pose),
+        ("orientation pose", orientation_pose),
     ):
         if not pose_is_valid(pose):
             raise ValueError(f"{name} pose is invalid")
-    axis = seam_axis.lower()
-    if axis not in ("x", "y"):
-        raise ValueError("0°/90° seam axis must be World X or Y")
-    result = copy.deepcopy(taught_pose)
-    if axis == "x":
-        lateral_wall = wall_touch.position.y
-    else:
-        lateral_wall = wall_touch.position.x
+    if seam_axis.lower() != "x":
+        raise ValueError("Y/Z touch seam calculation requires World X axis")
+    result = copy.deepcopy(orientation_pose)
+    result.position.x = (
+        wall_touch.position.x + floor_touch.position.x
+    ) * 0.5
+    result.position.y = wall_touch.position.y + wall_offset
 
     # The wall touch measures the lateral wall coordinate; the floor touch
-    # measures the floor height.  A perpendicular-bisector construction only
-    # reaches this corner when both probe distances happen to be equal.
-    seam_lateral = lateral_wall + wall_offset
-    plane_z = floor_touch.position.z + floor_offset
-    if axis == "x":
-        result.position.y = seam_lateral
-    else:
-        result.position.x = seam_lateral
-    result.position.z = plane_z
+    # measures the floor height.  Orientation is intentionally untouched.
+    result.position.z = floor_touch.position.z + floor_offset
     return result
 
 
@@ -253,27 +274,114 @@ def aligned_wait_pose(wait_pose, seam_point, seam_axis):
     return result
 
 
-def touch_midpoint_wait_pose(
-    wait_pose,
-    wall_touch,
-    floor_touch,
-    seam_axis,
-):
-    """Place a wait TCP at the 1:1 midpoint of the two touch TCP poses."""
+def translated_wait_pose(wait_pose, taught_seam_pose, corrected_seam_pose):
+    """Move a taught wait TCP with its corrected seam endpoint.
+
+    The taught wait-to-seam offset is the intentional approach clearance.  A
+    wall/floor touch midpoint is a measurement artifact, not a safe wait pose,
+    so never replace that clearance with the midpoint coordinates.
+    """
     for name, pose in (
         ("wait pose", wait_pose),
-        ("wall touch", wall_touch),
-        ("floor touch", floor_touch),
+        ("taught seam pose", taught_seam_pose),
+        ("corrected seam pose", corrected_seam_pose),
     ):
         if not pose_is_valid(pose):
             raise ValueError(f"{name} is invalid")
-    if seam_axis.lower() not in ("x", "y"):
-        raise ValueError("0°/90° seam axis must be World X or Y")
     result = copy.deepcopy(wait_pose)
-    result.position.x = (wall_touch.position.x + floor_touch.position.x) * 0.5
-    result.position.y = (wall_touch.position.y + floor_touch.position.y) * 0.5
-    result.position.z = (wall_touch.position.z + floor_touch.position.z) * 0.5
+    result.position.x += (
+        corrected_seam_pose.position.x - taught_seam_pose.position.x
+    )
+    result.position.y += (
+        corrected_seam_pose.position.y - taught_seam_pose.position.y
+    )
+    result.position.z += (
+        corrected_seam_pose.position.z - taught_seam_pose.position.z
+    )
     return result
+
+
+def tcp_position_is_valid(target_pose):
+    return target_pose is not None and all(
+        math.isfinite(float(getattr(target_pose.position, axis)))
+        for axis in ("x", "y", "z")
+    )
+
+
+def position_only_goal_constraints(planning_group, target_pose, tolerance=0.001):
+    """Build a World-frame TCP position goal without orientation constraints."""
+    if not tcp_position_is_valid(target_pose):
+        raise ValueError("position-only target XYZ is invalid")
+    if tolerance <= 0.0:
+        raise ValueError("position-only tolerance must be positive")
+    primitive = SolidPrimitive()
+    primitive.type = SolidPrimitive.SPHERE
+    primitive.dimensions = [float(tolerance)]
+    center = Pose()
+    center.position = copy.deepcopy(target_pose.position)
+    center.orientation.w = 1.0
+    position = PositionConstraint()
+    position.header.frame_id = "World"
+    position.link_name = tip_link_for_group(planning_group)
+    position.constraint_region.primitives = [primitive]
+    position.constraint_region.primitive_poses = [center]
+    position.weight = 1.0
+    constraints = Constraints()
+    constraints.position_constraints.append(position)
+    return constraints
+
+
+def tcp_pose_goal_constraints(
+    planning_group,
+    target_pose,
+    position_tolerance=0.001,
+    orientation_tolerance=0.01,
+):
+    """Use corrected XYZ together with the orientation captured for this pose."""
+    if not pose_is_valid(target_pose):
+        raise ValueError("complete TCP target pose is invalid")
+    constraints = position_only_goal_constraints(
+        planning_group, target_pose, position_tolerance
+    )
+    orientation = OrientationConstraint()
+    orientation.header.frame_id = "World"
+    orientation.link_name = tip_link_for_group(planning_group)
+    orientation.orientation = copy.deepcopy(target_pose.orientation)
+    orientation.absolute_x_axis_tolerance = float(orientation_tolerance)
+    orientation.absolute_y_axis_tolerance = float(orientation_tolerance)
+    orientation.absolute_z_axis_tolerance = float(orientation_tolerance)
+    orientation.weight = 1.0
+    constraints.orientation_constraints.append(orientation)
+    return constraints
+
+
+def quaternion_angular_distance(first, second):
+    first_q = (first.x, first.y, first.z, first.w)
+    second_q = (second.x, second.y, second.z, second.w)
+    first_norm = math.sqrt(sum(value * value for value in first_q))
+    second_norm = math.sqrt(sum(value * value for value in second_q))
+    if first_norm < 1e-12 or second_norm < 1e-12:
+        return math.inf
+    dot = abs(sum(
+        a * b / (first_norm * second_norm)
+        for a, b in zip(first_q, second_q)
+    ))
+    return 2.0 * math.acos(max(-1.0, min(1.0, dot)))
+
+
+def named_tcp_linear_waypoints(start, goal):
+    """Sample a named TCP transition with linear XYZ and orientation SLERP."""
+    distance = math.sqrt(sum(
+        (getattr(goal.position, axis) - getattr(start.position, axis)) ** 2
+        for axis in ("x", "y", "z")
+    ))
+    angle = quaternion_angular_distance(start.orientation, goal.orientation)
+    count = max(
+        2,
+        math.ceil(distance / 0.005) + 1,
+        math.ceil(angle / math.radians(2.0)) + 1,
+    )
+    return linear_pose_waypoints(start, goal, count)
 
 
 def two_touch_corner_seam(
@@ -356,6 +464,202 @@ def pose_with_rpy_offset(pose, roll, pitch, yaw, reference="tool"):
     return result
 
 
+def _vector_dot(first, second):
+    return sum(float(a) * float(b) for a, b in zip(first, second))
+
+
+def _vector_cross(first, second):
+    ax, ay, az = (float(value) for value in first)
+    bx, by, bz = (float(value) for value in second)
+    return (
+        ay * bz - az * by,
+        az * bx - ax * bz,
+        ax * by - ay * bx,
+    )
+
+
+def _unit_vector(vector, description="vector"):
+    values = tuple(float(value) for value in vector)
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm < 1e-9:
+        raise ValueError(f"{description} has near-zero length")
+    return tuple(value / norm for value in values)
+
+
+def _axis_unit_vector(axis):
+    axis = str(axis).strip().lower().replace("world ", "")
+    vectors = {
+        "x": (1.0, 0.0, 0.0),
+        "y": (0.0, 1.0, 0.0),
+        "z": (0.0, 0.0, 1.0),
+    }
+    if axis not in vectors:
+        raise ValueError(f"unsupported World probe axis: {axis}")
+    return vectors[axis]
+
+
+def seam_direction(start, goal, *, xy_only=False):
+    """Return a unit START→GOAL direction, optionally projected onto World XY."""
+    if not pose_is_valid(start) or not pose_is_valid(goal):
+        raise ValueError("seam START/GOAL poses must be valid")
+    direction = (
+        goal.position.x - start.position.x,
+        goal.position.y - start.position.y,
+        0.0 if xy_only else goal.position.z - start.position.z,
+    )
+    return _unit_vector(direction, "seam direction")
+
+
+def seam_xy_normal(start, goal):
+    """Return the +90° World-XY normal of the taught START→GOAL seam."""
+    tx, ty, _tz = seam_direction(start, goal, xy_only=True)
+    return (-ty, tx, 0.0)
+
+
+def _pose_position_tuple(pose):
+    return (pose.position.x, pose.position.y, pose.position.z)
+
+
+def intersect_three_planes(normal_a, value_a, normal_b, value_b, normal_c, value_c):
+    """Return the unique point satisfying n·p=d for three independent planes."""
+    normal_a = _unit_vector(normal_a, "plane A normal")
+    normal_b = _unit_vector(normal_b, "plane B normal")
+    normal_c = _unit_vector(normal_c, "plane C normal")
+    b_cross_c = _vector_cross(normal_b, normal_c)
+    denominator = _vector_dot(normal_a, b_cross_c)
+    if abs(denominator) < 1e-6:
+        raise ValueError(
+            "probe directions and seam cross-section are not independent; "
+            "choose probe directions that measure two different surfaces"
+        )
+    c_cross_a = _vector_cross(normal_c, normal_a)
+    a_cross_b = _vector_cross(normal_a, normal_b)
+    numerator = tuple(
+        float(value_a) * b_cross_c[index]
+        + float(value_b) * c_cross_a[index]
+        + float(value_c) * a_cross_b[index]
+        for index in range(3)
+    )
+    return tuple(value / denominator for value in numerator)
+
+
+def generalized_corner_endpoint_from_two_touches(
+    wall_touch,
+    floor_touch,
+    orientation_pose,
+    taught_start,
+    taught_goal,
+    wall_normal,
+    floor_normal,
+    wall_offset=0.0,
+    floor_offset=0.0,
+):
+    """Reconstruct a seam endpoint from two touched planes and a seam cross-section.
+
+    The two contact TCP positions define one point on each sensed plane.  The
+    configured probe directions are used as those plane normals.  The third
+    plane is perpendicular to the taught seam direction; its location is the
+    mean longitudinal coordinate of the two contacts.  This is the vector form
+    of the old World-X/Y/Z rule (mean X, wall Y, floor Z).
+    """
+    for name, pose in (
+        ("wall touch", wall_touch),
+        ("floor touch", floor_touch),
+        ("orientation pose", orientation_pose),
+        ("taught start", taught_start),
+        ("taught goal", taught_goal),
+    ):
+        if not pose_is_valid(pose):
+            raise ValueError(f"{name} pose is invalid")
+
+    wall_normal = _unit_vector(wall_normal, "wall probe direction")
+    floor_normal = _unit_vector(floor_normal, "floor probe direction")
+    tangent = seam_direction(taught_start, taught_goal)
+    wall_position = _pose_position_tuple(wall_touch)
+    floor_position = _pose_position_tuple(floor_touch)
+
+    wall_plane = _vector_dot(wall_normal, wall_position) + float(wall_offset)
+    floor_plane = _vector_dot(floor_normal, floor_position) + float(floor_offset)
+    cross_section = 0.5 * (
+        _vector_dot(tangent, wall_position)
+        + _vector_dot(tangent, floor_position)
+    )
+    x, y, z = intersect_three_planes(
+        wall_normal, wall_plane,
+        floor_normal, floor_plane,
+        tangent, cross_section,
+    )
+    result = copy.deepcopy(orientation_pose)
+    result.position.x = x
+    result.position.y = y
+    result.position.z = z
+    return result
+
+
+def apply_sensed_seam_orientation(
+    taught_start,
+    taught_goal,
+    sensed_start,
+    sensed_goal,
+    mode,
+):
+    """Combine sensed XYZ with either yaw-corrected or unchanged taught attitudes."""
+    normalized = str(mode).strip().lower()
+    if normalized.startswith("yaw") or normalized.startswith("follow"):
+        start, goal, delta_yaw = yaw_corrected_seam_poses(
+            taught_start, taught_goal, sensed_start, sensed_goal
+        )
+        return start, goal, delta_yaw, "yaw-corrected"
+    if normalized.startswith("keep"):
+        start = copy.deepcopy(taught_start)
+        goal = copy.deepcopy(taught_goal)
+        start.position = copy.deepcopy(sensed_start.position)
+        goal.position = copy.deepcopy(sensed_goal.position)
+        return start, goal, 0.0, "teaching orientation kept"
+    raise ValueError(f"unknown seam orientation mode: {mode}")
+
+
+def seam_yaw(start, goal):
+    """Return World-Z seam yaw from two TCP positions."""
+    dx = goal.position.x - start.position.x
+    dy = goal.position.y - start.position.y
+    if math.hypot(dx, dy) < 1e-9:
+        raise ValueError("seam START/GOAL have no usable XY direction")
+    return math.atan2(dy, dx)
+
+
+def yaw_corrected_seam_poses(
+    taught_start,
+    taught_goal,
+    sensed_start,
+    sensed_goal,
+):
+    """Apply sensed-vs-taught seam yaw to taught orientations and sensed XYZ."""
+    for name, pose in (
+        ("taught start", taught_start),
+        ("taught goal", taught_goal),
+        ("sensed start", sensed_start),
+        ("sensed goal", sensed_goal),
+    ):
+        if not pose_is_valid(pose):
+            raise ValueError(f"{name} pose is invalid")
+    taught_yaw = seam_yaw(taught_start, taught_goal)
+    sensed_yaw = seam_yaw(sensed_start, sensed_goal)
+    delta_yaw = math.atan2(
+        math.sin(sensed_yaw - taught_yaw),
+        math.cos(sensed_yaw - taught_yaw),
+    )
+    corrected_start = pose_with_rpy_offset(
+        taught_start, 0.0, 0.0, delta_yaw, reference="world"
+    )
+    corrected_goal = pose_with_rpy_offset(
+        taught_goal, 0.0, 0.0, delta_yaw, reference="world"
+    )
+    corrected_start.position = copy.deepcopy(sensed_start.position)
+    corrected_goal.position = copy.deepcopy(sensed_goal.position)
+    return corrected_start, corrected_goal, delta_yaw
+
+
 def pose_with_local_rpy_offset(pose, roll, pitch, yaw):
     """Backward-compatible helper for a tool-frame RPY adjustment."""
     return pose_with_rpy_offset(pose, roll, pitch, yaw, "tool")
@@ -397,6 +701,88 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp):
                 "w": float(tcp.orientation.w),
             },
         },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            yaml.safe_dump(document, stream, sort_keys=False)
+        temporary_path.replace(path)
+        # Do not report a successful teaching update unless the final target
+        # file can be read back and contains exactly what was requested.
+        with path.open("r", encoding="utf-8") as stream:
+            persisted = yaml.safe_load(stream)
+        if persisted != document:
+            raise OSError(f"YAML read-back verification failed: {path}")
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
+def save_seam_touch_yaml(
+    path,
+    planning_group,
+    seam_axis,
+    touches,
+    starts,
+    stopped_poses=None,
+    probe_configuration=None,
+):
+    """Atomically save raw DI8 contact and probe-start poses for diagnostics."""
+    path = Path(path)
+
+    def pose_document(pose):
+        if pose is None:
+            return None
+        return {
+            "position_m": {
+                "x": float(pose.position.x),
+                "y": float(pose.position.y),
+                "z": float(pose.position.z),
+            },
+            # Retained only to diagnose TCP/sensor-offset consistency.  Seam
+            # geometry intentionally uses position_m only.
+            "orientation_xyzw": {
+                "x": float(pose.orientation.x),
+                "y": float(pose.orientation.y),
+                "z": float(pose.orientation.z),
+                "w": float(pose.orientation.w),
+            },
+        }
+
+    records = {}
+    stopped_poses = stopped_poses or {}
+    for name in CORNER_TOUCH_NAMES:
+        contact = touches.get(name)
+        start = starts.get(name)
+        stopped = stopped_poses.get(name)
+        if contact is None and start is None and stopped is None:
+            continue
+        records[name] = {
+            "contact_tcp": pose_document(contact),
+            "stopped_tcp": pose_document(stopped),
+            "probe_start_tcp": pose_document(start),
+        }
+    document = {
+        "format_version": 1,
+        "planning_group": planning_group,
+        # Keep seam_axis for compatibility with the existing diagnostic plotter.
+        "seam_axis": str(seam_axis).upper(),
+        "probe_configuration": copy.deepcopy(probe_configuration),
+        "saved_unix_time": time.time(),
+        "note": (
+            "touch orientation is diagnostic only; seam XYZ comes from sensed "
+            "plane intersection and seam orientation is handled separately"
+        ),
+        "touches": records,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
@@ -488,6 +874,60 @@ def load_initial_state_yaml(path):
     return planning_group, tuple(names), positions, tcp
 
 
+def save_seam_teaching_reference_yaml(path, planning_group, references):
+    """Persist pre-correction TCP references used for seam-yaw correction."""
+    document = {
+        "format_version": 1,
+        "planning_group": planning_group,
+        "poses": {},
+    }
+    for name, stored in references.items():
+        pose = stored[3]
+        document["poses"][name] = {
+            "position_m": {
+                axis: float(getattr(pose.position, axis))
+                for axis in ("x", "y", "z")
+            },
+            "orientation_xyzw": {
+                axis: float(getattr(pose.orientation, axis))
+                for axis in ("x", "y", "z", "w")
+            },
+        }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as stream:
+        temporary_path = Path(stream.name)
+        yaml.safe_dump(document, stream, sort_keys=False)
+    temporary_path.replace(path)
+
+
+def load_seam_teaching_reference_yaml(path):
+    with Path(path).open("r", encoding="utf-8") as stream:
+        document = yaml.safe_load(stream)
+    poses = {}
+    for name, data in document.get("poses", {}).items():
+        pose = Pose()
+        for axis in ("x", "y", "z"):
+            setattr(pose.position, axis, float(data["position_m"][axis]))
+        for axis in ("x", "y", "z", "w"):
+            setattr(
+                pose.orientation,
+                axis,
+                float(data["orientation_xyzw"][axis]),
+            )
+        if not pose_is_valid(pose):
+            raise ValueError(f"invalid seam teaching reference: {name}")
+        poses[name] = pose
+    return document.get("planning_group"), poses
+
+
 class WeldGuiNode(Node):
     """ROS interface used by the editable weld-path GUI."""
 
@@ -519,6 +959,7 @@ class WeldGuiNode(Node):
             GetCartesianPath,
             "/compute_cartesian_path",
         )
+        self.ik_client = self.create_client(GetPositionIK, "/compute_ik")
         self.joint_trajectory_clients = {
             "left": ActionClient(
                 self,
@@ -537,12 +978,12 @@ class WeldGuiNode(Node):
             ),
         }
         self.joint_trajectory_cancel_clients = {
-            arm: self.create_client(
+            device: self.create_client(
                 CancelGoal,
-                f"/{CONTROLLER_NAMES[arm]}/follow_joint_trajectory/"
+                f"/{CONTROLLER_NAMES[device]}/follow_joint_trajectory/"
                 "_action/cancel_goal",
             )
-            for arm in ("left", "right")
+            for device in ("left", "right", "head")
         }
         self.digital_output_client = self.create_client(
             SetDigitalOutput,
@@ -567,6 +1008,7 @@ class WeldGuiNode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.active_motion_goal = None
         self.active_touch_probe = None
+        self.touch_probe_edge_pose = None
         self.touch_probe_stop_requested = threading.Event()
         self.touch_probe_controller_deactivated = False
         self.touch_stop_lock = threading.Lock()
@@ -687,6 +1129,24 @@ class WeldGuiNode(Node):
             # OFF/ON while the tool settles; only the first edge belongs to
             # this probe.
             self.touch_probe_stop_requested.set()
+            try:
+                # Latch the TCP at the DI8 edge.  Waiting for measured
+                # standstill before reading TF records braking overshoot as if
+                # it were the physical contact point, especially along Y.
+                self.touch_probe_edge_pose = self._current_tcp_pose(probe[2])
+                self.ui.post(
+                    self.ui.apply_touch_edge_capture,
+                    copy.deepcopy(self.touch_probe_edge_pose),
+                    probe[2],
+                    probe[1],
+                    copy.deepcopy(probe[3]),
+                )
+            except TransformException as error:
+                self.touch_probe_edge_pose = None
+                self.ui.post(
+                    self.ui.log,
+                    f"DI8 edge TCP latch failed; stopped TCP will be used: {error}",
+                )
             self.get_logger().warning(
                 f"DI{TOUCH_INPUT_PORT} rising edge · {arm} · "
                 f"stopping active probe {probe[1]}"
@@ -1085,26 +1545,30 @@ class WeldGuiNode(Node):
         target_pose,
         expected_joint_names,
         endpoint,
-        wait_name,
+        teaching_name,
     ):
-        """Resolve and return the joint state at a corrected teaching TCP."""
-        while rclpy.ok() and not self.cartesian_planning_client.wait_for_service(
-            timeout_sec=1.0
-        ):
+        """Use MoveIt IK to make a named pose's joints match its corrected TCP."""
+        while rclpy.ok() and not self.ik_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warning(
-                "Waiting for /compute_cartesian_path to resolve corrected wait"
+                f"Waiting for /compute_ik to resolve corrected {teaching_name} TCP"
             )
         if not rclpy.ok():
             return
-        request = GetCartesianPath.Request()
-        request.header.frame_id = "World"
-        request.start_state.is_diff = True
-        request.group_name = planning_group
-        request.link_name = tip_link_for_group(planning_group)
-        request.waypoints = [copy.deepcopy(target_pose)]
-        request.max_step = 0.005
-        request.jump_threshold = 0.0
-        request.avoid_collisions = True
+        request = GetPositionIK.Request()
+        request.ik_request.group_name = planning_group
+        request.ik_request.robot_state.is_diff = True
+        request.ik_request.ik_link_name = tip_link_for_group(planning_group)
+        request.ik_request.pose_stamped.header.frame_id = "World"
+        request.ik_request.pose_stamped.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+        request.ik_request.pose_stamped.pose = copy.deepcopy(target_pose)
+        # This call resolves and persists a kinematic seed only.  A sensed weld
+        # point is intentionally on the workpiece and can be rejected as a
+        # collision if scene geometry is present.  Actual Plan/Execute still
+        # performs normal collision checking before any physical movement.
+        request.ik_request.avoid_collisions = False
+        request.ik_request.timeout = Duration(seconds=3.0).to_msg()
         finished = threading.Event()
         outcome = {}
 
@@ -1115,7 +1579,7 @@ class WeldGuiNode(Node):
                 outcome["error"] = str(error)
             finished.set()
 
-        self.cartesian_planning_client.call_async(request).add_done_callback(
+        self.ik_client.call_async(request).add_done_callback(
             response_ready
         )
         while rclpy.ok() and not finished.wait(timeout=0.2):
@@ -1124,44 +1588,60 @@ class WeldGuiNode(Node):
             return
         if "error" in outcome:
             self.ui.post(
-                self.ui.corrected_wait_joint_state_failed,
+                self.ui.corrected_tcp_joint_state_failed,
                 endpoint,
+                teaching_name,
                 outcome["error"],
             )
             return
         response = outcome["response"]
-        trajectory = response.solution.joint_trajectory
-        if response.fraction < 0.999:
+        if response.error_code.val != 1:
             self.ui.post(
-                self.ui.corrected_wait_joint_state_failed,
+                self.ui.corrected_tcp_joint_state_failed,
                 endpoint,
-                f"MoveIt resolved only {response.fraction:.1%} of corrected wait",
+                teaching_name,
+                f"MoveIt IK error code {response.error_code.val}",
             )
             return
-        if trajectory.points:
-            resolved = dict(zip(
-                trajectory.joint_names,
-                trajectory.points[-1].positions,
-            ))
-        else:
-            resolved = dict(self.latest_joint_positions)
+        resolved = dict(zip(
+            response.solution.joint_state.name,
+            response.solution.joint_state.position,
+        ))
         missing = [name for name in expected_joint_names if name not in resolved]
         if missing:
             self.ui.post(
-                self.ui.corrected_wait_joint_state_failed,
+                self.ui.corrected_tcp_joint_state_failed,
                 endpoint,
-                "corrected wait IK omitted joints: " + ", ".join(missing),
+                teaching_name,
+                "corrected TCP IK omitted joints: " + ", ".join(missing),
             )
             return
         self.ui.post(
-            self.ui.apply_corrected_wait_joint_state,
+            self.ui.apply_corrected_tcp_joint_state,
             endpoint,
-            wait_name,
+            teaching_name,
             planning_group,
             tuple(expected_joint_names),
             tuple(resolved[name] for name in expected_joint_names),
             copy.deepcopy(target_pose),
         )
+
+    def resolve_tcp_joint_states(self, targets):
+        """Resolve related corrected named poses serially for deterministic YAML."""
+        for (
+            endpoint,
+            planning_group,
+            target_pose,
+            joint_names,
+            teaching_name,
+        ) in targets:
+            self.resolve_tcp_joint_state(
+                planning_group,
+                target_pose,
+                joint_names,
+                endpoint,
+                teaching_name,
+            )
 
     def publish_points(self, points, visible=True):
         displayed_points = points if visible else []
@@ -1210,6 +1690,93 @@ class WeldGuiNode(Node):
         pose_array.header.stamp = stamp
         pose_array.poses = list(raw_points)
         self.pose_publisher.publish(pose_array)
+
+    def publish_touch_geometry(self, endpoint, wall, floor, seam_point):
+        """Show two DI8 contacts, their midpoint, and reconstructed seam point."""
+        endpoint = str(endpoint).strip().lower()
+        if endpoint not in ("start", "goal"):
+            raise ValueError(f"unknown touch endpoint: {endpoint}")
+        if not all(pose_is_valid(pose) for pose in (wall, floor, seam_point)):
+            raise ValueError("touch visualization poses must be valid")
+        midpoint = midpoint_pose(wall, floor)
+        stamp = self.get_clock().now().to_msg()
+        markers = MarkerArray()
+        base_id = 300 if endpoint == "start" else 400
+        namespace = "seam_touch_geometry"
+
+        # Delete only this endpoint's old diagnostic markers so the weld path
+        # and the other endpoint remain visible.
+        for marker_id in range(base_id, base_id + 16):
+            marker = Marker()
+            marker.header.frame_id = "World"
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = marker_id
+            marker.action = Marker.DELETE
+            markers.markers.append(marker)
+
+        items = (
+            ("WALL TOUCH", wall, (1.0, 0.08, 0.05, 1.0)),
+            ("FLOOR TOUCH", floor, (0.05, 0.3, 1.0, 1.0)),
+            ("SEAM POINT", seam_point, (0.0, 1.0, 0.2, 1.0)),
+            ("1:1 MIDPOINT", midpoint, (1.0, 0.8, 0.0, 1.0)),
+        )
+        for index, (label_text, pose, color) in enumerate(items):
+            sphere = Marker()
+            sphere.header.frame_id = "World"
+            sphere.header.stamp = stamp
+            sphere.ns = namespace
+            sphere.id = base_id + index * 2
+            sphere.type = Marker.SPHERE
+            sphere.action = Marker.ADD
+            sphere.pose = copy.deepcopy(pose)
+            sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.014
+            (
+                sphere.color.r,
+                sphere.color.g,
+                sphere.color.b,
+                sphere.color.a,
+            ) = color
+            markers.markers.append(sphere)
+
+            label = Marker()
+            label.header.frame_id = "World"
+            label.header.stamp = stamp
+            label.ns = namespace
+            label.id = base_id + index * 2 + 1
+            label.type = Marker.TEXT_VIEW_FACING
+            label.action = Marker.ADD
+            label.pose.position.x = pose.position.x
+            label.pose.position.y = pose.position.y
+            label.pose.position.z = pose.position.z + 0.022
+            label.pose.orientation.w = 1.0
+            label.scale.z = 0.018
+            label.color.r = label.color.g = label.color.b = 1.0
+            label.color.a = 1.0
+            label.text = f"{endpoint.upper()} {label_text}"
+            markers.markers.append(label)
+
+        connection = Marker()
+        connection.header.frame_id = "World"
+        connection.header.stamp = stamp
+        connection.ns = namespace
+        connection.id = base_id + 12
+        connection.type = Marker.LINE_STRIP
+        connection.action = Marker.ADD
+        connection.scale.x = 0.003
+        connection.color.r = connection.color.g = connection.color.b = 0.9
+        connection.color.a = 0.8
+        connection.points = [
+            Point(x=wall.position.x, y=wall.position.y, z=wall.position.z),
+            Point(
+                x=midpoint.position.x,
+                y=midpoint.position.y,
+                z=midpoint.position.z,
+            ),
+            Point(x=floor.position.x, y=floor.position.y, z=floor.position.z),
+        ]
+        markers.markers.append(connection)
+        self.marker_publisher.publish(markers)
 
     def acquire_points(
         self,
@@ -1333,12 +1900,12 @@ class WeldGuiNode(Node):
         self,
         planning_group,
         probe_kind,
-        axis,
+        direction,
         distance,
         velocity_scale,
         interpolation_step,
     ):
-        """Execute a straight World-axis probe path; the GUI cancels on DI8."""
+        """Execute a straight World-vector probe path; the GUI cancels on DI8."""
         arm = planning_group.removesuffix("_manipulator")
         try:
             start = self._current_tcp_pose(planning_group)
@@ -1350,19 +1917,24 @@ class WeldGuiNode(Node):
                 velocity_scale,
                 interpolation_step,
             )
+            self.touch_probe_edge_pose = None
             self.touch_probe_controller_deactivated = False
             self.touch_probe_stop_requested.clear()
             # MoveIt's GetCartesianPath already interpolates this segment using
             # max_step.  Supplying every 1 mm point here duplicated that work
             # and made a 50 mm probe spend many seconds in PLAN PREVIEW.
             count = 2
-            points = straight_waypoints(
-                start,
-                distance,
-                count,
-                axis.lower(),
-                "world",
-            )
+            if isinstance(direction, str):
+                points = straight_waypoints(
+                    start, distance, count, direction.lower(), "world"
+                )
+            else:
+                dx, dy, dz = _unit_vector(direction, "touch probe direction")
+                goal = copy.deepcopy(start)
+                goal.position.x += float(distance) * dx
+                goal.position.y += float(distance) * dy
+                goal.position.z += float(distance) * dz
+                points = [copy.deepcopy(start), goal]
         except (TransformException, ValueError) as error:
             self.active_touch_probe = None
             self.ui.post(self.ui.touch_probe_failed, str(error))
@@ -1393,8 +1965,69 @@ class WeldGuiNode(Node):
         if probe is None:
             return
         arm, kind, planning_group, start, speed, interpolation = probe
+        stationary, controller_deactivated = self._stop_motion_on_di8(
+            arm, f"probe {kind}"
+        )
+        self.touch_probe_controller_deactivated = controller_deactivated
+        if not stationary:
+            self.active_touch_probe = None
+            if self.touch_probe_controller_deactivated:
+                self.switch_arm_controller(arm, True)
+                self.touch_probe_controller_deactivated = False
+            self.ui.post(
+                self.ui.touch_probe_failed,
+                "DI8 received, but measured joints did not reach standstill",
+            )
+            return
+        try:
+            stopped_pose = self._current_tcp_pose(planning_group)
+        except TransformException as error:
+            self.active_touch_probe = None
+            if self.touch_probe_controller_deactivated:
+                self.switch_arm_controller(arm, True)
+                self.touch_probe_controller_deactivated = False
+            self.ui.post(self.ui.touch_probe_failed, str(error))
+            return
+        touched = (
+            copy.deepcopy(self.touch_probe_edge_pose)
+            if self.touch_probe_edge_pose is not None
+            else copy.deepcopy(stopped_pose)
+        )
+        edge_values = (
+            touched.position.x, touched.position.y, touched.position.z
+        )
+        stopped_values = (
+            stopped_pose.position.x,
+            stopped_pose.position.y,
+            stopped_pose.position.z,
+        )
+        braking_mm = tuple(
+            (stopped_values[index] - edge_values[index]) * 1000.0
+            for index in range(3)
+        )
+        self.ui.post(
+            self.ui.log,
+            f"DI8 CONTACT LATCH · {kind} · edge XYZ="
+            f"({edge_values[0]:.6f}, {edge_values[1]:.6f}, "
+            f"{edge_values[2]:.6f}) m · braking delta="
+            f"({braking_mm[0]:+.3f}, {braking_mm[1]:+.3f}, "
+            f"{braking_mm[2]:+.3f}) mm",
+        )
+        self.touch_probe_edge_pose = None
+        self.ui.post(
+            self.ui.apply_touch_capture,
+            touched,
+            planning_group,
+            f"automatic probe:{kind}",
+            start,
+            stopped_pose,
+        )
+
+    def _stop_motion_on_di8(self, arm, label):
+        """Apply the seam-probe controlled-stop ladder to any guarded move."""
         handle = self.active_motion_goal
         action_finished = threading.Event()
+        controller_deactivated = False
         if handle is not None:
             try:
                 handle.get_result_async().add_done_callback(
@@ -1404,14 +2037,13 @@ class WeldGuiNode(Node):
             except Exception as error:
                 self.ui.post(
                     self.ui.log,
-                    f"DI8 Cartesian cancel warning: {error}",
+                    f"DI8 {label} action cancel warning: {error}",
                 )
 
         # Prefer action cancellation while keeping the trajectory controller
         # active.  Deactivate/reactivate mode switches caused a visible kick at
         # contact and before retract.  Escalate only when cancellation cannot
         # establish standstill promptly.
-        self.touch_probe_controller_deactivated = False
         cancel_success, cancel_message = self.cancel_controller_goals(arm)
         self.ui.post(
             self.ui.log,
@@ -1432,7 +2064,7 @@ class WeldGuiNode(Node):
             controller_success, controller_message = self.switch_arm_controller(
                 arm, False
             )
-            self.touch_probe_controller_deactivated = bool(controller_success)
+            controller_deactivated = bool(controller_success)
             direct_stop_success, direct_stop_message = (
                 self.request_direct_motion_stop(arm)
             )
@@ -1449,38 +2081,13 @@ class WeldGuiNode(Node):
                 f"{direct_stop_message}",
             )
             stationary = self.wait_until_arm_stopped(arm)
-        if not stationary:
-            self.active_touch_probe = None
-            if self.touch_probe_controller_deactivated:
-                self.switch_arm_controller(arm, True)
-                self.touch_probe_controller_deactivated = False
-            self.ui.post(
-                self.ui.touch_probe_failed,
-                "DI8 received, but measured joints did not reach standstill",
-            )
-            return
         if handle is not None and not action_finished.wait(timeout=2.0):
             self.ui.post(
                 self.ui.log,
                 "DI8 motion is physically stopped; outer action cleanup "
                 "is still pending",
             )
-        try:
-            touched = self._current_tcp_pose(planning_group)
-        except TransformException as error:
-            self.active_touch_probe = None
-            if self.touch_probe_controller_deactivated:
-                self.switch_arm_controller(arm, True)
-                self.touch_probe_controller_deactivated = False
-            self.ui.post(self.ui.touch_probe_failed, str(error))
-            return
-        self.ui.post(
-            self.ui.apply_touch_capture,
-            touched,
-            planning_group,
-            f"automatic probe:{kind}",
-            start,
-        )
+        return bool(stationary), controller_deactivated
 
     def cancel_controller_goals(self, arm):
         """Cancel every active FollowJointTrajectory goal for one arm."""
@@ -1512,32 +2119,36 @@ class WeldGuiNode(Node):
             f"goals_canceling={outcome.get('count', 0)}"
         )
 
-    def stop_sequence_equipment(self, arms):
-        """Immediately cancel controller goals; escalate only active failures."""
+    def stop_sequence_equipment(self, devices):
+        """Cancel every robot goal and escalate until measured motion stops."""
         results = []
-        for arm in tuple(dict.fromkeys(arms)):
-            canceled, cancel_message = self.cancel_controller_goals(arm)
-            if canceled:
-                stationary = self.wait_until_arm_stopped(arm, timeout=1.5)
-                if not stationary:
-                    deactivated, deactivate_message = self.switch_arm_controller(
-                        arm, False
-                    )
-                    direct, direct_message = self.request_direct_motion_stop(arm)
-                    results.append(
-                        f"{arm}: cancel accepted but stop unconfirmed · "
-                        f"controller_off={deactivated} ({deactivate_message}) · "
-                        f"move_stop={direct} ({direct_message})"
-                    )
-                else:
-                    results.append(f"{arm}: trajectory canceled and stationary")
+        for device in tuple(dict.fromkeys(devices)):
+            canceled, cancel_message = self.cancel_controller_goals(device)
+            stationary = self.wait_until_device_stopped(device, timeout=1.5)
+            if stationary:
+                results.append(
+                    f"{device}: stationary · cancel="
+                    f"{'OK' if canceled else cancel_message}"
+                )
             else:
-                # ERROR_REJECTED normally means this arm has no active goal.
-                results.append(f"{arm}: no cancelable goal · {cancel_message}")
+                deactivated, deactivate_message = self.switch_arm_controller(
+                    device, False
+                )
+                if device in ("left", "right"):
+                    direct, direct_message = self.request_direct_motion_stop(device)
+                else:
+                    direct, direct_message = False, "head has no RBPodo move_stop"
+                stopped_after_fallback = self.wait_until_device_stopped(device)
+                results.append(
+                    f"{device}: fallback stop="
+                    f"{'OK' if stopped_after_fallback else 'FAILED'} · "
+                    f"controller_off={deactivated} ({deactivate_message}) · "
+                    f"move_stop={direct} ({direct_message})"
+                )
         self.ui.post(self.ui.sequence_hard_stop_finished, results)
 
     def stop_touch_guarded_motion(self):
-        """Stop a DI8-guarded named-pose move without capturing a probe."""
+        """Stop a guarded named move using the seam-probe stop ladder."""
         if not self.touch_guard_stop_lock.acquire(blocking=False):
             return
         try:
@@ -1547,29 +2158,37 @@ class WeldGuiNode(Node):
             arm, pose_name = guard
             self.touch_guard_triggered.set()
             self.touch_guard_stop_success = False
-            handle = self.active_motion_goal
-            if handle is not None:
-                try:
-                    handle.cancel_goal_async()
-                except Exception as error:
-                    self.ui.post(
-                        self.ui.log,
-                        f"DI8 {pose_name} cancel warning: {error}",
-                    )
-            stopped, stop_message = self.request_direct_motion_stop(arm)
-            self.ui.post(
-                self.ui.log,
-                f"DI8 stopped guarded {pose_name} motion · "
-                f"move_stop={'OK' if stopped else 'FAILED'} · {stop_message}",
+            stationary, controller_deactivated = self._stop_motion_on_di8(
+                arm, f"guarded named pose {pose_name}"
             )
-            stationary = self.wait_until_arm_stopped(arm)
-            self.touch_guard_stop_success = bool(stationary)
+            restored = True
+            restore_message = "controller remained active"
+            if controller_deactivated:
+                restored, restore_message = self.switch_arm_controller(arm, True)
+                self.ui.post(
+                    self.ui.log,
+                    f"DI8 guarded motion controller restore: "
+                    f"{'OK' if restored else 'FAILED'} · {restore_message}",
+                )
+            self.touch_guard_stop_success = bool(stationary and restored)
             if not stationary:
                 self.ui.post(
                     self.ui.error,
                     f"DI8 detected during {pose_name}, but standstill was not confirmed",
                 )
+            elif not restored:
+                self.ui.post(
+                    self.ui.error,
+                    f"DI8 stopped {pose_name}, but controller restore failed: "
+                    f"{restore_message}",
+                )
         finally:
+            # The DI8 edge terminates only this guarded execution.  Drop the
+            # guard as soon as stop/recovery finishes so a later command can
+            # move again (including a deliberate retraction while DI8 is
+            # still high).  A new stop requires DI8 to release and rise again.
+            if self.active_touch_guard == guard:
+                self.active_touch_guard = None
             self.touch_guard_stop_complete.set()
             self.touch_guard_stop_lock.release()
 
@@ -1665,7 +2284,11 @@ class WeldGuiNode(Node):
 
     def wait_until_arm_stopped(self, arm, timeout=3.0):
         """Confirm measured joints remain still before capturing the touch."""
-        names = tuple(sorted(ARM_JOINT_NAMES[arm]))
+        return self.wait_until_device_stopped(arm, timeout)
+
+    def wait_until_device_stopped(self, device, timeout=3.0):
+        """Confirm a controlled arm or head remains measurably stationary."""
+        names = tuple(sorted(CONTROLLED_JOINT_NAMES[device]))
         deadline = time.monotonic() + timeout
         previous = None
         stable_since = None
@@ -1739,6 +2362,7 @@ class WeldGuiNode(Node):
 
     def clear_touch_probe(self):
         self.active_touch_probe = None
+        self.touch_probe_edge_pose = None
         self.touch_probe_stop_requested.set()
 
     def stop_auto_motion(self, arm):
@@ -1770,6 +2394,7 @@ class WeldGuiNode(Node):
         positions,
         velocity_scale,
         pose_name=None,
+        target_tcp=None,
     ):
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
@@ -1784,14 +2409,51 @@ class WeldGuiNode(Node):
                 "Complete measured joint state is unavailable",
             )
             return
-        maximum_delta = max(
-            abs(current - target)
-            for current, target in zip(current_positions, positions)
+        tcp_target = bool(
+            pose_name in TCP_POSE_TEACHING_POSES
+            and pose_is_valid(target_tcp)
         )
-        if maximum_delta <= 0.002:
+        if tcp_target:
+            try:
+                current_tcp = self._current_tcp_pose(planning_group)
+            except TransformException as error:
+                self.ui.post(self.ui.error, f"Current TCP lookup failed: {error}")
+                return
+            target_delta = math.sqrt(sum(
+                (
+                    getattr(current_tcp.position, axis)
+                    - getattr(target_tcp.position, axis)
+                ) ** 2
+                for axis in ("x", "y", "z")
+            ))
+            orientation_delta = quaternion_angular_distance(
+                current_tcp.orientation, target_tcp.orientation
+            )
+            already_at_target = (
+                target_delta <= 0.001 and orientation_delta <= 0.01
+            )
+        else:
+            maximum_delta = max(
+                abs(current - target)
+                for current, target in zip(current_positions, positions)
+            )
+            already_at_target = maximum_delta <= 0.002
+        if already_at_target:
             self.ui.post(
                 self.ui.pipeline_result,
-                "Already at selected taught pose · no plan required",
+                "Already at selected corrected XYZ + taught orientation"
+                if tcp_target
+                else "Already at selected taught pose · no plan required",
+            )
+            return
+        if tcp_target:
+            self._plan_named_tcp_linear(
+                planning_group,
+                current_tcp,
+                target_tcp,
+                tuple(positions),
+                velocity_scale,
+                pose_name,
             )
             return
         if not self.move_group_client.wait_for_server(timeout_sec=3.0):
@@ -1831,6 +2493,87 @@ class WeldGuiNode(Node):
                 velocity_scale,
                 pose_name,
             )
+        )
+
+    def _plan_named_tcp_linear(
+        self,
+        planning_group,
+        current_tcp,
+        target_tcp,
+        target_positions,
+        velocity_scale,
+        pose_name,
+    ):
+        """Plan current TCP→named TCP as linear XYZ plus quaternion SLERP."""
+        if not self.cartesian_planning_client.wait_for_service(timeout_sec=3.0):
+            self.ui.post(
+                self.ui.error, "/compute_cartesian_path service unavailable"
+            )
+            return
+        try:
+            waypoints = named_tcp_linear_waypoints(current_tcp, target_tcp)
+        except ValueError as error:
+            self.ui.post(self.ui.error, f"Named TCP path failed: {error}")
+            return
+        request = GetCartesianPath.Request()
+        request.header.frame_id = "World"
+        request.start_state.is_diff = True
+        request.group_name = planning_group
+        request.link_name = tip_link_for_group(planning_group)
+        # The current state is already the path start.  Send every sampled
+        # pose after it so MoveIt follows the explicit SLERP sequence.
+        request.waypoints = copy.deepcopy(waypoints[1:])
+        request.max_step = 0.005
+        request.jump_threshold = 0.0
+        request.avoid_collisions = True
+        self.ui.post(
+            self.ui.pipeline_waiting,
+            f"Planning named TCP linear path · {len(waypoints)} SLERP samples",
+        )
+        finished = threading.Event()
+        outcome = {}
+
+        def response_ready(future):
+            try:
+                outcome["response"] = future.result()
+            except Exception as error:
+                outcome["error"] = str(error)
+            finished.set()
+
+        self.cartesian_planning_client.call_async(request).add_done_callback(
+            response_ready
+        )
+        if not finished.wait(timeout=30.0):
+            self.ui.post(self.ui.error, "Named TCP Cartesian planning timed out")
+            return
+        if "error" in outcome:
+            self.ui.post(
+                self.ui.error,
+                f"Named TCP Cartesian planning failed: {outcome['error']}",
+            )
+            return
+        response = outcome["response"]
+        if response.fraction < 0.999:
+            self.ui.post(
+                self.ui.error,
+                f"Named TCP Cartesian path planned only "
+                f"{response.fraction:.1%}",
+            )
+            return
+        scale_trajectory_speed(response.solution, velocity_scale)
+        display = DisplayTrajectory()
+        display.trajectory_start = response.start_state
+        display.trajectory.append(response.solution)
+        self.initial_planned_trajectory = copy.deepcopy(response.solution)
+        self.initial_planned_pose_name = pose_name
+        self.initial_planned_group = planning_group
+        self.display_trajectory_publisher.publish(display)
+        self.ui.post(
+            self.ui.initial_position_plan_ready,
+            planning_group,
+            target_positions,
+            velocity_scale,
+            "Named TCP linear plan shown in RViz · XYZ linear + orientation SLERP",
         )
 
     def _initial_plan_goal_response(
@@ -1925,22 +2668,24 @@ class WeldGuiNode(Node):
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
-        touch_guarded = bool(pose_name == "weld_start" and planning_group)
+        touch_guarded = bool(
+            pose_name in DI8_GUARDED_TEACHING_POSES and planning_group
+        )
         if touch_guarded:
             arm = planning_group.removesuffix("_manipulator")
             if self.node_touch_input_states.get(arm):
                 self.ui.post(
-                    self.ui.error,
-                    "DI8 is already ON; Weld start execution was not started",
+                    self.ui.log,
+                    "DI8 is already ON; new taught-pose execution is allowed. "
+                    "Guard will stop only after DI8 releases and rises again",
                 )
-                return
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
             self.touch_guard_stop_success = False
             self.active_touch_guard = (arm, pose_name)
             self.ui.post(
                 self.ui.log,
-                "DI8 stop guard armed for approved Weld start trajectory",
+                f"DI8 stop guard armed for approved taught pose: {pose_name}",
             )
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = trajectory
@@ -1979,6 +2724,7 @@ class WeldGuiNode(Node):
         )
 
     def _initial_execute_result(self, future, touch_guarded=False):
+        self.active_motion_goal = None
         try:
             result = future.result().result
         except Exception as error:
@@ -1990,11 +2736,25 @@ class WeldGuiNode(Node):
                 self.active_touch_guard = None
             return
         if touch_guarded and self.touch_guard_triggered.is_set():
+            stop_complete = self.touch_guard_stop_complete.wait(timeout=5.0)
+            stop_success = self.touch_guard_stop_success
             self.active_touch_guard = None
-            self.ui.post(
-                self.ui.error,
-                "Weld start approach stopped by DI8",
-            )
+            if not stop_complete:
+                self.ui.post(
+                    self.ui.error,
+                    "Guarded taught-pose action ended, but DI8 stop cleanup timed out",
+                )
+            elif not stop_success:
+                self.ui.post(
+                    self.ui.error,
+                    "Guarded taught-pose action ended, but controller recovery failed",
+                )
+            else:
+                self.ui.post(
+                    self.ui.pipeline_result,
+                    "Guarded taught-pose execution stopped by DI8 · "
+                    "execution closed · ready for the next command",
+                )
             return
         if touch_guarded:
             self.active_touch_guard = None
@@ -2052,12 +2812,30 @@ class WeldGuiNode(Node):
         )
 
     def capture_linear_tcp(self, endpoint_index, planning_group):
+        arm = "left" if planning_group.startswith("left") else "right"
+        joint_names = [
+            f"{arm}_manipulator_joint{index}" for index in range(1, 7)
+        ]
         try:
             pose = self._current_tcp_pose(planning_group)
+            positions = [self.latest_joint_positions[name] for name in joint_names]
+        except KeyError:
+            self.ui.post(
+                self.ui.error,
+                "Complete measured joint state is unavailable for TCP teaching",
+            )
+            return
         except TransformException as error:
             self.ui.post(self.ui.error, f"TCP capture failed: {error}")
             return
-        self.ui.post(self.ui.apply_linear_tcp, endpoint_index, pose)
+        self.ui.post(
+            self.ui.apply_linear_tcp,
+            endpoint_index,
+            pose,
+            planning_group,
+            tuple(joint_names),
+            tuple(positions),
+        )
 
     def generate_tcp_line(self, start, end, count, visible):
         try:
@@ -2138,7 +2916,15 @@ class WeldGuiNode(Node):
                         f"{guard_name} already at START contact (DI8 ON) · "
                         "approach skipped and weld stages will continue"
                     )
-                return False, f"DI8 is already ON; {guard_name} was not started"
+                if not step.get("allow_initial_touch_motion", False):
+                    return False, (
+                        f"DI8 is already ON; {guard_name} was not started"
+                    )
+                self.ui.post(
+                    self.ui.log,
+                    f"{guard_name} starts while DI8 is ON · Cartesian "
+                    "retraction allowed; guard waits for a new rising edge",
+                )
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
             self.touch_guard_stop_success = False
@@ -2184,6 +2970,33 @@ class WeldGuiNode(Node):
 
     def run_sequence_named_pose(self, step, execute_requested):
         """Plan or plan-and-execute one taught joint pose."""
+        tcp_target = bool(
+            step.get("pose_name") in TCP_POSE_TEACHING_POSES
+            and pose_is_valid(step.get("tcp_pose"))
+        )
+        if tcp_target:
+            try:
+                current_tcp = self._current_tcp_pose(step["planning_group"])
+                points = named_tcp_linear_waypoints(
+                    current_tcp, step["tcp_pose"]
+                )
+            except (TransformException, ValueError) as error:
+                return False, f"Named TCP linear path failed: {error}"
+            return self.run_sequence_cartesian_motion(
+                {
+                    "planning_group": step["planning_group"],
+                    "interpolation_step": 0.005,
+                    "velocity_scale": step["velocity_scale"],
+                    "points": points,
+                    "path_kind": f"{step['pose_label']} TCP linear",
+                    "touch_guard": bool(step.get("touch_guard", True)),
+                    "continue_after_touch": bool(
+                        step.get("continue_after_touch", False)
+                    ),
+                    "allow_initial_touch_motion": True,
+                },
+                execute_requested,
+            )
         goal = MoveGroup.Goal()
         goal.request.group_name = step["planning_group"]
         goal.request.num_planning_attempts = int(
@@ -2210,21 +3023,26 @@ class WeldGuiNode(Node):
         goal.planning_options.replan = False
         touch_guarded = bool(
             execute_requested
-            and step.get(
-                "touch_guard", step.get("pose_name") == "weld_start"
+            and (
+                step.get("touch_guard", False)
+                or step.get("pose_name") in DI8_GUARDED_TEACHING_POSES
             )
         )
         arm = step["planning_group"].removesuffix("_manipulator")
         if touch_guarded:
             if self.node_touch_input_states.get(arm):
-                return False, "DI8 is already ON; Weld start approach was not started"
+                self.ui.post(
+                    self.ui.log,
+                    f"{step['pose_label']} starts while DI8 is ON · "
+                    "allowed for contact retraction; guard waits for a new rising edge",
+                )
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
             self.touch_guard_stop_success = False
             self.active_touch_guard = (arm, step["pose_name"])
             self.ui.post(
                 self.ui.log,
-                "DI8 stop guard armed for Weld start pose approach",
+                f"DI8 stop guard armed for {step['pose_label']} approach",
             )
         try:
             result = self._send_action_goal_and_wait(
@@ -2261,7 +3079,8 @@ class WeldGuiNode(Node):
                 self.display_trajectory_publisher.publish(display)
             return success, (
                 f"{step['pose_label']} "
-                f"{'reached' if execute_requested else 'planned in RViz'}"
+                f"{'reached' if execute_requested else 'planned in RViz'} · "
+                "stored joint state"
                 if success
                 else f"MoveIt code {result.error_code.val}"
             )
@@ -2514,7 +3333,21 @@ class WeldActionGui:
         self.corner_touch_target = tk.StringVar(value="start_floor")
         self.corner_touch_count = tk.IntVar(value=10)
         self.corner_touches = {name: None for name in CORNER_TOUCH_NAMES}
+        # seam_axis is retained only for backward-compatible touch YAML / legacy
+        # helpers.  New DI8 probing uses explicit probe directions below.
         self.seam_axis = tk.StringVar(value="X")
+        self.wall_probe_axis = tk.StringVar(value="AUTO ⟂ taught seam (XY)")
+        self.floor_probe_axis = tk.StringVar(value="World Z")
+        self.seam_orientation_mode = tk.StringVar(
+            value="Follow sensed seam yaw"
+        )
+        self.reference_yaw_status = tk.StringVar(value="Reference yaw: --")
+        self.sensed_yaw_status = tk.StringVar(value="Sensed yaw: --")
+        self.delta_yaw_status = tk.StringVar(value="ΔYaw: --")
+        self.reference_length_status = tk.StringVar(value="Length: --")
+        self.quick_teaching_status = tk.StringVar(
+            value="Auxiliary teaching: not captured"
+        )
         self.wall_probe_sign = tk.StringVar(value="-")
         self.floor_probe_sign = tk.StringVar(value="-")
         self.touch_probe_distance_mm = tk.DoubleVar(value=25.0)
@@ -2525,10 +3358,17 @@ class WeldActionGui:
         self.seam_probe_touches = {
             name: None for name in CORNER_TOUCH_NAMES
         }
+        self.seam_probe_starts = {
+            name: None for name in CORNER_TOUCH_NAMES
+        }
+        self.seam_probe_stops = {
+            name: None for name in CORNER_TOUCH_NAMES
+        }
         self.raw_two_touch_seam = []
         self.corrected_two_touch_seam = []
         self.computed_seam_endpoints = {"start": None, "goal": None}
         self.computed_seam_wait_points = {"start": None, "goal": None}
+        self.seam_teaching_reference = None
         self.automatic_probe_kind = None
         self.seam_auto_running = False
         self.seam_auto_stage_event = threading.Event()
@@ -2655,6 +3495,20 @@ class WeldActionGui:
             font=("Sans", 11, "bold"),
         )
         self.welder_connection_label.pack(side=tk.LEFT, padx=6, pady=6)
+        tk.Button(
+            robot_status,
+            text="EMERGENCY STOP (SOFTWARE)\nALL MOTION + WELDER",
+            command=self.emergency_stop_all,
+            bg="#b3261e",
+            fg="white",
+            activebackground="#7f1d1d",
+            activeforeground="white",
+            font=("Sans", 11, "bold"),
+            relief=tk.RAISED,
+            borderwidth=3,
+            padx=12,
+            pady=3,
+        ).pack(side=tk.RIGHT, padx=8, pady=4)
 
         arm_selection = ttk.Frame(outer)
         arm_selection.pack(fill=tk.X, pady=(0, 7))
@@ -2990,50 +3844,100 @@ class WeldActionGui:
             row=3, column=2, columnspan=7, padx=8, pady=3, sticky=tk.W
         )
 
-        welding_tests = self._create_toggle_section(
-            outer, "welding_test", "Welding Test", expanded=False
+        tcp_teaching = self._create_toggle_section(
+            outer, "tcp_teaching", "TCP Teaching · Seam Reference", expanded=True
         )
-        tcp_line = ttk.Frame(welding_tests)
-        tcp_line.pack(fill=tk.X, pady=2)
+
+        reference_row = ttk.Frame(tcp_teaching)
+        reference_row.pack(fill=tk.X, pady=2)
+        ttk.Label(
+            reference_row,
+            text="Reference seam",
+            font=("Sans", 10, "bold"),
+        ).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(
-            tcp_line,
-            text="Capture TCP 1",
+            reference_row,
+            text="Teach TCP 1 / START",
             command=lambda: self.capture_linear_tcp(0),
         ).pack(side=tk.LEFT, padx=(0, 5))
-        self.tcp_1_status = ttk.Label(tcp_line, text="not captured")
-        self.tcp_1_status.pack(side=tk.LEFT, padx=(0, 10))
+        self.tcp_1_status = ttk.Label(reference_row, text="not saved")
+        self.tcp_1_status.pack(side=tk.LEFT, padx=(0, 12))
         ttk.Button(
-            tcp_line,
-            text="Capture TCP 2",
+            reference_row,
+            text="Teach TCP 2 / GOAL",
             command=lambda: self.capture_linear_tcp(1),
         ).pack(side=tk.LEFT, padx=(0, 5))
-        self.tcp_2_status = ttk.Label(tcp_line, text="not captured")
-        self.tcp_2_status.pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(tcp_line, text="points").pack(side=tk.LEFT)
+        self.tcp_2_status = ttk.Label(reference_row, text="not saved")
+        self.tcp_2_status.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            reference_row,
+            text="Load reference YAML",
+            command=self.load_seam_reference,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(reference_row, text="preview points").pack(side=tk.LEFT)
         ttk.Spinbox(
-            tcp_line,
+            reference_row,
             from_=2,
             to=200,
             increment=1,
             textvariable=self.tcp_line_count,
             width=5,
-        ).pack(side=tk.LEFT, padx=(3, 8))
-        ttk.Combobox(
-            tcp_line,
-            textvariable=self.tcp_line_direction,
-            values=("TCP 1 → TCP 2", "TCP 2 → TCP 1"),
-            state="readonly",
-            width=13,
-        ).pack(side=tk.LEFT, padx=(0, 8))
+        ).pack(side=tk.LEFT, padx=(3, 5))
         self.generate_tcp_line_button = ttk.Button(
-            tcp_line,
-            text="Generate linear path",
+            reference_row,
+            text="Preview reference line",
             command=self.acquire_two_tcp,
             state=tk.DISABLED,
         )
         self.generate_tcp_line_button.pack(side=tk.LEFT)
 
-        teaching = ttk.LabelFrame(outer, text="Named Robot Pose Teaching")
+        reference_status = ttk.Frame(tcp_teaching)
+        reference_status.pack(fill=tk.X, pady=(0, 3))
+        for variable in (
+            self.reference_yaw_status,
+            self.reference_length_status,
+            self.sensed_yaw_status,
+            self.delta_yaw_status,
+        ):
+            ttk.Label(reference_status, textvariable=variable).pack(
+                side=tk.LEFT, padx=(0, 16)
+            )
+        ttk.Label(
+            reference_status,
+            text="TCP 1/2 are the immutable nominal seam reference used for yaw correction.",
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        auxiliary_row = ttk.Frame(tcp_teaching)
+        auxiliary_row.pack(fill=tk.X, pady=(2, 2))
+        ttk.Label(
+            auxiliary_row,
+            text="Auxiliary poses",
+            font=("Sans", 10, "bold"),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        for text, pose_name in (
+            ("Teach Weld WAIT", "weld_wait"),
+            ("Teach START WAIT", "weld_start_wait"),
+            ("Teach GOAL WAIT", "weld_goal_wait"),
+            ("Teach Weld END", "weld_finish"),
+        ):
+            ttk.Button(
+                auxiliary_row,
+                text=text,
+                command=lambda name=pose_name: self.quick_capture_teaching_pose(name),
+            ).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(
+            auxiliary_row, textvariable=self.quick_teaching_status
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        ttk.Label(
+            tcp_teaching,
+            text=(
+                "Required for seam correction: TCP 1 + TCP 2.  "
+                "START/GOAL WAIT are used by automatic sensing; Weld END is optional post-weld teaching."
+            ),
+        ).pack(anchor=tk.W, pady=(0, 2))
+
+        teaching = ttk.LabelFrame(outer, text="Teaching Detail · Plan / Execute / YAML")
         teaching.pack(fill=tk.X, pady=(7, 0))
         ttk.Label(teaching, text="pose").pack(side=tk.LEFT, padx=(3, 2))
         teaching_pose_box = ttk.Combobox(
@@ -3075,7 +3979,10 @@ class WeldActionGui:
         self.initial_state_status.pack(side=tk.LEFT, padx=(12, 0))
         self.path_summary = ttk.Label(teaching, text="empty path")
 
-        weaving = ttk.Frame(welding_tests)
+        path_tests = self._create_toggle_section(
+            outer, "path_test", "Path Generation · Weave", expanded=False
+        )
+        weaving = ttk.Frame(path_tests)
         weaving.pack(fill=tk.X, pady=2)
         ttk.Button(
             weaving,
@@ -3127,82 +4034,133 @@ class WeldActionGui:
         touch_corner = self._create_toggle_section(
             outer,
             "touch_corner",
-            "Seam Correction · DI8 automatic 0°/90° probing",
+            "Seam Correction · DI8 wall/base probing + seam-yaw orientation",
         )
-        touch_controls = ttk.Frame(touch_corner)
-        touch_controls.pack(fill=tk.X)
-        ttk.Label(touch_controls, text="seam axis").pack(side=tk.LEFT)
-        ttk.Combobox(
-            touch_controls,
-            textvariable=self.seam_axis,
-            values=("X", "Y"),
-            state="readonly",
-            width=3,
-        ).pack(side=tk.LEFT, padx=4)
 
-        for label, variable in (
-            ("wall sign", self.wall_probe_sign),
-            ("floor Z sign", self.floor_probe_sign),
+        geometry_controls = ttk.Frame(touch_corner)
+        geometry_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(geometry_controls, text="wall probe direction").pack(side=tk.LEFT)
+        ttk.Combobox(
+            geometry_controls,
+            textvariable=self.wall_probe_axis,
+            values=(
+                "AUTO ⟂ taught seam (XY)",
+                "World X",
+                "World Y",
+                "World Z",
+            ),
+            state="readonly",
+            width=24,
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(geometry_controls, text="sign").pack(side=tk.LEFT)
+        ttk.Combobox(
+            geometry_controls,
+            textvariable=self.wall_probe_sign,
+            values=("+", "-"),
+            state="readonly",
+            width=2,
+        ).pack(side=tk.LEFT, padx=(3, 10))
+
+        ttk.Label(geometry_controls, text="base/floor probe direction").pack(side=tk.LEFT)
+        ttk.Combobox(
+            geometry_controls,
+            textvariable=self.floor_probe_axis,
+            values=("World X", "World Y", "World Z"),
+            state="readonly",
+            width=9,
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(geometry_controls, text="sign").pack(side=tk.LEFT)
+        ttk.Combobox(
+            geometry_controls,
+            textvariable=self.floor_probe_sign,
+            values=("+", "-"),
+            state="readonly",
+            width=2,
+        ).pack(side=tk.LEFT, padx=(3, 10))
+
+        ttk.Label(geometry_controls, text="orientation").pack(side=tk.LEFT)
+        ttk.Combobox(
+            geometry_controls,
+            textvariable=self.seam_orientation_mode,
+            values=(
+                "Follow sensed seam yaw",
+                "Keep reference orientation",
+            ),
+            state="readonly",
+            width=27,
+        ).pack(side=tk.LEFT, padx=(4, 8))
+
+        yaw_summary = ttk.Frame(touch_corner)
+        yaw_summary.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(yaw_summary, text="Orientation status", font=("Sans", 9, "bold")).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        for variable in (
+            self.reference_yaw_status,
+            self.sensed_yaw_status,
+            self.delta_yaw_status,
         ):
-            ttk.Label(touch_controls, text=label).pack(side=tk.LEFT, padx=(8, 2))
-            ttk.Combobox(
-                touch_controls,
-                textvariable=variable,
-                values=("+", "-"),
-                state="readonly",
-                width=2,
-            ).pack(side=tk.LEFT)
-        ttk.Label(touch_controls, text="max travel mm").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
+            ttk.Label(yaw_summary, textvariable=variable).pack(
+                side=tk.LEFT, padx=(0, 14)
+            )
+
+        offset_controls = ttk.Frame(touch_corner)
+        offset_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(offset_controls, text="wall plane offset mm").pack(side=tk.LEFT)
         ttk.Entry(
-            touch_controls,
-            textvariable=self.touch_probe_distance_mm,
+            offset_controls,
+            textvariable=self.seam_wall_offset_mm,
             width=6,
-        ).pack(side=tk.LEFT)
-        ttk.Label(touch_controls, text="speed %").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(offset_controls, text="base plane offset mm").pack(side=tk.LEFT)
         ttk.Entry(
-            touch_controls,
-            textvariable=self.touch_probe_speed_percent,
-            width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(touch_controls, text="settle s").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
+            offset_controls,
+            textvariable=self.seam_floor_offset_mm,
+            width=6,
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(
+            offset_controls,
+            text=(
+                "AUTO wall = World-XY normal of taught START→GOAL; "
+                "positive offsets follow each configured +normal"
+            ),
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        motion_controls = ttk.Frame(touch_corner)
+        motion_controls.pack(fill=tk.X, pady=(0, 3))
+        for label, variable, width in (
+            ("max travel mm", self.touch_probe_distance_mm, 6),
+            ("speed %", self.touch_probe_speed_percent, 5),
+        ):
+            ttk.Label(motion_controls, text=label).pack(side=tk.LEFT, padx=(0, 2))
+            ttk.Entry(
+                motion_controls, textvariable=variable, width=width
+            ).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(motion_controls, text="settle s").pack(side=tk.LEFT)
         ttk.Spinbox(
-            touch_controls,
+            motion_controls,
             from_=0.2,
             to=5.0,
             increment=0.1,
             textvariable=self.touch_settle_seconds,
             width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(touch_controls, text="wall offset mm").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
-        ttk.Entry(
-            touch_controls,
-            textvariable=self.seam_wall_offset_mm,
+        ).pack(side=tk.LEFT, padx=(3, 10))
+        ttk.Label(motion_controls, text="path points").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            motion_controls,
+            from_=2,
+            to=200,
+            textvariable=self.corner_touch_count,
             width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(touch_controls, text="floor offset mm").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
-        ttk.Entry(
-            touch_controls,
-            textvariable=self.seam_floor_offset_mm,
-            width=5,
-        ).pack(side=tk.LEFT)
+        ).pack(side=tk.LEFT, padx=(3, 10))
 
         probe_actions = ttk.Frame(touch_corner)
         probe_actions.pack(fill=tk.X, pady=3)
         for label, kind in (
-            ("1 · START wall touch", "start_wall"),
-            ("2 · START floor touch", "start_floor"),
-            ("3 · GOAL wall touch", "goal_wall"),
-            ("4 · GOAL floor touch", "goal_floor"),
+            ("1 · START wall", "start_wall"),
+            ("2 · START base", "start_floor"),
+            ("3 · GOAL wall", "goal_wall"),
+            ("4 · GOAL base", "goal_floor"),
         ):
             ttk.Button(
                 probe_actions,
@@ -3211,51 +4169,42 @@ class WeldActionGui:
                     self.start_automatic_touch_probe(selected)
                 ),
             ).pack(side=tk.LEFT, padx=3)
-        ttk.Label(probe_actions, text="path points").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
-        ttk.Spinbox(
-            probe_actions,
-            from_=2,
-            to=200,
-            textvariable=self.corner_touch_count,
-            width=5,
-        ).pack(side=tk.LEFT)
         ttk.Button(
             probe_actions,
-            text="5a · Compute START from 2 poses",
+            text="Compute START",
             command=lambda: self.compute_seam_endpoint("start"),
-        ).pack(side=tk.LEFT, padx=4)
+        ).pack(side=tk.LEFT, padx=(12, 3))
         ttk.Button(
             probe_actions,
-            text="5b · Compute GOAL from 2 poses",
+            text="Compute GOAL",
             command=lambda: self.compute_seam_endpoint("goal"),
-        ).pack(side=tk.LEFT, padx=4)
+        ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
             probe_actions,
-            text="5c · Compute full seam",
+            text="Compute full seam + orientation",
             command=self.compute_two_touch_seam,
         ).pack(side=tk.LEFT, padx=7)
         self.correct_two_touch_seam_button = ttk.Button(
             probe_actions,
-            text="6 · Correct seam path + update YAML",
+            text="Commit corrected seam YAML",
             command=self.correct_two_touch_seam,
             state=tk.DISABLED,
         )
         self.correct_two_touch_seam_button.pack(side=tk.LEFT, padx=7)
+
         auto_actions = ttk.Frame(touch_corner)
         auto_actions.pack(fill=tk.X, padx=3, pady=3)
         self.auto_start_correction_button = ttk.Button(
             auto_actions,
-            text="AUTO START · weld wait → wall/floor → compute + save",
+            text="AUTO START · wait → wall/base → compute",
             command=self.run_automatic_start_correction,
         )
         self.auto_start_correction_button.pack(side=tk.LEFT, padx=(0, 6))
         self.auto_seam_correction_button = ttk.Button(
             auto_actions,
             text=(
-                "AUTO · start wait → START 2 touches → goal wait "
-                "→ GOAL 2 touches → correct YAML"
+                "AUTO FULL · START wall/base → GOAL wall/base → "
+                "yaw-correct + save"
             ),
             command=self.run_automatic_seam_correction,
         )
@@ -3269,14 +4218,24 @@ class WeldActionGui:
         self.stop_auto_seam_button.pack(side=tk.LEFT, padx=3)
         ttk.Button(
             auto_actions,
-            text="Show computed seam in RViz",
+            text="RViz seam",
             command=self.show_computed_seam_in_rviz,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            auto_actions,
+            text="RViz touches",
+            command=self.show_touch_geometry_in_rviz,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            auto_actions,
+            text="PyPlot touches",
+            command=self.show_touch_geometry_pyplot,
         ).pack(side=tk.LEFT, padx=3)
         self.corner_touch_status = ttk.Label(
             touch_corner,
             text=(
-                "Capture START wall/floor and GOAL wall/floor · "
-                "each DI8 touch stops and returns to that probe's start pose"
+                "Teach rough START/GOAL first · AUTO wall follows the taught seam normal · "
+                "touch geometry corrects XYZ; START→GOAL corrects welding yaw"
             ),
         )
         self.corner_touch_status.pack(anchor=tk.W, pady=(3, 0))
@@ -3294,8 +4253,6 @@ class WeldActionGui:
             ("Add D-WELD OFF", lambda: self.add_digital_weld_step("off")),
             ("Add D-WELD SET", lambda: self.add_digital_weld_step("set")),
             ("Build weld scenario (START enough)", self.build_sensed_weld_sequence),
-            ("Add Forward Inch", lambda: self.add_inching_sequence_step("forward")),
-            ("Add Reverse Inch", lambda: self.add_inching_sequence_step("reverse")),
             ("Add Sleep", self.add_sleep_sequence_step),
             ("Delete", self.delete_sequence_step),
             ("↑", lambda: self.move_sequence_step(-1)),
@@ -4160,8 +5117,8 @@ class WeldActionGui:
         description = (
             "Execute START wall/floor touch probes automatically?\n\n"
             "Weld wait → wall touch/return → floor touch/return\n"
-            "The START seam pose and the two-touch 1:1 midpoint wait pose "
-            "will be saved."
+            "The START seam pose will be saved; both wait poses remain "
+            "unchanged."
             if start_only
             else
             "Execute four physical touch probes automatically?\n\n"
@@ -4178,7 +5135,7 @@ class WeldActionGui:
             else ("weld_start_wait", "weld_goal_wait")
         )
         for wait_name in wait_names:
-            group, names, positions, _tcp = self.taught_robot_poses[wait_name]
+            group, names, positions, tcp = self.taught_robot_poses[wait_name]
             wait_steps[wait_name] = {
                 "type": "named_pose",
                 "pose_name": wait_name,
@@ -4186,6 +5143,7 @@ class WeldActionGui:
                 "planning_group": group,
                 "joint_names": tuple(names),
                 "positions": tuple(positions),
+                "tcp_pose": copy.deepcopy(tcp),
                 "velocity_scale": max(
                     0.01,
                     min(1.0, self.velocity_percent.get() / 100.0),
@@ -4209,6 +5167,8 @@ class WeldActionGui:
             if start_only else CORNER_TOUCH_NAMES
         ):
             self.seam_probe_touches[name] = None
+            self.seam_probe_starts[name] = None
+            self.seam_probe_stops[name] = None
         self.raw_two_touch_seam = []
         self.corrected_two_touch_seam = []
         self.seam_auto_running = True
@@ -4260,10 +5220,103 @@ class WeldActionGui:
             self.corrected_two_touch_seam,
             True,
         )
+        for endpoint in ("start", "goal"):
+            self._publish_touch_geometry_if_ready(
+                endpoint, self.computed_seam_endpoints.get(endpoint)
+            )
         self.log(
             "Published computed seam to RViz /weld_path_markers · "
             "red=raw, translucent cyan=corrected"
         )
+
+    def _publish_touch_geometry_if_ready(self, endpoint, seam_point=None):
+        wall = self.seam_probe_touches.get(f"{endpoint}_wall")
+        floor = self.seam_probe_touches.get(f"{endpoint}_floor")
+        if wall is None or floor is None:
+            return False
+        try:
+            if seam_point is None:
+                teaching_reference = self._ensure_seam_teaching_reference(
+                    require_complete=True
+                )
+                if teaching_reference is None:
+                    return False
+                pose_name = "weld_start" if endpoint == "start" else "weld_end"
+                (
+                    _reference,
+                    wall_normal,
+                    floor_normal,
+                    _wall_label,
+                    _floor_label,
+                ) = self._seam_geometry_settings(require_teaching=True)
+                seam_point = generalized_corner_endpoint_from_two_touches(
+                    wall,
+                    floor,
+                    teaching_reference[pose_name][3],
+                    teaching_reference["weld_start"][3],
+                    teaching_reference["weld_end"][3],
+                    wall_normal,
+                    floor_normal,
+                    float(self.seam_wall_offset_mm.get()) * 0.001,
+                    float(self.seam_floor_offset_mm.get()) * 0.001,
+                )
+            self.node.publish_touch_geometry(
+                endpoint, wall, floor, seam_point
+            )
+        except (ValueError, tk.TclError) as error:
+            self.error(f"{endpoint.upper()} touch visualization failed: {error}")
+            return False
+        return True
+
+    def show_touch_geometry_in_rviz(self):
+        published = [
+            endpoint
+            for endpoint in ("start", "goal")
+            if self._publish_touch_geometry_if_ready(
+                endpoint, self.computed_seam_endpoints.get(endpoint)
+            )
+        ]
+        if not published:
+            self.error("Capture a complete wall/floor touch pair first")
+            return
+        self.show_path.set(True)
+        self.log(
+            "Published DI8 touch geometry to RViz /weld_path_markers · "
+            f"{', '.join(name.upper() for name in published)} · "
+            "red=wall, blue=floor, green=seam, yellow=midpoint"
+        )
+
+    def show_touch_geometry_pyplot(self, endpoint=None):
+        touch_yaml = self._seam_touch_yaml_path("right_manipulator")
+        if not touch_yaml.is_file():
+            self.error("No saved DI8 touch YAML exists yet")
+            return False
+        plot_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
+        if not plot_python.is_file():
+            self.error(f"PyPlot Python is unavailable: {plot_python}")
+            return False
+        plot_script = Path(__file__).with_name("seam_touch_plot.py")
+        try:
+            command = [
+                str(plot_python),
+                str(plot_script),
+                str(touch_yaml),
+                "--wall-offset-mm",
+                str(float(self.seam_wall_offset_mm.get())),
+                "--floor-offset-mm",
+                str(float(self.seam_floor_offset_mm.get())),
+            ]
+            if endpoint in ("start", "goal"):
+                command.extend(("--endpoint", endpoint))
+            subprocess.Popen(command, start_new_session=True)
+        except (OSError, ValueError, tk.TclError) as error:
+            self.error(f"Cannot open touch-result PyPlot: {error}")
+            return False
+        self.log(
+            "Opened DI8 touch-result PyPlot · "
+            + (endpoint.upper() if endpoint else "START + GOAL")
+        )
+        return True
 
     def _automatic_seam_correction_worker(self, workflow, start_only=False):
         probe_index = 0
@@ -4419,7 +5472,6 @@ class WeldActionGui:
                 False, "four-touch seam computation failed"
             )
             return
-        self.correct_two_touch_seam()
         success = self.path_kind == "di8_four_touch_corrected"
         self._finish_automatic_seam_correction(
             success,
@@ -4441,6 +5493,48 @@ class WeldActionGui:
             self.pipeline_result(f"AUTO SEAM CORRECTION COMPLETE · {message}")
         else:
             self.error(f"Automatic seam correction stopped: {message}")
+
+    def _resolve_probe_direction(self, surface, teaching_reference=None):
+        """Resolve a configured positive World probe normal and display label."""
+        surface = str(surface).strip().lower()
+        if surface == "wall":
+            selection = self.wall_probe_axis.get().strip()
+            if selection.upper().startswith("AUTO"):
+                if teaching_reference is None:
+                    teaching_reference = self._ensure_seam_teaching_reference(
+                        require_complete=True
+                    )
+                if teaching_reference is None:
+                    raise ValueError("START/GOAL teaching is required for AUTO wall normal")
+                direction = seam_xy_normal(
+                    teaching_reference["weld_start"][3],
+                    teaching_reference["weld_end"][3],
+                )
+                return direction, (
+                    "AUTO seam-normal "
+                    f"({direction[0]:+.3f}, {direction[1]:+.3f}, {direction[2]:+.3f})"
+                )
+            direction = _axis_unit_vector(selection)
+            return direction, selection
+        if surface == "floor":
+            selection = self.floor_probe_axis.get().strip()
+            direction = _axis_unit_vector(selection)
+            return direction, selection
+        raise ValueError(f"unknown probe surface: {surface}")
+
+    def _seam_geometry_settings(self, require_teaching=True):
+        teaching_reference = self._ensure_seam_teaching_reference(
+            require_complete=require_teaching
+        )
+        if require_teaching and teaching_reference is None:
+            raise ValueError("complete seam teaching reference is unavailable")
+        wall_normal, wall_label = self._resolve_probe_direction(
+            "wall", teaching_reference
+        )
+        floor_normal, floor_label = self._resolve_probe_direction(
+            "floor", teaching_reference
+        )
+        return teaching_reference, wall_normal, floor_normal, wall_label, floor_label
 
     def start_automatic_touch_probe(self, kind, skip_confirmation=False):
         if kind not in CORNER_TOUCH_NAMES:
@@ -4477,25 +5571,34 @@ class WeldActionGui:
         if not 0.2 <= settle <= 5.0:
             self.error("Touch settle time must be in 0.2..5.0 seconds")
             return
-        seam_axis = self.seam_axis.get().lower()
         surface = kind.rsplit("_", 1)[1]
-        axis = (
-            ("y" if seam_axis == "x" else "x")
-            if surface == "wall"
-            else "z"
-        )
+        try:
+            teaching_reference = self._ensure_seam_teaching_reference(
+                require_complete=True
+            )
+            if teaching_reference is None:
+                return
+            direction, direction_label = self._resolve_probe_direction(
+                surface, teaching_reference
+            )
+        except ValueError as error:
+            self.error(f"Cannot resolve touch probe direction: {error}")
+            return
         sign = (
             self.wall_probe_sign.get()
             if surface == "wall"
             else self.floor_probe_sign.get()
         )
-        signed_distance = distance if sign == "+" else -distance
+        sign_scale = 1.0 if sign == "+" else -1.0
+        signed_direction = tuple(sign_scale * value for value in direction)
         if not skip_confirmation:
             if not messagebox.askyesno(
                 "Execute DI8 touch probe",
                 f"{kind.replace('_', ' ').upper()}\n"
-                f"Move along World {sign}{axis.upper()} up to "
-                f"{distance * 1000.0:.1f} mm at {speed:.1%}?\n\n"
+                f"Direction: {direction_label} · sign {sign}\n"
+                f"World vector=({signed_direction[0]:+.3f}, "
+                f"{signed_direction[1]:+.3f}, {signed_direction[2]:+.3f})\n"
+                f"Travel up to {distance * 1000.0:.1f} mm at {speed:.1%}?\n\n"
                 "DI8 will stop the motion and return to the current "
                 "start pose.",
             ):
@@ -4504,15 +5607,19 @@ class WeldActionGui:
             self.hicomm_client.set_arc(False)
         self.automatic_probe_kind = kind
         self.corner_touch_status.configure(
-            text=f"PROBING {kind.upper()} · World {sign}{axis.upper()} · waiting for DI8"
+            text=(
+                f"PROBING {kind.upper()} · {direction_label} {sign} · "
+                f"v=({signed_direction[0]:+.2f}, {signed_direction[1]:+.2f}, "
+                f"{signed_direction[2]:+.2f}) · waiting for DI8"
+            )
         )
         threading.Thread(
             target=self.node.execute_touch_probe,
             args=(
                 self.planning_group.get(),
                 kind,
-                axis,
-                signed_distance,
+                signed_direction,
+                distance,
                 speed,
                 0.001,
             ),
@@ -4526,8 +5633,43 @@ class WeldActionGui:
         self._signal_auto_seam_stage(False, kind)
         self.error(f"{kind or 'touch'} probe failed: {message}")
 
+    def _ensure_seam_teaching_reference(self, require_complete=False):
+        """Return immutable TCP1/TCP2 seam references used for geometry/yaw."""
+        names = ("weld_start", "weld_end")
+        if self.seam_teaching_reference is None:
+            self.seam_teaching_reference = {}
+        for name in names:
+            if (
+                name not in self.seam_teaching_reference
+                and self.taught_robot_poses.get(name) is not None
+            ):
+                self.seam_teaching_reference[name] = copy.deepcopy(
+                    self.taught_robot_poses[name]
+                )
+        missing = [
+            TEACHING_POSES[name]
+            for name in names
+            if name not in self.seam_teaching_reference
+        ]
+        if missing and require_complete:
+            self.error(
+                "Capture/load seam teaching references first: "
+                + ", ".join(missing)
+            )
+            return None
+        if not missing:
+            self.log(
+                "Seam reference ready for yaw correction · TCP1 START / TCP2 GOAL"
+            )
+        return self.seam_teaching_reference
+
     def compute_seam_endpoint(self, endpoint, update_wait_joints=True):
         """Compute START or GOAL independently from its two DI8 poses."""
+        teaching_reference = self._ensure_seam_teaching_reference(
+            require_complete=True
+        )
+        if teaching_reference is None:
+            return None
         endpoint = str(endpoint).strip().lower()
         if endpoint not in ("start", "goal"):
             self.error(f"Unknown seam endpoint: {endpoint}")
@@ -4566,45 +5708,54 @@ class WeldActionGui:
         try:
             wall_offset = float(self.seam_wall_offset_mm.get()) * 0.001
             floor_offset = float(self.seam_floor_offset_mm.get()) * 0.001
-            point = corner_endpoint_from_two_touches(
+            (
+                _reference,
+                wall_normal,
+                floor_normal,
+                wall_label,
+                floor_label,
+            ) = self._seam_geometry_settings(require_teaching=True)
+            point = generalized_corner_endpoint_from_two_touches(
                 wall,
                 floor,
-                endpoint_data[3],
-                self.seam_axis.get(),
+                teaching_reference[pose_name][3],
+                teaching_reference["weld_start"][3],
+                teaching_reference["weld_end"][3],
+                wall_normal,
+                floor_normal,
                 wall_offset,
                 floor_offset,
             )
-            wait_point = touch_midpoint_wait_pose(
-                wait_data[3],
-                wall,
-                floor,
-                self.seam_axis.get(),
-            )
+            wait_point = copy.deepcopy(wait_data[3])
         except (ValueError, tk.TclError) as error:
             self.error(f"{endpoint.upper()} two-pose computation failed: {error}")
             return None
-        updates = (
-            (pose_name, endpoint_data, point),
-            (wait_name, wait_data, wait_point),
-        )
+        updates = [(pose_name, endpoint_data, point)]
         try:
+            saved_paths = []
             for teaching_name, stored, corrected_tcp in updates:
                 planning_group, joint_names, positions, _old_tcp = stored
+                yaml_path = self._initial_state_yaml_path(
+                    planning_group, teaching_name
+                )
                 save_initial_state_yaml(
-                    self._initial_state_yaml_path(
-                        planning_group, teaching_name
-                    ),
+                    yaml_path,
                     planning_group,
                     joint_names,
                     positions,
                     corrected_tcp,
                 )
+                saved_paths.append(yaml_path)
         except (OSError, ValueError, yaml.YAMLError) as error:
             self.error(
                 f"{endpoint.upper()} computed, but teaching YAML update "
                 f"failed: {error}"
             )
             return None
+        self.log(
+            f"{endpoint.upper()} TCP YAML WRITE VERIFIED · "
+            + " · ".join(str(path) for path in saved_paths)
+        )
         for teaching_name, stored, corrected_tcp in updates:
             planning_group, joint_names, positions, _old_tcp = stored
             self.taught_robot_poses[teaching_name] = (
@@ -4615,49 +5766,128 @@ class WeldActionGui:
             )
         self.computed_seam_endpoints[endpoint] = copy.deepcopy(point)
         self.computed_seam_wait_points[endpoint] = copy.deepcopy(wait_point)
+        self._publish_touch_geometry_if_ready(endpoint, point)
         # Make the automatically changed wait pose immediately visible in the
         # Named Robot Pose Teaching panel.  The stored joint seed remains the
         # taught one; the corrected TCP is used by the sensed weld workflow.
         self.teaching_pose_name.set(TEACHING_POSES[wait_name])
         self.teaching_pose_changed()
+        yaw_commit_done = False
         if all(self.computed_seam_endpoints.values()):
             try:
+                teaching_reference = self._ensure_seam_teaching_reference(
+                    require_complete=True
+                )
+                if teaching_reference is None:
+                    return None
                 count = int(self.corner_touch_count.get())
-                preview = linear_pose_waypoints(
+                corrected_start, corrected_goal, delta_yaw, orientation_label = (
+                    apply_sensed_seam_orientation(
+                        teaching_reference["weld_start"][3],
+                        teaching_reference["weld_end"][3],
+                        self.computed_seam_endpoints["start"],
+                        self.computed_seam_endpoints["goal"],
+                        self.seam_orientation_mode.get(),
+                    )
+                )
+                self.computed_seam_endpoints = {
+                    "start": corrected_start,
+                    "goal": corrected_goal,
+                }
+                self._update_seam_yaw_status(
                     self.computed_seam_endpoints["start"],
                     self.computed_seam_endpoints["goal"],
+                )
+                # Both wait poses are fixed, manually taught standby poses.
+                # Cartesian transitions connect them to yaw-corrected seam
+                # endpoints with linear XYZ and orientation SLERP.
+                self.computed_seam_wait_points = {
+                    "start": copy.deepcopy(
+                        self.taught_robot_poses["weld_start_wait"][3]
+                    ),
+                    "goal": copy.deepcopy(
+                        self.taught_robot_poses["weld_goal_wait"][3]
+                    ),
+                }
+                preview = linear_pose_waypoints(
+                    corrected_start,
+                    corrected_goal,
                     count,
                 )
                 self.corrected_two_touch_seam = copy.deepcopy(preview)
                 self.node.publish_points(preview, self.show_path.get())
+                self.correct_two_touch_seam()
+                yaw_commit_done = True
+                self.log(
+                    "Both endpoints ready · "
+                    f"orientation={orientation_label} · "
+                    f"World Δyaw={math.degrees(delta_yaw):+.3f}° · "
+                    "both wait poses kept as taught standby"
+                )
             except (ValueError, tk.TclError) as error:
                 self.error(f"Endpoint preview failed: {error}")
                 return None
         values = self._pose_values(point)
         wait_values = self._pose_values(wait_point)
-        cross_plane = "YZ" if self.seam_axis.get().lower() == "x" else "XZ"
+        wall_values = self._pose_values(wall)
+        floor_values = self._pose_values(floor)
+        taught_values = self._pose_values(endpoint_data[3])
+        correction_mm = tuple(
+            (values[index] - taught_values[index]) * 1000.0
+            for index in range(3)
+        )
+        self.log(
+            f"{endpoint.upper()} SEAM XYZ INPUT · "
+            f"wall=({wall_values[0]:.6f}, {wall_values[1]:.6f}, "
+            f"{wall_values[2]:.6f}) · "
+            f"floor=({floor_values[0]:.6f}, {floor_values[1]:.6f}, "
+            f"{floor_values[2]:.6f}) m"
+        )
+        self.log(
+            f"{endpoint.upper()} SEAM XYZ RESULT · "
+            f"computed=({values[0]:.6f}, {values[1]:.6f}, "
+            f"{values[2]:.6f}) m · old teaching="
+            f"({taught_values[0]:.6f}, {taught_values[1]:.6f}, "
+            f"{taught_values[2]:.6f}) m · correction="
+            f"({correction_mm[0]:+.3f}, {correction_mm[1]:+.3f}, "
+            f"{correction_mm[2]:+.3f}) mm · "
+            + (
+                "orientation=yaw-corrected after both endpoints"
+                if yaw_commit_done
+                else "orientation=temporary teaching value"
+            )
+        )
         self.corner_touch_status.configure(
             text=(
-                f"{endpoint.upper()} computed from wall/floor · {cross_plane} "
+                f"{endpoint.upper()} computed · wall={wall_label} · "
+                f"base={floor_label} · "
                 f"seam=({values[0]:.4f}, {values[1]:.4f}, {values[2]:.4f}) · "
-                f"touch midpoint wait=({wait_values[0]:.4f}, {wait_values[1]:.4f}, "
+                f"fixed wait=({wait_values[0]:.4f}, {wait_values[1]:.4f}, "
                 f"{wait_values[2]:.4f})"
             )
         )
-        if update_wait_joints:
+        if update_wait_joints and not yaw_commit_done:
+            target_labels = " and ".join(
+                TEACHING_POSES[teaching_name]
+                for teaching_name, _stored, _tcp in updates
+            )
             self.pipeline_waiting(
-                f"{endpoint.upper()} TCP computed · resolving corrected "
-                f"{TEACHING_POSES[wait_name]} joint state"
+                f"{endpoint.upper()} TCP computed · resolving MoveIt IK for "
+                f"{target_labels}"
+            )
+            ik_targets = tuple(
+                (
+                    endpoint,
+                    stored[0],
+                    copy.deepcopy(corrected_tcp),
+                    tuple(stored[1]),
+                    teaching_name,
+                )
+                for teaching_name, stored, corrected_tcp in updates
             )
             threading.Thread(
-                target=self.node.resolve_tcp_joint_state,
-                args=(
-                    wait_data[0],
-                    copy.deepcopy(wait_point),
-                    tuple(wait_data[1]),
-                    endpoint,
-                    wait_name,
-                ),
+                target=self.node.resolve_tcp_joint_states,
+                args=(ik_targets,),
                 daemon=True,
             ).start()
         else:
@@ -4669,12 +5899,14 @@ class WeldActionGui:
                 f"({wait_values[0]:.4f}, {wait_values[1]:.4f}, "
                 f"{wait_values[2]:.4f}) · YAML saved"
             )
+        if update_wait_joints:
+            self.show_touch_geometry_pyplot(endpoint)
         return point
 
-    def apply_corrected_wait_joint_state(
+    def apply_corrected_tcp_joint_state(
         self,
         endpoint,
-        wait_name,
+        teaching_name,
         planning_group,
         joint_names,
         positions,
@@ -4682,35 +5914,38 @@ class WeldActionGui:
     ):
         try:
             save_initial_state_yaml(
-                self._initial_state_yaml_path(planning_group, wait_name),
+                self._initial_state_yaml_path(planning_group, teaching_name),
                 planning_group,
                 joint_names,
                 positions,
                 tcp,
             )
         except (OSError, ValueError, yaml.YAMLError) as error:
-            self.corrected_wait_joint_state_failed(endpoint, str(error))
+            self.corrected_tcp_joint_state_failed(
+                endpoint, teaching_name, str(error)
+            )
             return
-        self.taught_robot_poses[wait_name] = (
+        self.taught_robot_poses[teaching_name] = (
             planning_group,
             tuple(joint_names),
             tuple(positions),
             copy.deepcopy(tcp),
         )
-        self.teaching_pose_name.set(TEACHING_POSES[wait_name])
+        self.teaching_pose_name.set(TEACHING_POSES[teaching_name])
         self.teaching_pose_changed()
         values = self._pose_values(tcp)
         self.pipeline_result(
             f"{endpoint.upper()} TWO-POSE APPLIED · "
-            f"{TEACHING_POSES[wait_name]} TCP="
+            f"{TEACHING_POSES[teaching_name]} TCP="
             f"({values[0]:.4f}, {values[1]:.4f}, {values[2]:.4f}) · "
             "MoveIt joint state resolved and YAML saved · computation complete"
         )
 
-    def corrected_wait_joint_state_failed(self, endpoint, message):
+    def corrected_tcp_joint_state_failed(self, endpoint, teaching_name, message):
         self.error(
-            f"{str(endpoint).upper()} TCP was computed, but corrected wait "
-            f"joint-state update failed: {message}"
+            f"{str(endpoint).upper()} TCP was computed, but "
+            f"{TEACHING_POSES.get(teaching_name, teaching_name)} IK update "
+            f"failed: {message}"
         )
 
     def _sensed_motion_step(self, points, label, slot, touch_guard=False):
@@ -4751,17 +5986,22 @@ class WeldActionGui:
 
         goal_data = self.taught_robot_poses.get("weld_end")
         goal_wait_data = self.taught_robot_poses.get("weld_goal_wait")
-        if goal_data is None or goal_wait_data is None:
+        finish_data = self.taught_robot_poses.get("weld_finish")
+        if goal_data is None or goal_wait_data is None or finish_data is None:
             self.error(
                 f"Capture/load {TEACHING_POSES['weld_end']} and "
-                f"{TEACHING_POSES['weld_goal_wait']} first"
+                f"{TEACHING_POSES['weld_goal_wait']} and "
+                f"{TEACHING_POSES['weld_finish']} first"
             )
             return
         if (
             goal_data[0] != "right_manipulator"
             or goal_wait_data[0] != "right_manipulator"
+            or finish_data[0] != "right_manipulator"
         ):
-            self.error("Weld goal and goal-wait poses must belong to the right arm")
+            self.error(
+                "Weld goal, goal-wait, and end poses must belong to the right arm"
+            )
             return
         try:
             settings = self._digital_weld_settings()
@@ -4773,83 +6013,74 @@ class WeldActionGui:
                 raise ValueError(
                     f"Capture/load {TEACHING_POSES['weld_start_wait']} first"
                 )
-            start_wait_group, start_wait_names, start_wait_joints, _ = (
-                start_wait_data
-            )
+            start_wait_group = start_wait_data[0]
             if start_wait_group != "right_manipulator":
                 raise ValueError("Weld start-wait pose must belong to the right arm")
-            goal_wait = self.taught_robot_poses["weld_goal_wait"][3]
-            aligned_start_wait = self.computed_seam_wait_points["start"]
             start = self.computed_seam_endpoints["start"]
             if goal_is_sensed:
                 goal = self.computed_seam_endpoints["goal"]
-                aligned_goal_wait = self.computed_seam_wait_points["goal"]
                 goal_source = "sensed GOAL"
                 goal_path_name = "sensed_goal"
             else:
                 goal = copy.deepcopy(goal_data[3])
-                aligned_goal_wait = aligned_wait_pose(
-                    goal_wait, goal, self.seam_axis.get()
-                )
                 goal_source = TEACHING_POSES["weld_end"]
                 goal_path_name = "taught_goal"
             count = int(self.corner_touch_count.get())
             preview = linear_pose_waypoints(start, goal, count)
             self.node.publish_points(preview, self.show_path.get())
             base_slot = int(self.sequence_parallel_slot.get())
-            steps = [
-                {
+
+            def named_step(name, stored, slot):
+                group, names, joints, tcp = stored
+                return {
                     "type": "named_pose",
-                    "pose_name": "weld_start_wait",
-                    "pose_label": (
-                        f"{TEACHING_POSES['weld_start_wait']} joint approach"
-                    ),
-                    "planning_group": start_wait_group,
-                    "joint_names": tuple(start_wait_names),
-                    "positions": tuple(start_wait_joints),
+                    "pose_name": name,
+                    "pose_label": TEACHING_POSES[name],
+                    "planning_group": group,
+                    "joint_names": tuple(names),
+                    "positions": tuple(joints),
+                    "tcp_pose": copy.deepcopy(tcp),
                     "velocity_scale": max(
                         0.01,
                         min(1.0, self.velocity_percent.get() / 100.0),
                     ),
-                    "parallel_slot": base_slot,
+                    "parallel_slot": slot,
                     "duration": 0.0,
-                    "touch_guard": False,
+                    "touch_guard": True,
                     "continue_after_touch": False,
-                },
-                self._sensed_motion_step(
-                    (aligned_start_wait,),
-                    "short_cartesian_start_wait_alignment",
-                    base_slot + 1,
-                ),
-                self._sensed_motion_step(
-                    (aligned_start_wait, start),
-                    "approach_sensed_seam_start_DI8_guarded",
-                    base_slot + 2,
-                    touch_guard=True,
-                ),
+                }
+
+            approach_start = self._sensed_motion_step(
+                (start,),
+                "start_wait_to_sensed_start_DI8_guarded",
+                base_slot + 1,
+                touch_guard=True,
+            )
+            approach_start["continue_after_touch"] = True
+            approach_start["accept_initial_touch"] = True
+            steps = [
+                named_step("weld_start_wait", start_wait_data, base_slot),
+                approach_start,
                 {
                     "type": "digital_weld", "command": "on",
                     "settings": copy.deepcopy(settings),
-                    "parallel_slot": base_slot + 3, "duration": 0.0,
+                    "parallel_slot": base_slot + 2, "duration": 0.0,
                 },
                 self._sensed_motion_step(
                     (start, goal),
                     f"sensed_start_to_{goal_path_name}_weld_DI8_ignored",
-                    base_slot + 4,
+                    base_slot + 3,
                 ),
                 {
                     "type": "digital_weld", "command": "off",
                     "settings": None,
-                    "parallel_slot": base_slot + 5, "duration": 0.0,
+                    "parallel_slot": base_slot + 4, "duration": 0.0,
                 },
-                self._sensed_motion_step(
-                    (goal, aligned_goal_wait, goal_wait),
-                    f"retract_from_{goal_path_name}_DI8_ignored",
-                    base_slot + 6,
+                named_step(
+                    "weld_goal_wait", goal_wait_data, base_slot + 5
                 ),
+                named_step("weld_finish", finish_data, base_slot + 6),
             ]
-            steps[2]["continue_after_touch"] = True
-            steps[2]["accept_initial_touch"] = True
         except (ValueError, TypeError, tk.TclError) as error:
             self.error(f"Cannot build sensed weld sequence: {error}")
             return
@@ -4858,10 +6089,8 @@ class WeldActionGui:
         self.log(
             f"Built weld workflow from sensed START to {goal_source} · "
             f"{len(steps)} steps · slots {base_slot}..{base_slot + 6} · "
-            "joint approach then short Cartesian START-wait alignment · "
-            "D-WELD ON after START arrival · no separate GAS command · "
-            "no automatic inching · "
-            "DI8 guard only on seam START approach"
+            "START WAIT → START → D-WELD ON → GOAL → D-WELD OFF → "
+            "END WAIT → END · D-WELD ON only after START arrival"
         )
 
     def compute_two_touch_seam(self):
@@ -4875,8 +6104,13 @@ class WeldActionGui:
                 "Complete all four DI8 probes first: " + ", ".join(missing)
             )
             return
-        start_data = self.taught_robot_poses["weld_start"]
-        end_data = self.taught_robot_poses["weld_end"]
+        teaching_reference = self._ensure_seam_teaching_reference(
+            require_complete=True
+        )
+        if teaching_reference is None:
+            return
+        start_data = teaching_reference["weld_start"]
+        end_data = teaching_reference["weld_end"]
         if start_data is None or end_data is None:
             self.error("Capture/load Weld start and Weld goal poses first")
             return
@@ -4898,23 +6132,60 @@ class WeldActionGui:
                 self.seam_probe_touches,
                 count,
             )
-            corrected_points = corrected_corner_seam_from_four_touches(
-                self.seam_probe_touches,
-                self.seam_axis.get(),
-                count,
+            (
+                _reference,
+                wall_normal,
+                floor_normal,
+                wall_label,
+                floor_label,
+            ) = self._seam_geometry_settings(require_teaching=True)
+            sensed_start = generalized_corner_endpoint_from_two_touches(
+                self.seam_probe_touches["start_wall"],
+                self.seam_probe_touches["start_floor"],
+                start_data[3],
+                start_data[3],
+                end_data[3],
+                wall_normal,
+                floor_normal,
                 wall_offset,
                 floor_offset,
             )
-            for points in (raw_points, corrected_points):
-                points[0].orientation = copy.deepcopy(
-                    start_data[3].orientation
+            sensed_goal = generalized_corner_endpoint_from_two_touches(
+                self.seam_probe_touches["goal_wall"],
+                self.seam_probe_touches["goal_floor"],
+                end_data[3],
+                start_data[3],
+                end_data[3],
+                wall_normal,
+                floor_normal,
+                wall_offset,
+                floor_offset,
+            )
+            corrected_points = linear_pose_waypoints(sensed_start, sensed_goal, count)
+            # Raw touch geometry is diagnostic.  The adopted seam uses sensed
+            # endpoint XYZ and rotates both taught welding orientations by the
+            # same sensed-vs-taught World yaw delta.
+            raw_points[0].orientation = copy.deepcopy(
+                start_data[3].orientation
+            )
+            raw_points[-1].orientation = copy.deepcopy(
+                end_data[3].orientation
+            )
+            raw_points[:] = linear_pose_waypoints(
+                raw_points[0], raw_points[-1], count
+            )
+            corrected_start, corrected_goal, delta_yaw, orientation_label = (
+                apply_sensed_seam_orientation(
+                    start_data[3],
+                    end_data[3],
+                    corrected_points[0],
+                    corrected_points[-1],
+                    self.seam_orientation_mode.get(),
                 )
-                points[-1].orientation = copy.deepcopy(
-                    end_data[3].orientation
-                )
-                points[:] = linear_pose_waypoints(
-                    points[0], points[-1], count
-                )
+            )
+            corrected_points[:] = linear_pose_waypoints(
+                corrected_start, corrected_goal, count
+            )
         except ValueError as error:
             self.error(f"Four-touch seam generation failed: {error}")
             return
@@ -4924,19 +6195,18 @@ class WeldActionGui:
             "start": copy.deepcopy(corrected_points[0]),
             "goal": copy.deepcopy(corrected_points[-1]),
         }
+        self._update_seam_yaw_status(
+            self.computed_seam_endpoints["start"],
+            self.computed_seam_endpoints["goal"],
+        )
         try:
             self.computed_seam_wait_points = {
-                endpoint: touch_midpoint_wait_pose(
-                    self.taught_robot_poses[
-                        "weld_start_wait"
-                        if endpoint == "start"
-                        else "weld_goal_wait"
-                    ][3],
-                    self.seam_probe_touches[f"{endpoint}_wall"],
-                    self.seam_probe_touches[f"{endpoint}_floor"],
-                    self.seam_axis.get(),
-                )
-                for endpoint in ("start", "goal")
+                "start": copy.deepcopy(
+                    self.taught_robot_poses["weld_start_wait"][3]
+                ),
+                "goal": copy.deepcopy(
+                    self.taught_robot_poses["weld_goal_wait"][3]
+                ),
             }
         except (TypeError, ValueError):
             self.computed_seam_wait_points = {"start": None, "goal": None}
@@ -4948,6 +6218,10 @@ class WeldActionGui:
             corrected_points,
             self.show_path.get(),
         )
+        for endpoint in ("start", "goal"):
+            self._publish_touch_geometry_if_ready(
+                endpoint, self.computed_seam_endpoints[endpoint]
+            )
         self.correct_two_touch_seam_button.configure(state=tk.NORMAL)
         self.corner_touch_status.configure(
             text=(
@@ -4956,8 +6230,16 @@ class WeldActionGui:
             )
         )
         self.log(
-            "Computed START→GOAL 0°/90° seam from four DI8 touches"
+            "Computed START→GOAL seam from four DI8 touches · "
+            f"wall={wall_label} · base={floor_label} · "
+            f"orientation={orientation_label} · "
+            f"World Δyaw={math.degrees(delta_yaw):+.3f}° · "
+            "both wait poses kept as taught standby"
         )
+        self.show_touch_geometry_pyplot()
+        # Calculation is the commit point: persist corrected start/goal and
+        # wait teaching YAML immediately instead of requiring a second button.
+        self.correct_two_touch_seam()
 
     def correct_two_touch_seam(self):
         if not self.corrected_two_touch_seam:
@@ -4974,27 +6256,28 @@ class WeldActionGui:
             ("weld_start", start_data, corrected_start),
             ("weld_end", end_data, corrected_end),
         ]
-        for endpoint, wait_name in (
-            ("start", "weld_start_wait"),
-            ("goal", "weld_goal_wait"),
-        ):
-            wait_point = self.computed_seam_wait_points.get(endpoint)
-            wait_data = self.taught_robot_poses.get(wait_name)
-            if wait_point is not None and wait_data is not None:
-                updates.append((wait_name, wait_data, copy.deepcopy(wait_point)))
         try:
+            saved_paths = []
             for pose_name, stored, corrected_tcp in updates:
                 planning_group, joint_names, positions, _old_tcp = stored
+                yaml_path = self._initial_state_yaml_path(
+                    planning_group, pose_name
+                )
                 save_initial_state_yaml(
-                    self._initial_state_yaml_path(planning_group, pose_name),
+                    yaml_path,
                     planning_group,
                     joint_names,
                     positions,
                     corrected_tcp,
                 )
+                saved_paths.append(yaml_path)
         except (OSError, ValueError, yaml.YAMLError) as error:
             self.error(f"Corrected seam YAML update failed: {error}")
             return
+        self.log(
+            "CORRECTED SEAM TCP YAML SAVED · "
+            + " · ".join(path.name for path in saved_paths)
+        )
         for pose_name, stored, corrected_tcp in updates:
             planning_group, joint_names, positions, _old_tcp = stored
             self.taught_robot_poses[pose_name] = (
@@ -5003,6 +6286,25 @@ class WeldActionGui:
                 positions,
                 corrected_tcp,
             )
+        ik_targets = []
+        for pose_name, stored, corrected_tcp in updates:
+            endpoint = (
+                "goal"
+                if pose_name in ("weld_end", "weld_goal_wait")
+                else "start"
+            )
+            ik_targets.append((
+                endpoint,
+                stored[0],
+                copy.deepcopy(corrected_tcp),
+                tuple(stored[1]),
+                pose_name,
+            ))
+        threading.Thread(
+            target=self.node.resolve_tcp_joint_states,
+            args=(tuple(ik_targets),),
+            daemon=True,
+        ).start()
         self.path_kind = "di8_four_touch_corrected"
         self.weave_source = copy.deepcopy(self.corrected_two_touch_seam)
         self.set_points(self.corrected_two_touch_seam)
@@ -5012,14 +6314,13 @@ class WeldActionGui:
         self.correct_two_touch_seam_button.configure(state=tk.DISABLED)
         self.corner_touch_status.configure(
             text=(
-                "CORRECTED SEAM ADOPTED · Weld start/goal and touch-midpoint "
-                "wait TCP YAML updated · joint teaching values preserved"
+                "CORRECTED SEAM ADOPTED · Weld start/goal YAML saved · "
+                "both wait poses kept as manual standby"
             )
         )
         self.log(
-            "Adopted corrected seam and updated Weld start/Weld goal plus "
-            "START/GOAL touch-midpoint wait TCP poses in YAML without changing "
-            "taught joint positions"
+            "Adopted corrected seam and updated Weld start/Weld goal YAML · "
+            "START/GOAL wait unchanged · sequential MoveIt IK update started"
         )
 
     def _advance_corner_touch_target(self):
@@ -5147,7 +6448,7 @@ class WeldActionGui:
         except ValueError as error:
             self.error(str(error))
             return
-        planning_group, joint_names, positions, _tcp = stored
+        planning_group, joint_names, positions, tcp = stored
         self.sequence_steps.append({
             "type": "named_pose",
             "pose_name": pose_name,
@@ -5155,13 +6456,14 @@ class WeldActionGui:
             "planning_group": planning_group,
             "joint_names": tuple(joint_names),
             "positions": tuple(positions),
+            "tcp_pose": copy.deepcopy(tcp),
             "velocity_scale": max(
                 0.01,
                 min(1.0, self.velocity_percent.get() / 100.0),
             ),
             "parallel_slot": slot,
             "duration": duration,
-            "touch_guard": pose_name == "weld_start",
+            "touch_guard": pose_name in DI8_GUARDED_TEACHING_POSES,
             "continue_after_touch": False,
         })
         self.refresh_sequence_table(select_last=True)
@@ -5212,20 +6514,6 @@ class WeldActionGui:
             f"Added D-WELD {command.upper()} to sequence · "
             f"slot {slot} · {duration:.3f} s"
         )
-
-    def add_inching_sequence_step(self, direction):
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        self.sequence_steps.append({
-            "type": "inching",
-            "direction": direction,
-            "parallel_slot": slot,
-            "duration": duration,
-        })
-        self.refresh_sequence_table(select_last=True)
 
     def add_gas_sequence_step(self, enabled):
         try:
@@ -5514,11 +6802,6 @@ class WeldActionGui:
                 "enabled", "Gas command",
                 "on" if step["enabled"] else "off", ("on", "off")
             )
-        elif step["type"] == "inching":
-            choice(
-                "direction", "Inching direction", step["direction"],
-                ("forward", "reverse"),
-            )
 
         def save():
             try:
@@ -5578,8 +6861,6 @@ class WeldActionGui:
                         updated["settings"] = settings
                 elif updated["type"] == "gas":
                     updated["enabled"] = variables["enabled"].get() == "on"
-                elif updated["type"] == "inching":
-                    updated["direction"] = variables["direction"].get()
             except (ValueError, tk.TclError) as error:
                 messagebox.showerror("Invalid sequence value", str(error), parent=dialog)
                 return
@@ -5654,8 +6935,7 @@ class WeldActionGui:
                 )
                 return
             contains_weld_command = any(
-                step["type"] in ("digital_weld", "inching", "gas")
-                for step in steps
+                step["type"] in ("digital_weld", "gas") for step in steps
             )
             if contains_weld_command and (
                 not self.hicomm_connected
@@ -5846,34 +7126,6 @@ class WeldActionGui:
             except Exception as error:
                 client.set_command_bit(BIT_GAS, False)
                 return False, str(error)
-        if step["type"] == "inching":
-            client = self.hicomm_client
-            if client is None or not client.connected:
-                return False, "Hi-COMM disconnected"
-            mask = (
-                BIT_FORWARD
-                if step["direction"] == "forward"
-                else BIT_REVERSE
-            )
-            distance_before = self._inching_distance_snapshot()[0]
-            try:
-                client.set_command_bit(mask, True)
-                waited = self._interruptible_wait(duration)
-            except Exception as error:
-                return False, str(error)
-            finally:
-                try:
-                    client.set_command_bit(mask, False)
-                except Exception:
-                    pass
-            distance_after = self._inching_distance_snapshot()[0]
-            fed_mm = distance_after - distance_before
-            return waited, (
-                f"{step['direction']} inch ran for {duration:.3f} seconds · "
-                f"estimated wire {fed_mm:+.1f} mm"
-                if waited
-                else f"inching interrupted · estimated wire {fed_mm:+.1f} mm"
-            )
         return False, "unsupported sequence step"
 
     def _set_sequence_status(self, text):
@@ -5902,13 +7154,13 @@ class WeldActionGui:
         self.hicomm_arc_on_button.configure(state=tk.DISABLED)
         self.hicomm_test_status.configure(text="STOP NOW · ALL OUTPUTS INHIBITED")
         self.node.cancel_active_motion()
-        arms = [
-            arm for arm in ("left", "right")
-            if self.robot_connected.get(arm, False)
+        devices = [
+            device for device in ("left", "right", "head")
+            if self.robot_connected.get(device, False)
         ]
         threading.Thread(
             target=self.node.stop_sequence_equipment,
-            args=(arms,),
+            args=(devices,),
             daemon=True,
         ).start()
         self.sequence_status.configure(
@@ -5916,6 +7168,29 @@ class WeldActionGui:
         )
         self.pipeline_waiting(
             "STOP NOW · ARC/GAS/INCH OFF · canceling all robot motion"
+        )
+
+    def emergency_stop_all(self):
+        """Stop every GUI-owned workflow, robot goal, and welder output."""
+        self.seam_auto_running = False
+        self.seam_auto_expected_kind = None
+        self.seam_auto_stage_success = False
+        self.seam_auto_stage_event.set()
+        self.automatic_probe_kind = None
+        self.node.clear_touch_probe()
+        self.node.active_touch_guard = None
+        self.initial_plan_ready = False
+        self._refresh_initial_position_controls()
+        self.auto_start_correction_button.configure(state=tk.NORMAL)
+        self.auto_seam_correction_button.configure(state=tk.NORMAL)
+        self.stop_auto_seam_button.configure(state=tk.DISABLED)
+        self.corner_touch_status.configure(
+            text="EMERGENCY STOP requested · all GUI motion workflows aborted"
+        )
+        self.root.bell()
+        self.stop_sequence()
+        self.pipeline_waiting(
+            "EMERGENCY STOP (SOFTWARE) · ALL ROBOT MOTION + WELDER STOP REQUESTED"
         )
 
     def sequence_hard_stop_finished(self, results):
@@ -5935,8 +7210,12 @@ class WeldActionGui:
         else:
             self._set_welder_test_controls(self.hicomm_connected)
         self.linear_tcp_endpoints = [None, None]
-        self.tcp_1_status.configure(text="not captured")
-        self.tcp_2_status.configure(text="not captured")
+        self.tcp_1_status.configure(text="not saved")
+        self.tcp_2_status.configure(text="not saved")
+        self.reference_yaw_status.set("Reference yaw: --")
+        self.reference_length_status.set("Length: --")
+        self.sensed_yaw_status.set("Sensed yaw: --")
+        self.delta_yaw_status.set("ΔYaw: --")
         self.generate_tcp_line_button.configure(state=tk.DISABLED)
         self.path_kind = "empty"
         self.weave_source = []
@@ -6465,6 +7744,30 @@ class WeldActionGui:
             / f"{group}_{selected_pose}_state.yaml"
         )
 
+    def _seam_reference_yaml_path(self, planning_group=None):
+        group = planning_group or self.planning_group.get()
+        return (
+            Path.home()
+            / "ros2_ws"
+            / "src"
+            / "construct_robot_ros2"
+            / "construct_description"
+            / "config"
+            / f"{group}_seam_teaching_reference.yaml"
+        )
+
+    def _seam_touch_yaml_path(self, planning_group=None):
+        group = planning_group or self.planning_group.get()
+        return (
+            Path.home()
+            / "ros2_ws"
+            / "src"
+            / "construct_robot_ros2"
+            / "construct_description"
+            / "config"
+            / f"{group}_seam_touch_points.yaml"
+        )
+
     def _auto_load_teaching_states(self):
         """Load every named teaching pose found at its default YAML path."""
         planning_group = self.planning_group.get()
@@ -6496,6 +7799,43 @@ class WeldActionGui:
                 copy.deepcopy(tcp),
             )
             loaded.append(TEACHING_POSES[pose_name])
+
+        reference_path = self._seam_reference_yaml_path(planning_group)
+        if reference_path.is_file():
+            try:
+                reference_group, reference_poses = (
+                    load_seam_teaching_reference_yaml(reference_path)
+                )
+                if reference_group != planning_group:
+                    raise ValueError(
+                        f"reference group is {reference_group}, expected "
+                        f"{planning_group}"
+                    )
+                self.seam_teaching_reference = {}
+                for name, pose in reference_poses.items():
+                    stored = self.taught_robot_poses.get(name)
+                    if stored is not None:
+                        self.seam_teaching_reference[name] = (
+                            stored[0], stored[1], stored[2], copy.deepcopy(pose)
+                        )
+                for index, pose_name in enumerate(("weld_start", "weld_end")):
+                    stored_reference = self.seam_teaching_reference.get(pose_name)
+                    if stored_reference is not None:
+                        pose = copy.deepcopy(stored_reference[3])
+                        self.linear_tcp_endpoints[index] = pose
+                        label = self.tcp_1_status if index == 0 else self.tcp_2_status
+                        label.configure(
+                            text=(
+                                f"loaded ({pose.position.x:.3f}, {pose.position.y:.3f}, "
+                                f"{pose.position.z:.3f})"
+                            )
+                        )
+                if all(item is not None for item in self.linear_tcp_endpoints):
+                    self.generate_tcp_line_button.configure(state=tk.NORMAL)
+                self._update_seam_yaw_status()
+                self.log(f"Loaded seam teaching reference from {reference_path}")
+            except (OSError, ValueError, yaml.YAMLError, KeyError) as error:
+                self.error(f"Seam teaching reference load failed: {error}")
 
         self.teaching_pose_name.set(TEACHING_POSES[selected_pose])
         self.teaching_pose_changed()
@@ -6558,6 +7898,23 @@ class WeldActionGui:
             tuple(positions),
             copy.deepcopy(tcp),
         )
+        if pose_name in TCP_POSE_TEACHING_POSES:
+            if self.seam_teaching_reference is None:
+                self.seam_teaching_reference = {}
+            self.seam_teaching_reference[pose_name] = (
+                planning_group,
+                tuple(joint_names),
+                tuple(positions),
+                copy.deepcopy(tcp),
+            )
+            try:
+                save_seam_teaching_reference_yaml(
+                    self._seam_reference_yaml_path(planning_group),
+                    planning_group,
+                    self.seam_teaching_reference,
+                )
+            except (OSError, ValueError, yaml.YAMLError) as error:
+                self.error(f"Seam teaching reference save failed: {error}")
         self.initial_joint_state = (
             planning_group,
             tuple(joint_names),
@@ -6569,6 +7926,10 @@ class WeldActionGui:
             text=f"{TEACHING_POSES[pose_name]}: {angles}"
         )
         self._refresh_initial_position_controls()
+        if pose_name in ("weld_wait", "weld_start_wait", "weld_goal_wait", "weld_finish"):
+            self.quick_teaching_status.set(
+                f"Saved {TEACHING_POSES[pose_name]}"
+            )
         values = self._pose_values(tcp)
         saved_message = ""
         save_error = None
@@ -6602,7 +7963,10 @@ class WeldActionGui:
         if not self._selected_robot_connected():
             self.error("Connect the selected REAL RB robot first")
             return
+        pose_name = self._selected_teaching_pose_name()
         group, joint_names, positions = self.initial_joint_state
+        stored = self.taught_robot_poses.get(pose_name)
+        target_tcp = copy.deepcopy(stored[3]) if stored is not None else None
         if group != self.planning_group.get():
             self.error("Selected taught pose belongs to another arm")
             return
@@ -6615,7 +7979,8 @@ class WeldActionGui:
                 joint_names,
                 positions,
                 max(0.01, min(1.0, self.velocity_percent.get() / 100.0)),
-                self._selected_teaching_pose_name(),
+                pose_name,
+                target_tcp,
             ),
             daemon=True,
         ).start()
@@ -6670,9 +8035,10 @@ class WeldActionGui:
         self.pipeline_result(message)
 
     def capture_linear_tcp(self, endpoint_index):
+        role = "START" if endpoint_index == 0 else "GOAL"
         self.log(
-            f"Reading current {self.planning_group.get()} TCP as "
-            f"TCP {endpoint_index + 1}..."
+            f"Teaching reference TCP {endpoint_index + 1} / {role} from "
+            f"current {self.planning_group.get()} TCP..."
         )
         threading.Thread(
             target=self.node.capture_linear_tcp,
@@ -6680,38 +8046,194 @@ class WeldActionGui:
             daemon=True,
         ).start()
 
-    def apply_linear_tcp(self, endpoint_index, pose):
+    def apply_linear_tcp(
+        self,
+        endpoint_index,
+        pose,
+        planning_group=None,
+        joint_names=None,
+        positions=None,
+    ):
+        """Store TCP1/TCP2 as persistent nominal seam reference teaching."""
+        planning_group = planning_group or self.planning_group.get()
+        pose_name = "weld_start" if endpoint_index == 0 else "weld_end"
+        role = "START" if endpoint_index == 0 else "GOAL"
+        if joint_names is None or positions is None:
+            self.error(
+                f"Reference TCP {endpoint_index + 1} needs a measured six-joint seed"
+            )
+            return
+        stored = (
+            planning_group,
+            tuple(joint_names),
+            tuple(positions),
+            copy.deepcopy(pose),
+        )
         self.linear_tcp_endpoints[endpoint_index] = copy.deepcopy(pose)
+        self.taught_robot_poses[pose_name] = copy.deepcopy(stored)
+        if self.seam_teaching_reference is None:
+            self.seam_teaching_reference = {}
+        self.seam_teaching_reference[pose_name] = copy.deepcopy(stored)
+        try:
+            state_path = self._initial_state_yaml_path(planning_group, pose_name)
+            save_initial_state_yaml(
+                state_path,
+                planning_group,
+                joint_names,
+                positions,
+                pose,
+            )
+            reference_path = self._seam_reference_yaml_path(planning_group)
+            save_seam_teaching_reference_yaml(
+                reference_path,
+                planning_group,
+                self.seam_teaching_reference,
+            )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Reference TCP save failed: {error}")
+            return
         position = pose.position
         status = (
-            f"({position.x:.3f}, {position.y:.3f}, {position.z:.3f})"
+            f"saved ({position.x:.3f}, {position.y:.3f}, {position.z:.3f})"
         )
         label = self.tcp_1_status if endpoint_index == 0 else self.tcp_2_status
         label.configure(text=status)
-        ready = all(pose is not None for pose in self.linear_tcp_endpoints)
+        ready = all(item is not None for item in self.linear_tcp_endpoints)
         self.generate_tcp_line_button.configure(
             state=tk.NORMAL if ready else tk.DISABLED
         )
-        self.log(
-            f"Captured TCP {endpoint_index + 1} · World XYZ {status}"
+        self._update_seam_yaw_status()
+        self.quick_teaching_status.set(
+            f"Reference TCP {endpoint_index + 1} / {role} saved"
         )
+        self.log(
+            f"REFERENCE TCP {endpoint_index + 1} / {role} SAVED · "
+            f"World XYZ {status} · {reference_path}"
+        )
+
+    def quick_capture_teaching_pose(self, pose_name):
+        if pose_name not in TEACHING_POSES:
+            self.error(f"Unknown quick teaching pose: {pose_name}")
+            return
+        self.teaching_pose_name.set(TEACHING_POSES[pose_name])
+        self.teaching_pose_changed()
+        self.quick_teaching_status.set(
+            f"Capturing {TEACHING_POSES[pose_name]}..."
+        )
+        self.capture_initial_state()
+
+    def _update_seam_yaw_status(self, sensed_start=None, sensed_goal=None):
+        ref_start = self.linear_tcp_endpoints[0]
+        ref_goal = self.linear_tcp_endpoints[1]
+        if ref_start is None or ref_goal is None:
+            reference = self.seam_teaching_reference or {}
+            if ref_start is None and reference.get("weld_start") is not None:
+                ref_start = reference["weld_start"][3]
+            if ref_goal is None and reference.get("weld_end") is not None:
+                ref_goal = reference["weld_end"][3]
+        if ref_start is None or ref_goal is None:
+            self.reference_yaw_status.set("Reference yaw: --")
+            self.reference_length_status.set("Length: --")
+            self.sensed_yaw_status.set("Sensed yaw: --")
+            self.delta_yaw_status.set("ΔYaw: --")
+            return
+        try:
+            reference_yaw = seam_yaw(ref_start, ref_goal)
+            dx = ref_goal.position.x - ref_start.position.x
+            dy = ref_goal.position.y - ref_start.position.y
+            dz = ref_goal.position.z - ref_start.position.z
+            length = math.sqrt(dx * dx + dy * dy + dz * dz)
+            self.reference_yaw_status.set(
+                f"Reference yaw: {math.degrees(reference_yaw):+.2f}°"
+            )
+            self.reference_length_status.set(
+                f"Length: {length * 1000.0:.1f} mm"
+            )
+            if sensed_start is None or sensed_goal is None:
+                self.sensed_yaw_status.set("Sensed yaw: --")
+                self.delta_yaw_status.set("ΔYaw: --")
+                return
+            sensed_value = seam_yaw(sensed_start, sensed_goal)
+            delta = math.atan2(
+                math.sin(sensed_value - reference_yaw),
+                math.cos(sensed_value - reference_yaw),
+            )
+            self.sensed_yaw_status.set(
+                f"Sensed yaw: {math.degrees(sensed_value):+.2f}°"
+            )
+            self.delta_yaw_status.set(
+                f"ΔYaw: {math.degrees(delta):+.2f}°"
+            )
+        except ValueError:
+            self.reference_yaw_status.set("Reference yaw: invalid")
+            self.reference_length_status.set("Length: --")
+            self.sensed_yaw_status.set("Sensed yaw: --")
+            self.delta_yaw_status.set("ΔYaw: --")
+
+    def load_seam_reference(self):
+        default_path = self._seam_reference_yaml_path()
+        path = filedialog.askopenfilename(
+            title="Load seam reference TCP 1 / TCP 2",
+            initialdir=str(default_path.parent),
+            initialfile=default_path.name,
+            filetypes=(("YAML", "*.yaml *.yml"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            group, poses = load_seam_teaching_reference_yaml(path)
+        except (OSError, ValueError, yaml.YAMLError, KeyError) as error:
+            self.error(f"Reference YAML load failed: {error}")
+            return
+        if group != self.planning_group.get():
+            self.error(
+                f"Reference YAML is for {group}; selected arm is {self.planning_group.get()}"
+            )
+            return
+        missing = [
+            name for name in ("weld_start", "weld_end") if name not in poses
+        ]
+        if missing:
+            self.error(
+                "Reference YAML must contain TCP1/TCP2: " + ", ".join(missing)
+            )
+            return
+        if self.seam_teaching_reference is None:
+            self.seam_teaching_reference = {}
+        for index, pose_name in enumerate(("weld_start", "weld_end")):
+            pose = copy.deepcopy(poses[pose_name])
+            stored = self.taught_robot_poses.get(pose_name)
+            if stored is not None:
+                self.seam_teaching_reference[pose_name] = (
+                    stored[0], stored[1], stored[2], copy.deepcopy(pose)
+                )
+            else:
+                self.seam_teaching_reference[pose_name] = (
+                    group, tuple(), tuple(), copy.deepcopy(pose)
+                )
+            self.linear_tcp_endpoints[index] = copy.deepcopy(pose)
+            label = self.tcp_1_status if index == 0 else self.tcp_2_status
+            label.configure(
+                text=(
+                    f"loaded ({pose.position.x:.3f}, {pose.position.y:.3f}, "
+                    f"{pose.position.z:.3f})"
+                )
+            )
+        self.generate_tcp_line_button.configure(state=tk.NORMAL)
+        self._update_seam_yaw_status()
+        self.log(f"Loaded TCP1/TCP2 seam reference from {path}")
 
     def acquire_two_tcp(self):
         if any(pose is None for pose in self.linear_tcp_endpoints):
-            self.error("Capture both TCP 1 and TCP 2 first")
+            self.error("Teach or load both reference TCP 1 and TCP 2 first")
             return
         try:
             count = int(self.tcp_line_count.get())
         except (ValueError, tk.TclError):
             self.error("TCP line point count is invalid")
             return
-        if self.tcp_line_direction.get() == "TCP 1 → TCP 2":
-            start, end = self.linear_tcp_endpoints
-        else:
-            end, start = self.linear_tcp_endpoints
-        self.log(
-            f"Generating linear 6D path · {self.tcp_line_direction.get()}"
-        )
+        start, end = self.linear_tcp_endpoints
+        self.log("Previewing reference seam · TCP 1 / START → TCP 2 / GOAL")
         threading.Thread(
             target=self.node.generate_tcp_line,
             args=(
@@ -6925,12 +8447,53 @@ class WeldActionGui:
             daemon=True,
         ).start()
 
+    def _persist_seam_touch_yaml(self, planning_group, event_label):
+        touch_yaml = self._seam_touch_yaml_path(planning_group)
+        try:
+            save_seam_touch_yaml(
+                touch_yaml,
+                planning_group,
+                self.seam_axis.get(),
+                self.seam_probe_touches,
+                self.seam_probe_starts,
+                self.seam_probe_stops,
+                probe_configuration={
+                    "wall_direction": self.wall_probe_axis.get(),
+                    "wall_sign": self.wall_probe_sign.get(),
+                    "base_direction": self.floor_probe_axis.get(),
+                    "base_sign": self.floor_probe_sign.get(),
+                    "orientation_mode": self.seam_orientation_mode.get(),
+                },
+            )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            self.error(f"DI8 touch YAML save failed: {error}")
+            return None
+        self.log(f"DI8 {event_label} YAML SAVED · {touch_yaml}")
+        return touch_yaml
+
+    def apply_touch_edge_capture(
+        self,
+        pose,
+        planning_group,
+        kind,
+        probe_start,
+    ):
+        """Persist the DI8-edge pose before controlled-stop completion."""
+        if kind not in CORNER_TOUCH_NAMES:
+            self.error(f"Unknown DI8 edge capture kind: {kind}")
+            return
+        self.seam_probe_touches[kind] = copy.deepcopy(pose)
+        self.seam_probe_starts[kind] = copy.deepcopy(probe_start)
+        self.seam_probe_stops[kind] = None
+        self._persist_seam_touch_yaml(planning_group, "EDGE CONTACT")
+
     def apply_touch_capture(
         self,
         pose,
         planning_group,
         source,
         probe_start=None,
+        stopped_pose=None,
     ):
         self.last_touch_pose = copy.deepcopy(pose)
         values = self._pose_values(pose)
@@ -6942,6 +8505,33 @@ class WeldActionGui:
         if source.startswith("automatic probe:"):
             kind = source.split(":", 1)[1]
             self.seam_probe_touches[kind] = copy.deepcopy(pose)
+            self.seam_probe_starts[kind] = (
+                copy.deepcopy(probe_start) if probe_start is not None else None
+            )
+            self.seam_probe_stops[kind] = (
+                copy.deepcopy(stopped_pose) if stopped_pose is not None else None
+            )
+            touch_yaml = self._persist_seam_touch_yaml(
+                planning_group, "STOPPED-POSE UPDATE"
+            )
+            if touch_yaml is not None:
+                endpoint = kind.split("_", 1)[0]
+                wall = self.seam_probe_touches.get(f"{endpoint}_wall")
+                floor = self.seam_probe_touches.get(f"{endpoint}_floor")
+                if wall is not None and floor is not None:
+                    delta_x_mm = (
+                        wall.position.x - floor.position.x
+                    ) * 1000.0
+                    delta_y_mm = (
+                        wall.position.y - floor.position.y
+                    ) * 1000.0
+                    self.log(
+                        f"{endpoint.upper()} TOUCH PAIR CHECK · "
+                        f"wall-floor ΔX={delta_x_mm:+.3f} mm · "
+                        f"ΔY={delta_y_mm:+.3f} mm · "
+                        f"seam-axis coordinate uses pair mean"
+                    )
+                    self._publish_touch_geometry_if_ready(endpoint)
             self.automatic_probe_kind = None
             # Contact is complete.  The following motion is a deliberate
             # retract and must not be treated as the same active touch probe.
@@ -6970,7 +8560,7 @@ class WeldActionGui:
                     target=self.node.return_touch_probe,
                     args=(
                         planning_group,
-                        copy.deepcopy(pose),
+                        copy.deepcopy(stopped_pose or pose),
                         copy.deepcopy(probe_start),
                         max(
                             0.001,

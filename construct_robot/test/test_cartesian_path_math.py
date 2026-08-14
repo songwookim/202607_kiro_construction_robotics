@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from geometry_msgs.msg import Pose
 from moveit_msgs.msg import RobotTrajectory
 import numpy as np
+import yaml
 from rclpy.action import CancelResponse
 from trajectory_msgs.msg import JointTrajectoryPoint
 
@@ -14,6 +15,7 @@ from construct_robot.cartesian_path_common import (
     linear_pose_waypoints,
     pose_is_valid,
     scale_trajectory_speed,
+    slerp_quaternion,
     straight_waypoints,
     tip_link_for_group,
     weaving_from_path,
@@ -40,6 +42,7 @@ from construct_robot.hicomm_welder import (
 )
 from construct_robot.weld_action_gui import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
+    DI8_GUARDED_TEACHING_POSES,
     WeldGuiNode,
     aligned_wait_pose,
     corner_seam_from_touches,
@@ -48,10 +51,98 @@ from construct_robot.weld_action_gui import (
     digital_weld_recipe,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
-    touch_midpoint_wait_pose,
+    named_tcp_linear_waypoints,
+    position_only_goal_constraints,
+    tcp_pose_goal_constraints,
+    save_seam_touch_yaml,
+    seam_yaw,
+    translated_wait_pose,
     two_touch_corner_seam,
     validate_digital_weld_settings,
+    yaw_corrected_seam_poses,
 )
+
+
+def test_di8_guarded_named_teaching_poses():
+    assert DI8_GUARDED_TEACHING_POSES == {
+        "robot_start",
+        "weld_wait",
+        "weld_start_wait",
+        "weld_start",
+        "weld_goal_wait",
+        "weld_end",
+        "weld_finish",
+    }
+
+
+def test_position_only_goal_ignores_yaml_orientation():
+    target = make_pose(
+        0.1,
+        -0.2,
+        0.3,
+        quaternion=(0.7, -0.2, 0.1, 0.67),
+    )
+    constraints = position_only_goal_constraints(
+        "right_manipulator", target, tolerance=0.0005
+    )
+    assert constraints.orientation_constraints == []
+    assert constraints.joint_constraints == []
+    position = constraints.position_constraints[0]
+    center = position.constraint_region.primitive_poses[0]
+    assert position.header.frame_id == "World"
+    assert position.link_name == "right_manipulator_ee_point"
+    assert center.position == target.position
+    assert center.orientation.w == 1.0
+    assert list(position.constraint_region.primitives[0].dimensions) == [0.0005]
+
+
+def test_tcp_pose_goal_combines_position_and_captured_orientation():
+    target = make_pose(
+        0.1,
+        -0.2,
+        0.3,
+        quaternion=(0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)),
+    )
+    constraints = tcp_pose_goal_constraints("right_manipulator", target)
+    center = (
+        constraints.position_constraints[0]
+        .constraint_region.primitive_poses[0]
+    )
+    orientation = constraints.orientation_constraints[0]
+    assert center.position == target.position
+    assert orientation.orientation == target.orientation
+    assert orientation.link_name == "right_manipulator_ee_point"
+
+
+def test_named_tcp_transition_is_linear_xyz_and_slerp_orientation():
+    start = make_pose(quaternion=(0.0, 0.0, 0.0, 1.0))
+    goal = make_pose(
+        x=0.010,
+        quaternion=(0.0, 0.0, 1.0, 0.0),
+    )
+    points = named_tcp_linear_waypoints(start, goal)
+    assert points[0] == start
+    assert points[-1] == goal
+    middle = points[len(points) // 2]
+    assert math.isclose(middle.position.x, 0.005, abs_tol=1e-9)
+    assert math.isclose(middle.orientation.z, math.sqrt(0.5), abs_tol=1e-9)
+    assert math.isclose(middle.orientation.w, math.sqrt(0.5), abs_tol=1e-9)
+
+
+def test_sensed_seam_yaw_rotates_taught_orientations_and_uses_sensed_xyz():
+    taught_start = make_pose(0.0, 0.0, 0.2)
+    taught_goal = make_pose(1.0, 0.0, 0.2)
+    sensed_start = make_pose(0.3, -0.4, 0.5)
+    sensed_goal = make_pose(0.3, 0.6, 0.5)
+    corrected_start, corrected_goal, delta = yaw_corrected_seam_poses(
+        taught_start, taught_goal, sensed_start, sensed_goal
+    )
+    assert math.isclose(seam_yaw(taught_start, taught_goal), 0.0)
+    assert math.isclose(delta, math.pi / 2.0)
+    assert corrected_start.position == sensed_start.position
+    assert corrected_goal.position == sensed_goal.position
+    assert math.isclose(corrected_start.orientation.z, math.sqrt(0.5))
+    assert math.isclose(corrected_start.orientation.w, math.sqrt(0.5))
 
 
 def test_corner_endpoint_and_wait_alignment_for_world_x_seam():
@@ -63,7 +154,7 @@ def test_corner_endpoint_and_wait_alignment_for_world_x_seam():
         wall, floor, taught, "X", wall_offset=0.002, floor_offset=0.003
     )
     aligned = aligned_wait_pose(wait, endpoint, "X")
-    assert math.isclose(endpoint.position.x, 0.7)
+    assert math.isclose(endpoint.position.x, 0.4)
     assert math.isclose(endpoint.position.y, 0.202)
     assert math.isclose(endpoint.position.z, 0.103)
     assert math.isclose(aligned.position.x, 0.6)
@@ -71,48 +162,96 @@ def test_corner_endpoint_and_wait_alignment_for_world_x_seam():
     assert math.isclose(aligned.position.z, endpoint.position.z)
 
 
-def test_wait_pose_uses_touch_midpoint_for_world_x_seam():
-    wait = make_pose(0.8, 9.0, 9.0)
-    wall = make_pose(0.4, 0.2, 0.5)
-    floor = make_pose(0.4, 0.6, 0.1)
-    midpoint = touch_midpoint_wait_pose(wait, wall, floor, "X")
-    assert math.isclose(midpoint.position.x, 0.4)
-    assert math.isclose(midpoint.position.y, 0.4)
-    assert math.isclose(midpoint.position.z, 0.3)
+def test_wait_pose_preserves_taught_clearance_for_world_x_seam():
+    taught_seam = make_pose(0.7, 0.1, 0.2)
+    wait = make_pose(0.6, -0.1, 0.4)
+    corrected_seam = make_pose(0.7, 0.2, 0.1)
+    corrected_wait = translated_wait_pose(wait, taught_seam, corrected_seam)
+    assert math.isclose(corrected_wait.position.x, 0.6)
+    assert math.isclose(corrected_wait.position.y, 0.0)
+    assert math.isclose(corrected_wait.position.z, 0.3)
+    assert math.isclose(
+        corrected_wait.position.x - corrected_seam.position.x,
+        wait.position.x - taught_seam.position.x,
+    )
 
 
-def test_goal_wait_uses_touch_midpoint_for_world_y_seam():
-    wait = make_pose(9.0, 0.8, 9.0)
-    wall = make_pose(0.2, 1.0, 0.5)
-    floor = make_pose(0.6, 1.0, 0.1)
-    midpoint = touch_midpoint_wait_pose(wait, wall, floor, "Y")
-    assert math.isclose(midpoint.position.x, 0.4)
-    assert math.isclose(midpoint.position.y, 1.0)
-    assert math.isclose(midpoint.position.z, 0.3)
+def test_goal_wait_translation_preserves_orientation():
+    taught_seam = make_pose(0.2, 0.8, 0.1)
+    wait = make_pose(0.1, 0.7, 0.3, quaternion=(0.0, 0.0, 0.5, 0.5))
+    corrected_seam = make_pose(0.3, 1.0, 0.15)
+    corrected_wait = translated_wait_pose(wait, taught_seam, corrected_seam)
+    assert math.isclose(corrected_wait.position.x, 0.2)
+    assert math.isclose(corrected_wait.position.y, 0.9)
+    assert math.isclose(corrected_wait.position.z, 0.35)
+    assert math.isclose(corrected_wait.orientation.z, 0.5)
 
 
-def test_corner_endpoint_midpoint_normal_intersects_xy_plane():
+def test_raw_seam_touch_yaml_records_contact_and_probe_start(tmp_path):
+    path = tmp_path / "right_manipulator_seam_touch_points.yaml"
+    touches = {
+        "start_wall": make_pose(0.4, 0.2, 0.5),
+        "start_floor": make_pose(0.402, 0.6, 0.1),
+    }
+    starts = {
+        "start_wall": make_pose(0.401, 0.4, 0.4),
+        "start_floor": make_pose(0.401, 0.4, 0.4),
+    }
+    stops = {
+        "start_wall": make_pose(0.4, 0.198, 0.5),
+    }
+    save_seam_touch_yaml(
+        path, "right_manipulator", "X", touches, starts, stops
+    )
+    document = yaml.safe_load(path.read_text())
+    assert document["seam_axis"] == "X"
+    assert document["touches"]["start_wall"]["contact_tcp"][
+        "position_m"
+    ]["x"] == 0.4
+    assert document["touches"]["start_floor"]["probe_start_tcp"][
+        "position_m"
+    ]["x"] == 0.401
+    assert document["touches"]["start_wall"]["stopped_tcp"][
+        "position_m"
+    ]["y"] == 0.198
+
+
+def test_corner_endpoint_uses_touched_xyz_not_taught_position():
     wall = make_pose(0.4, 0.2, 0.4)
     floor = make_pose(0.4, 0.6, 0.0)
     taught = make_pose(0.7, 9.0, 9.0)
     endpoint = corner_endpoint_from_two_touches(
         wall, floor, taught, "X"
     )
-    assert math.isclose(endpoint.position.x, 0.7)
+    assert math.isclose(endpoint.position.x, 0.4)
     assert math.isclose(endpoint.position.y, 0.2)
     assert math.isclose(endpoint.position.z, 0.0)
 
 
-def test_corner_endpoint_rejects_far_normal_intersection():
+def test_corner_endpoint_applies_offsets_to_touched_xyz():
     wall = make_pose(0.4, 0.2, 0.4)
     floor = make_pose(0.4, 0.201, 0.0)
     taught = make_pose(0.7, 0.0, 0.0)
     endpoint = corner_endpoint_from_two_touches(
         wall, floor, taught, "X", wall_offset=0.002, floor_offset=0.003
     )
-    assert math.isclose(endpoint.position.x, 0.7)
+    assert math.isclose(endpoint.position.x, 0.4)
     assert math.isclose(endpoint.position.y, 0.202)
     assert math.isclose(endpoint.position.z, 0.003)
+
+
+def test_yz_touch_endpoint_rejects_non_world_x_axis():
+    try:
+        corner_endpoint_from_two_touches(
+            make_pose(0.4, 0.2, 0.4),
+            make_pose(0.4, 0.6, 0.0),
+            make_pose(0.7, 0.0, 0.0),
+            "Y",
+        )
+    except ValueError as error:
+        assert "requires World X" in str(error)
+    else:
+        raise AssertionError("Y/Z probing must reject a World Y seam axis")
 
 
 def make_pose(x=0.0, y=0.0, z=0.0, quaternion=(0.0, 0.0, 0.0, 1.0)):
@@ -486,6 +625,16 @@ def test_interpolation_handles_antipodal_quaternions():
     midpoint = interpolate_pose(start, goal, 0.5)
     assert midpoint.position.x == 1.0
     assert midpoint.orientation.w == 1.0
+
+
+def test_quaternion_slerp_has_constant_angular_progress():
+    start = make_pose(quaternion=(0.0, 0.0, 0.0, 1.0))
+    goal = make_pose(quaternion=(0.0, 0.0, 1.0, 0.0))
+    quarter = slerp_quaternion(
+        start.orientation, goal.orientation, 0.25
+    )
+    assert math.isclose(quarter[2], math.sin(math.pi / 8.0), abs_tol=1e-9)
+    assert math.isclose(quarter[3], math.cos(math.pi / 8.0), abs_tol=1e-9)
 
 
 def test_rotate_vector_quarter_turn_about_z():

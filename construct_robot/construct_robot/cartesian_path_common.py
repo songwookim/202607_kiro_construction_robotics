@@ -205,6 +205,29 @@ def circle_waypoints(
     return points
 
 
+def slerp_quaternion(first, second, ratio):
+    """Shortest-path spherical interpolation of two XYZW quaternions."""
+    first_q = _normalize_vector((first.x, first.y, first.z, first.w))
+    second_q = _normalize_vector((second.x, second.y, second.z, second.w))
+    dot = sum(a * b for a, b in zip(first_q, second_q))
+    if dot < 0.0:
+        second_q = tuple(-value for value in second_q)
+        dot = -dot
+    dot = max(-1.0, min(1.0, dot))
+    if dot > 0.9995:
+        return _normalize_vector(tuple(
+            a + (b - a) * ratio for a, b in zip(first_q, second_q)
+        ))
+    theta = math.acos(dot)
+    sin_theta = math.sin(theta)
+    first_scale = math.sin((1.0 - ratio) * theta) / sin_theta
+    second_scale = math.sin(ratio * theta) / sin_theta
+    return tuple(
+        first_scale * a + second_scale * b
+        for a, b in zip(first_q, second_q)
+    )
+
+
 def _interpolate_pose(first, second, ratio):
     pose = Pose()
     pose.position.x = (
@@ -219,30 +242,15 @@ def _interpolate_pose(first, second, ratio):
         first.position.z
         + (second.position.z - first.position.z) * ratio
     )
-    first_q = (
-        first.orientation.x,
-        first.orientation.y,
-        first.orientation.z,
-        first.orientation.w,
+    interpolated = slerp_quaternion(
+        first.orientation, second.orientation, ratio
     )
-    second_q = (
-        second.orientation.x,
-        second.orientation.y,
-        second.orientation.z,
-        second.orientation.w,
-    )
-    if sum(a * b for a, b in zip(first_q, second_q)) < 0.0:
-        second_q = tuple(-value for value in second_q)
-    blended = tuple(
-        a + (b - a) * ratio for a, b in zip(first_q, second_q)
-    )
-    normalized = _normalize_vector(blended)
     (
         pose.orientation.x,
         pose.orientation.y,
         pose.orientation.z,
         pose.orientation.w,
-    ) = normalized
+    ) = interpolated
     return pose
 
 

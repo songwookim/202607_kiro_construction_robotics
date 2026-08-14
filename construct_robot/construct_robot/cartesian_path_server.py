@@ -20,6 +20,7 @@ from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     pose_is_valid,
     scale_trajectory_speed,
+    slerp_quaternion,
     tip_link_for_group,
 )
 
@@ -30,36 +31,15 @@ EXECUTION_TIMEOUT = 120.0
 
 
 def interpolate_pose(start: Pose, goal: Pose, ratio: float) -> Pose:
-    """Interpolate position and use shortest-path normalized quaternion lerp."""
+    """Linearly interpolate position and SLERP the TCP orientation."""
     pose = Pose()
     pose.position.x = start.position.x + (goal.position.x - start.position.x) * ratio
     pose.position.y = start.position.y + (goal.position.y - start.position.y) * ratio
     pose.position.z = start.position.z + (goal.position.z - start.position.z) * ratio
 
-    start_quaternion = (
-        start.orientation.x,
-        start.orientation.y,
-        start.orientation.z,
-        start.orientation.w,
+    quaternion = slerp_quaternion(
+        start.orientation, goal.orientation, ratio
     )
-    goal_quaternion = (
-        goal.orientation.x,
-        goal.orientation.y,
-        goal.orientation.z,
-        goal.orientation.w,
-    )
-    if sum(a * b for a, b in zip(start_quaternion, goal_quaternion)) < 0.0:
-        goal_quaternion = tuple(-component for component in goal_quaternion)
-    quaternion = [
-        start_component + (goal_component - start_component) * ratio
-        for start_component, goal_component
-        in zip(start_quaternion, goal_quaternion)
-    ]
-    norm = math.sqrt(sum(component * component for component in quaternion))
-    if norm < 1e-12:
-        quaternion = [0.0, 0.0, 0.0, 1.0]
-    else:
-        quaternion = [component / norm for component in quaternion]
     (
         pose.orientation.x,
         pose.orientation.y,
