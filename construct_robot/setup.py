@@ -28,7 +28,6 @@ setup(
     entry_points={
         'console_scripts': [
             'cartesian_path_server = construct_robot.cartesian_path_server:main',
-            'cartesian_path_client = construct_robot.cartesian_path_client:main',
             'weld_action_gui = construct_robot.weld_action_gui:main',
             'controller_spawner = construct_robot.controller_spawner:main',
         ],

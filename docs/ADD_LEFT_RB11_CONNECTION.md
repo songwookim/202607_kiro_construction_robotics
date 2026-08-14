@@ -9,9 +9,10 @@ The user-facing launch uses both physical RB arms by default:
 ros2 launch construct_robot weld_action_gui.launch.py
 ```
 
-There is no connection service or Connect/Disconnect button. The launch starts
-`motion_stack.launch.py` directly and defaults both arm components to
-`rbpodo_hardware/RBPodoHardwareInterface`. Diagnostic launch profiles can set
+There is no connection service or Connect/Disconnect button. The GUI launch
+starts MoveIt, ros2_control, and the Cartesian server directly and defaults
+both arm components to `rbpodo_hardware/RBPodoHardwareInterface`.
+Diagnostic launch profiles can set
 `use_fake_left_hardware` and `use_fake_right_hardware` to `true` explicitly.
 
 ## Startup sequence

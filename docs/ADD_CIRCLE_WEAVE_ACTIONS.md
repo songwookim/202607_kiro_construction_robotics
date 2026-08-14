@@ -132,7 +132,7 @@ construct_robot/construct_robot/weave_path_server.py
 ## 5. Launch에 server 추가
 
 사용자 launch가 직접 포함하는
-`construct_robot/launch/motion_stack.launch.py`에 노드를 추가한다.
+`construct_robot/launch/weld_action_gui.launch.py`에 노드를 추가한다.
 
 ```python
 circle_server = Node(

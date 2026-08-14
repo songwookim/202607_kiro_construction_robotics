@@ -12,7 +12,7 @@ conversion, speed scaling, and ros2_control diagrams are in
 - `construct_description`: URDF, ros2_control, and optimized mesh assets
 - `construct_moveit_config`: MoveIt 2, ros2_control and RViz configuration
 - `construct_msgs`: Cartesian 6D pose path action
-- `construct_robot`: hardware launch and Cartesian action/MoveIt utilities
+- `construct_robot`: welding GUI, hardware launch, and Cartesian motion server
 - `construct_tesseract`: Tesseract Robotics model validation and pinned setup
 
 ## Build and test
@@ -34,13 +34,6 @@ source src/construct_robot_ros2/scripts/use_ros_python.bash
 ROS 2 Humble uses the CPython 3.10 ABI. Always source
 `scripts/use_ros_python.bash` in a new terminal; it selects the workspace
 `.venv` and removes Conda Python 3.14 from `PATH`.
-
-Standalone ros2_control launch:
-
-```bash
-source /home/irs/ros2_ws/install/setup.bash
-ros2 launch construct_robot control.launch.py
-```
 
 ## Cartesian 6D pose action with RViz
 
@@ -126,33 +119,6 @@ ros2 launch construct_moveit_config moveit.launch.py \
   use_fake_left_hardware:=true use_fake_right_hardware:=true
 ```
 
-Then start the action server. It publishes weld-point markers and the planned
-robot trajectory to RViz:
-
-```bash
-source /home/irs/ros2_ws/install/setup.bash
-ros2 run construct_robot cartesian_path_server --ros-args \
-  -p use_moveit:=true -p execute_motion:=true -p planning_frame:=World
-```
-
-Finally send a straight laser-scanner scenario from the current right-arm TCP:
-
-```bash
-source /home/irs/ros2_ws/install/setup.bash
-ros2 run construct_robot cartesian_path_client \
-  --planning-group right_manipulator \
-  --scenario laser-live-straight
-```
-
-CLI weaving test:
-
-```bash
-ros2 run construct_robot cartesian_path_client \
-  --planning-group right_manipulator \
-  --scenario laser-live-weave \
-  --velocity-scale 0.2
-```
-
 The goal is an ordered `geometry_msgs/Pose[]`. Feedback contains the current
 interpolated 6D pose, waypoint index and progress. The result contains the
 final pose and sampled path. Keep `execute_motion:=false` for visualization
@@ -160,15 +126,3 @@ without controller execution.
 
 See `construct_tesseract/README.md` for the ARM64/Humble Tesseract setup and
 model-validation command.
-
-## Motion planning smoke test
-
-```bash
-ROS_DOMAIN_ID=162 ros2 run construct_motion_tests straight_line_moveit_test \
-  --ros-args \
-  -p group:=right_manipulator \
-  -p axis:="'y'" \
-  -p distance:=0.01 \
-  -p speed:=0.02 \
-  -p execute:=false # true시 plan and execute
-```

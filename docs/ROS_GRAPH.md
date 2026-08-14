@@ -7,7 +7,7 @@ layers. All names below assume the default namespace.
 
 ```mermaid
 flowchart LR
-  GUI["weld_action_gui<br/>or cartesian_path_client"]
+  GUI["weld_action_gui"]
   AS["cartesian_path_action_server"]
   MG["move_group"]
   ET["MoveIt execute_trajectory"]
