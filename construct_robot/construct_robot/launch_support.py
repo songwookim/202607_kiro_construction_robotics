@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional
 
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PythonExpression,
+)
 
 
 @dataclass(frozen=True)
@@ -93,8 +97,14 @@ def configured_arguments(names: Iterable[str]):
 
 def debugpy_prefix(enabled, port):
     """Run a Python node under debugpy only when its debug flag is true."""
+    python_executable = EnvironmentVariable(
+        "CONSTRUCT_ROBOT_PYTHON",
+        default_value="/usr/bin/python3",
+    )
     return PythonExpression([
-        "'/usr/bin/python3 -m debugpy --listen 127.0.0.1:",
+        "'",
+        python_executable,
+        " -m debugpy --listen 127.0.0.1:",
         port,
         " --wait-for-client' if '",
         enabled,

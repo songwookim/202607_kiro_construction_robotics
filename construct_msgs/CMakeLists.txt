@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.8)
 project(construct_msgs)
 
+# ROS 2 Humble on Ubuntu 22.04 uses the CPython 3.10 ABI.  Conda on this
+# workstation may expose a newer python3 first in PATH, which produces an
+# extension module that rclpy cannot import.  Resolve one 3.10 interpreter and
+# make both modern and legacy CMake Python discovery use it.
+find_package(Python3 3.10 EXACT REQUIRED COMPONENTS Interpreter)
+set(
+  PYTHON_EXECUTABLE
+  "${Python3_EXECUTABLE}"
+  CACHE FILEPATH "Python interpreter used by ROS interface generators" FORCE
+)
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()

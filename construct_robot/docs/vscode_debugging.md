@@ -18,8 +18,17 @@ The debug endpoints are:
 - `weld_action_gui` and `hicomm_welder.py`: `127.0.0.1:5678`
 - `cartesian_path_server`: `127.0.0.1:5679`
 
-Both debug children use `/usr/bin/python3`; this prevents an active Conda or
-virtual environment from replacing the ROS 2 Python runtime.
+Build, launch, and both debug children use
+`/home/irs/ros2_ws/.venv/bin/python` (Python 3.10). The workspace source script
+removes Conda Python 3.14 from `PATH`, because ROS 2 Humble native modules and
+generated interfaces require the CPython 3.10 ABI.
+
+For a terminal session outside VS Code, run:
+
+```bash
+cd /home/irs/ros2_ws
+source src/construct_robot_ros2/scripts/use_ros_python.bash
+```
 
 Pausing inside `hicomm_welder.py` also pauses its cyclic network thread. Do
 not leave a breakpoint paused there while live welding equipment expects its

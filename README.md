@@ -19,14 +19,21 @@ conversion, speed scaling, and ros2_control diagrams are in
 
 ```bash
 cd /home/irs/ros2_ws
-source /opt/ros/humble/setup.bash
-colcon build --packages-up-to construct_robot construct_moveit_config
-source install/setup.bash
-colcon test --packages-select \
+source src/construct_robot_ros2/scripts/use_ros_python.bash
+/usr/bin/colcon build --packages-up-to construct_robot construct_moveit_config \
+  --symlink-install \
+  --cmake-args \
+  -DPYTHON_EXECUTABLE=/home/irs/ros2_ws/.venv/bin/python \
+  -DPython3_EXECUTABLE=/home/irs/ros2_ws/.venv/bin/python
+/usr/bin/colcon test --packages-select \
   construct_description construct_msgs construct_robot \
   construct_moveit_config
-colcon test-result --verbose
+/usr/bin/colcon test-result --verbose
 ```
+
+ROS 2 Humble uses the CPython 3.10 ABI. Always source
+`scripts/use_ros_python.bash` in a new terminal; it selects the workspace
+`.venv` and removes Conda Python 3.14 from `PATH`.
 
 Standalone ros2_control launch:
 
@@ -105,7 +112,7 @@ live DI monitor, guarded DO controls, and a safe procedure for identifying
 control-box wiring.
 
 See [`docs/ADD_LEFT_RB11_CONNECTION.md`](docs/ADD_LEFT_RB11_CONNECTION.md) for
-the atomic `.11` left + `.10` right connection controls, always-on fake RViz
+the atomic `.11` left + `.12` right connection controls, fake RViz
 startup, measured-pose synchronization, and connection-failure recovery.
 
 See `docs/CONTINUOUS_CIRCLE.md` for the exact waypoint, quaternion,
