@@ -85,7 +85,7 @@ def generate_launch_description():
         executable="weld_action_gui",
         output="screen",
         prefix=PythonExpression([
-            "'python3 -m debugpy --listen 127.0.0.1:",
+            "'/usr/bin/python3 -m debugpy --listen 127.0.0.1:",
             LaunchConfiguration("debug_gui_port"),
             " --wait-for-client' if '",
             LaunchConfiguration("debug_gui"),

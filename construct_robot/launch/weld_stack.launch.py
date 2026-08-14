@@ -68,7 +68,7 @@ def generate_launch_description():
         executable="cartesian_path_server",
         output="screen",
         prefix=PythonExpression([
-            "'python3 -m debugpy --listen 127.0.0.1:",
+            "'/usr/bin/python3 -m debugpy --listen 127.0.0.1:",
             debug_cartesian_server_port,
             " --wait-for-client' if '",
             debug_cartesian_server,
