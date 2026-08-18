@@ -18,10 +18,13 @@ from visualization_msgs.msg import Marker, MarkerArray
 from construct_msgs.action import CartesianPath
 from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
+    cartesian_path_length,
     pose_is_valid,
     scale_trajectory_speed,
+    scale_trajectory_to_tcp_speed,
     slerp_quaternion,
     tip_link_for_group,
+    trajectory_duration_seconds,
 )
 
 
@@ -257,9 +260,10 @@ class CartesianPathActionServer(Node):
             cartesian.start_state = copy.deepcopy(start_state)
         cartesian.group_name = request.planning_group
         cartesian.link_name = tip_link_for_group(request.planning_group)
-        cartesian.waypoints = (
+        effective_waypoints = (
             request.waypoints if waypoints is None else waypoints
         )
+        cartesian.waypoints = effective_waypoints
         cartesian.max_step = request.interpolation_step
         cartesian.jump_threshold = 0.0
         cartesian.avoid_collisions = True
@@ -270,7 +274,20 @@ class CartesianPathActionServer(Node):
         )
         if response is None:
             raise RuntimeError("MoveIt Cartesian service returned no response")
-        scale_trajectory_speed(response.solution, request.velocity_scale)
+        if request.tcp_speed_m_s > 0.0:
+            applied_scale, achieved_speed = scale_trajectory_to_tcp_speed(
+                response.solution,
+                effective_waypoints,
+                request.tcp_speed_m_s,
+            )
+            speed_description = (
+                f"TCP target={request.tcp_speed_m_s * 1000.0:.2f}mm/s, "
+                f"planned average={achieved_speed * 1000.0:.2f}mm/s, "
+                f"timing_scale={applied_scale:.3f}"
+            )
+        else:
+            scale_trajectory_speed(response.solution, request.velocity_scale)
+            speed_description = f"velocity_scale={request.velocity_scale:.2f}"
 
         if publish:
             self.publish_trajectories(
@@ -280,7 +297,7 @@ class CartesianPathActionServer(Node):
         self.get_logger().info(
             f"MoveIt path fraction={response.fraction:.3f}, "
             f"points={len(response.solution.joint_trajectory.points)}, "
-            f"velocity_scale={request.velocity_scale:.2f}"
+            f"{speed_description}"
         )
         return response
 
@@ -311,6 +328,7 @@ class CartesianPathActionServer(Node):
             request.planning_group,
             request.interpolation_step,
             request.velocity_scale,
+            request.tcp_speed_m_s,
             tuple(pose_values),
         )
 
@@ -377,9 +395,11 @@ class CartesianPathActionServer(Node):
             or not math.isfinite(goal_request.velocity_scale)
             or goal_request.velocity_scale <= 0.0
             or goal_request.velocity_scale > 1.0
+            or not math.isfinite(goal_request.tcp_speed_m_s)
+            or goal_request.tcp_speed_m_s < 0.0
         ):
             self.get_logger().warning(
-                "Rejected empty path, interpolation step, or velocity scale"
+                "Rejected path, interpolation, velocity scale, or TCP speed"
             )
             return GoalResponse.REJECT
         if not all(pose_is_valid(pose) for pose in goal_request.waypoints):
@@ -431,7 +451,7 @@ class CartesianPathActionServer(Node):
                     return result
                 if not request.execute_requested:
                     self.approve_plan(request, moveit_plan)
-            except RuntimeError as error:
+            except (RuntimeError, ValueError) as error:
                 goal_handle.abort()
                 result.success = False
                 result.message = str(error)
@@ -523,10 +543,24 @@ class CartesianPathActionServer(Node):
             )
         else:
             completion = "sampled only; MoveIt is disabled"
+        if request.tcp_speed_m_s > 0.0 and moveit_plan is not None:
+            duration = trajectory_duration_seconds(moveit_plan.solution)
+            length = cartesian_path_length(request.waypoints)
+            achieved = length / duration if duration > 1e-9 else 0.0
+            speed_text = (
+                f"TCP target {request.tcp_speed_m_s * 1000.0:.2f} mm/s · "
+                f"planned average {achieved * 1000.0:.2f} mm/s"
+            )
+        elif request.tcp_speed_m_s > 0.0:
+            speed_text = (
+                f"TCP target {request.tcp_speed_m_s * 1000.0:.2f} mm/s"
+            )
+        else:
+            speed_text = f"{request.velocity_scale:.0%} velocity scale"
         result.message = (
             f"Path for '{request.planning_group}' {completion} · "
             f"{len(sampled_path)} samples at "
-            f"{request.velocity_scale:.0%} speed"
+            f"{speed_text}"
         )
         result.final_pose = request.waypoints[-1]
         result.sampled_path = sampled_path

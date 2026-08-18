@@ -433,3 +433,46 @@ def scale_trajectory_speed(trajectory, velocity_scale: float):
             for value in point.accelerations
         ]
     return trajectory
+
+
+def trajectory_duration_seconds(trajectory):
+    """Return the final JointTrajectory timestamp in seconds."""
+    points = trajectory.joint_trajectory.points
+    if not points:
+        return 0.0
+    stamp = points[-1].time_from_start
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
+
+
+def cartesian_path_length(waypoints):
+    """Return translational polyline length in metres."""
+    return sum(
+        math.sqrt(
+            (second.position.x - first.position.x) ** 2
+            + (second.position.y - first.position.y) ** 2
+            + (second.position.z - first.position.z) ** 2
+        )
+        for first, second in zip(waypoints, waypoints[1:])
+    )
+
+
+def scale_trajectory_to_tcp_speed(trajectory, waypoints, tcp_speed_m_s):
+    """Scale timing to a requested average TCP speed without speeding past limits.
+
+    Returns ``(applied_scale, achieved_speed_m_s)``. A target faster than the
+    MoveIt-produced trajectory is capped at the original safe trajectory.
+    """
+    target = float(tcp_speed_m_s)
+    if not math.isfinite(target) or target <= 0.0:
+        raise ValueError("TCP speed must be greater than zero")
+    length = cartesian_path_length(waypoints)
+    duration = trajectory_duration_seconds(trajectory)
+    if length <= 1e-9:
+        raise ValueError("TCP speed mode needs a translational path")
+    if duration <= 1e-9:
+        raise ValueError("MoveIt trajectory has no usable timing")
+    desired_duration = length / target
+    applied_scale = min(1.0, duration / desired_duration)
+    scale_trajectory_speed(trajectory, applied_scale)
+    achieved_duration = duration / applied_scale
+    return applied_scale, length / achieved_duration

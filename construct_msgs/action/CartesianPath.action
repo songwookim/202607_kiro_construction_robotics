@@ -4,6 +4,8 @@ string planning_group
 float64 interpolation_step
 # 0.01..1.0 multiplier applied to trajectory velocity and timing.
 float64 velocity_scale
+# Optional target average translational TCP speed. 0 disables this mode.
+float64 tcp_speed_m_s
 # Plan-only previews and exact execution of the last matching approved plan.
 bool execute_requested
 bool reuse_approved_plan

@@ -29,6 +29,7 @@ setup(
         'console_scripts': [
             'cartesian_path_server = construct_robot.cartesian_path_server:main',
             'weld_action_gui = construct_robot.weld_action_gui:main',
+            'weld_feedback_plot = construct_robot.weld_feedback_plot:main',
             'controller_spawner = construct_robot.controller_spawner:main',
         ],
     },

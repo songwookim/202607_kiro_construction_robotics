@@ -1,8 +1,9 @@
 """Production Hi-COMM digital-welder TCP protocol used by the weld GUI.
 
-The wire format follows the successful Rainbow ARC capture used by
-``test_hicomm_control_v5_2.py``: TX55 every 40 ms and RX71.  This module
-deliberately does not depend on ROS or a GUI toolkit.
+The wire format follows ``test_hicomm_control_v5_3.py`` and the latest
+successful 1120 Rainbow ARC capture: TX55 every 40 ms, RX71, and welding
+golden Byte12/13 = 0x32/0x32.  This module deliberately does not depend on
+ROS or a GUI toolkit.
 """
 
 from collections import deque
@@ -17,6 +18,7 @@ PERIOD_SECONDS = 0.040
 CONNECT_RETRY_SECONDS = 0.200
 TX_SIZE = 55
 RX_SIZE = 71
+PROTOCOL_PROFILE_VERSION = "v5.3-1120"
 
 BIT_ARC = 0x01
 BIT_FORWARD = 0x02
@@ -54,6 +56,17 @@ PROFILE_INCHING = "inching_capture"
 
 CAPTURED_WELDING_BASE_REQUEST = bytes.fromhex(
     "00 0C 00 64 00 64 00 32 "
+    "00 00 00 00 32 32 00 00 "
+    "0F 00 00 32 32 32 32 32 "
+    "32 32 32 32 32 32 32 32 "
+    "32 32 32 32 32 32 32 32 "
+    "32 32 32 32 32 32 32 32 "
+    "32 09 00 00 00 00 00"
+)
+
+# Previous successful 0102 capture retained for diagnostics/A-B comparison.
+CAPTURED_WELDING_BASE_REQUEST_0102 = bytes.fromhex(
+    "00 0C 00 64 00 64 00 32 "
     "00 00 00 00 33 33 00 00 "
     "0F 00 00 32 32 32 32 32 "
     "32 32 32 32 32 32 32 32 "
@@ -84,6 +97,16 @@ CAPTURED_IDLE_REQUEST = CAPTURED_WELDING_BASE_REQUEST
 for _golden in BASE_PROFILE_REQUESTS.values():
     assert len(_golden) == TX_SIZE
     assert _golden[53:55] == b"\x00\x00"
+
+assert len(CAPTURED_WELDING_BASE_REQUEST_0102) == TX_SIZE
+assert [
+    index
+    for index, (latest, old) in enumerate(zip(
+        CAPTURED_WELDING_BASE_REQUEST,
+        CAPTURED_WELDING_BASE_REQUEST_0102,
+    ))
+    if latest != old
+] == [12, 13]
 
 
 @dataclass
@@ -695,16 +718,21 @@ class HiCommWelderClient:
                 select.select([], [sock], [], min(0.002, remaining))
 
     def _drain_rx(self, sock, rx_buffer, deadline):
+        """Publish one complete RX71 frame, then yield to the 40 ms scheduler."""
         while time.monotonic() < deadline:
             ready, _, _ = select.select(
                 [sock], [], [], min(0.002, max(0.0, deadline - time.monotonic()))
             )
             if not ready:
                 continue
-            chunk = sock.recv(4096)
+            try:
+                chunk = sock.recv(4096)
+            except BlockingIOError:
+                continue
             if not chunk:
                 raise ConnectionError("Hi-COMM closed the TCP connection")
             rx_buffer.extend(chunk)
+            processed = False
             while len(rx_buffer) >= RX_SIZE:
                 frame = bytes(rx_buffer[:RX_SIZE])
                 del rx_buffer[:RX_SIZE]
@@ -713,6 +741,12 @@ class HiCommWelderClient:
                     self._latest_status = status
                     self._status_condition.notify_all()
                 self._dispatch_status(status)
+                processed = True
+            # v5.3 cadence fix: once the cyclic response has arrived, do not
+            # remain in select() until the deadline.  The outer loop sleeps
+            # only for the remaining part of the 40 ms period.
+            if processed:
+                return
 
     def _dispatch_status(self, status):
         """Coalesce telemetry without running user code in the I/O thread."""
@@ -807,7 +841,8 @@ class HiCommWelderClient:
             sock.setblocking(False)
             self._set_connected(
                 True,
-                f"{sock.getsockname()} → {sock.getpeername()} · TX55/RX71",
+                f"{sock.getsockname()} → {sock.getpeername()} · TX55/RX71 · "
+                f"profile={PROTOCOL_PROFILE_VERSION}",
             )
             next_tick = time.monotonic()
             while not self._stop.is_set():

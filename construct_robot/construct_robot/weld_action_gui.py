@@ -4,6 +4,7 @@ from pathlib import Path
 import queue
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -60,6 +61,7 @@ from construct_robot.hicomm_welder import (
     HiCommWelderClient,
     MATERIAL_CODES,
     MODE_CODES,
+    PERIOD_SECONDS,
     TxState,
     build_request,
 )
@@ -67,6 +69,7 @@ from construct_robot.hicomm_welder import (
 
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
 TOUCH_INPUT_PORT = 8
+TOUCH_SENSING_OUTPUT_PORT = 4
 ARM_JOINT_NAMES = {
     arm: frozenset(
         f"{arm}_manipulator_joint{index}" for index in range(1, 7)
@@ -148,6 +151,17 @@ DEFAULT_DIGITAL_WELD_SETTINGS = {
     "preflow_seconds": 0.0,
 }
 
+WELD_SCENARIO_STAGE_ORDER = (
+    "start_wait",
+    "start_contact",
+    "touch_output_off",
+    "arc_on",
+    "weld_motion",
+    "arc_off",
+    "goal_wait",
+    "finish",
+)
+
 
 def digital_weld_recipe(settings):
     """Return only the values encoded into the Hi-COMM welding frame."""
@@ -172,6 +186,157 @@ def validate_digital_weld_settings(settings):
     # build_request is the protocol's single source of range/enum validation.
     build_request(TxState(**digital_weld_recipe(normalized)))
     return normalized
+
+
+def next_sequential_slot(steps, requested=1):
+    """Return a free slot after every existing non-sleep sequence step."""
+    requested = int(requested)
+    if not 1 <= requested <= 999:
+        raise ValueError("Sequence start slot must be in 1..999")
+    occupied = []
+    for index, step in enumerate(steps):
+        if step.get("type") == "sleep":
+            continue
+        slot = int(step.get("parallel_slot", index + 1))
+        if 1 <= slot <= 999:
+            occupied.append(slot)
+    return max(requested, max(occupied, default=0) + 1)
+
+
+def validate_managed_weld_sequence(steps, require_complete=False):
+    """Validate generated welding order and its intentional ARC/motion pair."""
+    scenarios = {}
+    all_slots = {}
+    for index, step in enumerate(steps):
+        if step.get("type") != "sleep":
+            slot = int(step.get("parallel_slot", index + 1))
+            all_slots.setdefault(slot, []).append(step)
+        scenario_id = step.get("weld_scenario_id")
+        if scenario_id is not None:
+            scenarios.setdefault(scenario_id, []).append(step)
+
+    motion_types = {"motion", "named_pose", "planned_trajectory"}
+    for slot, slot_steps in all_slots.items():
+        arc_on = any(
+            step.get("type") == "digital_weld"
+            and step.get("command") == "on"
+            for step in slot_steps
+        )
+        robot_motion = any(
+            step.get("type") in motion_types for step in slot_steps
+        )
+        if arc_on and robot_motion:
+            scenario_ids = {
+                step.get("weld_scenario_id") for step in slot_steps
+            }
+            stages = {
+                step.get("weld_scenario_stage") for step in slot_steps
+            }
+            managed_pair = (
+                len(slot_steps) == 2
+                and None not in scenario_ids
+                and len(scenario_ids) == 1
+                and stages == {"arc_on", "weld_motion"}
+            )
+            if not managed_pair:
+                raise ValueError(
+                    f"D-WELD ON cannot share slot {slot} with arbitrary robot "
+                    "motion; only the generated ARC ON + weld-motion pair is "
+                    "allowed"
+                )
+
+    stage_rank = {
+        stage: index for index, stage in enumerate(WELD_SCENARIO_STAGE_ORDER)
+    }
+    for scenario_steps in scenarios.values():
+        previous_rank = -1
+        previous_slot = 0
+        previous_stage = None
+        seen = set()
+        for step in scenario_steps:
+            stage = step.get("weld_scenario_stage")
+            if stage not in stage_rank or stage in seen:
+                raise ValueError("Generated weld scenario stages are invalid")
+            seen.add(stage)
+            rank = stage_rank[stage]
+            slot = int(step.get("parallel_slot", 0))
+            shared_weld_slot = (
+                stage == "weld_motion"
+                and previous_stage == "arc_on"
+                and slot == previous_slot
+            )
+            if rank <= previous_rank or (
+                slot <= previous_slot and not shared_weld_slot
+            ):
+                raise ValueError(
+                    "Generated weld scenario order/parallel slots are invalid"
+                )
+            previous_rank = rank
+            previous_slot = slot
+            previous_stage = stage
+
+            if stage == "arc_on":
+                if (
+                    step.get("type") != "digital_weld"
+                    or step.get("command") != "on"
+                ):
+                    raise ValueError("Generated ARC ON stage cannot be changed")
+                if float(step.get("duration", 0.0)) != 0.0:
+                    raise ValueError(
+                        "Generated ARC ON duration must be 0; ARC OFF is explicit"
+                    )
+                paired_stages = {
+                    candidate.get("weld_scenario_stage")
+                    for candidate in all_slots.get(slot, ())
+                }
+                if paired_stages != {"arc_on", "weld_motion"}:
+                    raise ValueError(
+                        "Generated ARC ON must share its slot with weld motion"
+                    )
+            elif stage == "arc_off" and (
+                step.get("type") != "digital_weld"
+                or step.get("command") != "off"
+            ):
+                raise ValueError("Generated ARC OFF stage cannot be changed")
+            elif stage == "start_contact":
+                if (
+                    not step.get("touch_guard", False)
+                    or not step.get("continue_after_touch", False)
+                    or step.get("accept_initial_touch", False)
+                ):
+                    raise ValueError(
+                        "START contact must require a new DI8 edge, stop, "
+                        "then continue"
+                    )
+            elif stage == "touch_output_off" and (
+                step.get("type") != "digital_output"
+                or int(step.get("port", -1)) != TOUCH_SENSING_OUTPUT_PORT
+                or bool(step.get("value", True))
+            ):
+                raise ValueError(
+                    "Generated scenario must turn DO4 OFF before ARC ON"
+                )
+            elif stage == "weld_motion":
+                if step.get("touch_guard", False):
+                    raise ValueError("DI8 must be ignored during weld motion")
+                arc_steps = [
+                    candidate for candidate in scenario_steps
+                    if candidate.get("weld_scenario_stage") == "arc_on"
+                ]
+                if not arc_steps or int(
+                    arc_steps[0].get("parallel_slot", -1)
+                ) != slot:
+                    raise ValueError(
+                        "Generated weld motion must share the ARC ON slot"
+                    )
+        if require_complete and seen != set(WELD_SCENARIO_STAGE_ORDER):
+            missing = [
+                stage for stage in WELD_SCENARIO_STAGE_ORDER if stage not in seen
+            ]
+            raise ValueError(
+                "Generated weld scenario is incomplete: " + ", ".join(missing)
+            )
+    return True
 
 
 def midpoint_pose(first, second):
@@ -727,6 +892,146 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp):
             temporary_path.unlink()
 
 
+def format_weld_feedback_log(document):
+    """Return a readable, line-oriented weld report including every RX sample."""
+    lines = [
+        "WELD FEEDBACK LOG",
+        f"result={document['result']}",
+        f"started={document['started']}",
+        f"ended={document['ended']}",
+        f"elapsed_seconds={document['elapsed_seconds']:.3f}",
+    ]
+    commanded = document["commanded"]
+    welding_echo = (
+        document.get("rx_welding_setting_echo")
+        or document.get("rx_setting_echo")
+        or {}
+    )
+    feedback = document["feedback"]
+
+    def statistic_text(values):
+        if values.get("average") is None:
+            return "no positive feedback"
+        return (
+            f"avg {values['average']:.2f} · min {values['min']:.2f} · "
+            f"max {values['max']:.2f}"
+        )
+
+    requested_current = int(commanded.get("current_a", 0))
+    requested_voltage = float(commanded.get("voltage", 0.0))
+    echo_current = int(welding_echo.get("current_a", 0))
+    echo_voltage = float(welding_echo.get("voltage_v", 0.0))
+    echo_match = (
+        requested_current == echo_current
+        and math.isclose(requested_voltage, echo_voltage, abs_tol=0.05)
+    )
+    lines.extend((
+        "",
+        "================ OPERATOR OVERVIEW ================",
+        f"REQUESTED : {requested_current} A / {requested_voltage:.1f} V · "
+        f"{commanded.get('material')} {commanded.get('diameter_mm')} mm · "
+        f"{commanded.get('mode')} · {commanded.get('gas')}",
+        f"RX ECHO   : {echo_current} A / {echo_voltage:.1f} V · "
+        f"MATCH={'YES' if echo_match else 'NO'}",
+        f"CURRENT FB: {statistic_text(feedback['current_a'])} A",
+        f"VOLTAGE FB: {statistic_text(feedback['voltage_v'])} V",
+        f"WIRE FEED : {statistic_text(feedback['wire_feed_m_min'])} m/min",
+        f"WCR       : {'DETECTED' if feedback['wcr_seen'] else 'NOT DETECTED'}",
+        f"SAMPLES   : RX {feedback['rx_samples']} / "
+        f"welding {feedback['welding_samples']}",
+        "===================================================",
+        "",
+        "[commanded]",
+    ))
+    for key, value in document["commanded"].items():
+        lines.append(f"{key}={value}")
+
+    echo = document.get("rx_setting_echo") or {}
+    lines.extend(("", "[rx_setting_echo]"))
+    for key, value in echo.items():
+        lines.append(f"{key}={value}")
+    lines.extend(("", "[rx_welding_setting_echo]"))
+    for key, value in (
+        document.get("rx_welding_setting_echo") or {}
+    ).items():
+        lines.append(f"{key}={value}")
+
+    def flattened(prefix, value):
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                child_prefix = f"{prefix}.{child_key}" if prefix else str(child_key)
+                yield from flattened(child_prefix, child_value)
+        elif isinstance(value, (list, tuple)):
+            for index, child_value in enumerate(value):
+                yield from flattened(f"{prefix}[{index}]", child_value)
+        else:
+            yield prefix, value
+
+    lines.extend(("", "[execution_conditions]"))
+    for key, value in flattened("", document.get("execution_conditions", {})):
+        lines.append(f"{key}={value}")
+
+    lines.extend((
+        "",
+        "[summary]",
+        f"rx_samples={feedback['rx_samples']}",
+        f"welding_samples={feedback['welding_samples']}",
+        f"wcr_seen={int(feedback['wcr_seen'])}",
+    ))
+    for name in ("current_a", "voltage_v", "wire_feed_m_min"):
+        values = feedback[name]
+        for statistic in ("min", "average", "max"):
+            lines.append(f"{name}.{statistic}={values[statistic]}")
+
+    lines.extend((
+        "",
+        "[samples]",
+        "elapsed_s raw0 state arc gas fwd wcr current_a voltage_v "
+        "wire_feed_m_min set_current_a set_voltage_v error db collision",
+    ))
+    for sample in document.get("samples", ()):
+        lines.append(
+            f"{sample['elapsed_s']:.3f} "
+            f"0x{int(sample.get('raw0') or 0):02X} "
+            f"{sample.get('output_state_name') or 'unknown'} "
+            f"{int(bool(sample.get('arc_ack')))} "
+            f"{int(bool(sample.get('gas_ack')))} "
+            f"{int(bool(sample.get('forward_ack')))} "
+            f"{int(bool(sample.get('wcr_detected')))} "
+            f"{sample.get('feedback_current_a') or 0} "
+            f"{sample.get('feedback_voltage_v') or 0.0} "
+            f"{sample.get('wire_feed_m_min') or 0.0} "
+            f"{sample.get('set_current_a') or 0} "
+            f"{sample.get('set_voltage_v') or 0.0} "
+            f"{sample.get('welder_error') or 0} "
+            f"{int(bool(sample.get('db_unavailable')))} "
+            f"{int(bool(sample.get('torch_collision')))}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def save_weld_feedback_log(path, document):
+    """Atomically save one completed welding-feedback report as text."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            stream.write(format_weld_feedback_log(document))
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
 def save_seam_touch_yaml(
     path,
     planning_group,
@@ -1018,6 +1323,7 @@ class WeldGuiNode(Node):
         self.touch_guard_stop_complete = threading.Event()
         self.touch_guard_stop_success = False
         self.node_touch_input_states = {"left": None, "right": None}
+        self.node_digital_outputs = {"left": None, "right": None}
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
@@ -1115,6 +1421,7 @@ class WeldGuiNode(Node):
 
     def _system_state(self, message, arm):
         touch_active = bool(message.digital_in[TOUCH_INPUT_PORT])
+        self.node_digital_outputs[arm] = tuple(message.digital_out)
         previous_touch = self.node_touch_input_states[arm]
         self.node_touch_input_states[arm] = touch_active
         probe = self.active_touch_probe
@@ -1290,7 +1597,20 @@ class WeldGuiNode(Node):
         self.digital_output_client.call_async(request).add_done_callback(completed)
         if not event.wait(timeout=3.0):
             return False, "RBPodo digital output command timed out"
-        return outcome["value"]
+        success, message = outcome["value"]
+        if not success:
+            return False, message
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            outputs = self.node_digital_outputs.get("right")
+            if outputs is not None and 0 <= int(port) < len(outputs):
+                if bool(outputs[int(port)]) == bool(value):
+                    return True, f"{message} · system_state confirmed"
+            time.sleep(0.02)
+        return False, (
+            f"{message} · DO{int(port)} command accepted, but system_state "
+            "confirmation timed out"
+        )
 
     @staticmethod
     def _call_service_and_wait(client, request, description):
@@ -2121,7 +2441,13 @@ class WeldGuiNode(Node):
 
     def stop_sequence_equipment(self, devices):
         """Cancel every robot goal and escalate until measured motion stops."""
-        results = []
+        do_success, do_message = self._set_digital_output_sync(
+            TOUCH_SENSING_OUTPUT_PORT, False
+        )
+        results = [
+            f"DO{TOUCH_SENSING_OUTPUT_PORT} OFF="
+            f"{'OK' if do_success else 'FAILED'} ({do_message})"
+        ]
         for device in tuple(dict.fromkeys(devices)):
             canceled, cancel_message = self.cancel_controller_goals(device)
             stationary = self.wait_until_device_stopped(device, timeout=1.5)
@@ -2865,6 +3191,7 @@ class WeldGuiNode(Node):
         execute_requested,
         reuse_approved_plan,
         planning_group,
+        tcp_speed_m_s=0.0,
     ):
         if not points:
             self.ui.post(self.ui.error, "Create weld points first")
@@ -2879,6 +3206,7 @@ class WeldGuiNode(Node):
         goal.planning_group = planning_group
         goal.interpolation_step = interpolation_step
         goal.velocity_scale = velocity_scale
+        goal.tcp_speed_m_s = float(tcp_speed_m_s)
         goal.execute_requested = execute_requested
         goal.reuse_approved_plan = reuse_approved_plan
         goal.visualize_path = visualize_path
@@ -2888,6 +3216,7 @@ class WeldGuiNode(Node):
             self.ui.begin,
             velocity_scale,
             execute_requested,
+            tcp_speed_m_s,
         )
         self.active_motion_goal = None
         future = self.cartesian_motion_client.send_goal_async(
@@ -2902,6 +3231,7 @@ class WeldGuiNode(Node):
         goal.planning_group = step["planning_group"]
         goal.interpolation_step = step["interpolation_step"]
         goal.velocity_scale = step["velocity_scale"]
+        goal.tcp_speed_m_s = float(step.get("tcp_speed_m_s", 0.0))
         goal.execute_requested = bool(execute_requested)
         goal.reuse_approved_plan = False
         goal.visualize_path = True
@@ -2987,6 +3317,9 @@ class WeldGuiNode(Node):
                     "planning_group": step["planning_group"],
                     "interpolation_step": 0.005,
                     "velocity_scale": step["velocity_scale"],
+                    "tcp_speed_m_s": float(
+                        step.get("tcp_speed_m_s", 0.0)
+                    ),
                     "points": points,
                     "path_kind": f"{step['pose_label']} TCP linear",
                     "touch_guard": bool(step.get("touch_guard", True)),
@@ -3207,9 +3540,16 @@ class WeldActionGui:
     ):
         container = ttk.Frame(parent)
         container.pack(fill=tk.X, pady=2)
+        section_styles = (
+            "SectionBlue.TButton",
+            "SectionGreen.TButton",
+            "SectionAmber.TButton",
+            "SectionViolet.TButton",
+        )
         button = ttk.Button(
             container,
             command=lambda selected=key: self.toggle_motion_section(selected),
+            style=section_styles[len(self.motion_sections) % len(section_styles)],
         )
         button.pack(fill=tk.X)
         body = ttk.Frame(container, padding=(8, 5))
@@ -3288,6 +3628,8 @@ class WeldActionGui:
         self.circle_axis = tk.StringVar(value="X")
         self.nudge_mm = tk.DoubleVar(value=5.0)
         self.velocity_percent = tk.DoubleVar(value=20.0)
+        self.speed_mode = tk.StringVar(value="scale")
+        self.tcp_speed_mm_s = tk.DoubleVar(value=10.0)
         self.interpolation_step_mm = tk.DoubleVar(value=5.0)
         self.show_path = tk.BooleanVar(value=True)
         self.weave_amplitude_mm = tk.DoubleVar(value=3.0)
@@ -3329,6 +3671,8 @@ class WeldActionGui:
         self.hicomm_feedback_last_signature = None
         self.hicomm_feedback_log_period_s = 0.2
         self.hicomm_feedback_idle_log_period_s = 1.0
+        self.weld_feedback_lock = threading.Lock()
+        self.active_weld_feedback_session = None
         self.touch_sensing_enabled = tk.BooleanVar(value=False)
         self.corner_touch_target = tk.StringVar(value="start_floor")
         self.corner_touch_count = tk.IntVar(value=10)
@@ -3378,8 +3722,9 @@ class WeldActionGui:
         self.sequence_steps = []
         self.sequence_sleep_seconds = tk.DoubleVar(value=1.0)
         self.sequence_parallel_slot = tk.IntVar(value=1)
-        self.sequence_duration_seconds = tk.DoubleVar(value=3.0)
+        self.sequence_duration_seconds = tk.DoubleVar(value=0.0)
         self.sequence_edit_velocity_percent = tk.DoubleVar(value=20.0)
+        self.sequence_edit_tcp_speed_mm_s = tk.DoubleVar(value=0.0)
         self.sequence_edit_touch_guard = tk.BooleanVar(value=False)
         self.sequence_edit_continue_after_touch = tk.BooleanVar(value=False)
         self.sequence_running = False
@@ -3422,6 +3767,22 @@ class WeldActionGui:
         style.theme_use("clam")
         style.configure("Title.TLabel", font=("Sans", 18, "bold"))
         style.configure("Step.TLabel", font=("Sans", 11, "bold"))
+        section_colors = (
+            ("SectionBlue.TButton", "#dbeafe", "#bfdbfe"),
+            ("SectionGreen.TButton", "#dcfce7", "#bbf7d0"),
+            ("SectionAmber.TButton", "#fef3c7", "#fde68a"),
+            ("SectionViolet.TButton", "#ede9fe", "#ddd6fe"),
+        )
+        for name, normal, active in section_colors:
+            style.configure(
+                name,
+                background=normal,
+                foreground="#172033",
+                font=("Sans", 10, "bold"),
+                padding=(8, 6),
+                anchor=tk.W,
+            )
+            style.map(name, background=[("active", active)])
 
         scroll_container = ttk.Frame(self.root)
         scroll_container.pack(fill=tk.BOTH, expand=True)
@@ -3686,6 +4047,25 @@ class WeldActionGui:
             state=tk.DISABLED,
         )
         self.hicomm_disconnect_button.pack(side=tk.LEFT, padx=3)
+
+        feedback_tools = ttk.LabelFrame(
+            welder, text="Weld feedback log / graph"
+        )
+        feedback_tools.pack(fill=tk.X, pady=2)
+        ttk.Button(
+            feedback_tools,
+            text="Open latest .log",
+            command=self.open_latest_weld_feedback_log,
+        ).pack(side=tk.LEFT, padx=5, pady=3)
+        ttk.Button(
+            feedback_tools,
+            text="Plot latest current / voltage",
+            command=self.plot_latest_weld_feedback,
+        ).pack(side=tk.LEFT, padx=5, pady=3)
+        ttk.Label(
+            feedback_tools,
+            text="saves latest_weld_feedback.png beside the log",
+        ).pack(side=tk.LEFT, padx=8)
 
         welder_test = self._create_toggle_section(
             outer,
@@ -4154,57 +4534,13 @@ class WeldActionGui:
             width=5,
         ).pack(side=tk.LEFT, padx=(3, 10))
 
-        probe_actions = ttk.Frame(touch_corner)
-        probe_actions.pack(fill=tk.X, pady=3)
-        for label, kind in (
-            ("1 · START wall", "start_wall"),
-            ("2 · START base", "start_floor"),
-            ("3 · GOAL wall", "goal_wall"),
-            ("4 · GOAL base", "goal_floor"),
-        ):
-            ttk.Button(
-                probe_actions,
-                text=label,
-                command=lambda selected=kind: (
-                    self.start_automatic_touch_probe(selected)
-                ),
-            ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            probe_actions,
-            text="Compute START",
-            command=lambda: self.compute_seam_endpoint("start"),
-        ).pack(side=tk.LEFT, padx=(12, 3))
-        ttk.Button(
-            probe_actions,
-            text="Compute GOAL",
-            command=lambda: self.compute_seam_endpoint("goal"),
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            probe_actions,
-            text="Compute full seam + orientation",
-            command=self.compute_two_touch_seam,
-        ).pack(side=tk.LEFT, padx=7)
-        self.correct_two_touch_seam_button = ttk.Button(
-            probe_actions,
-            text="Commit corrected seam YAML",
-            command=self.correct_two_touch_seam,
-            state=tk.DISABLED,
-        )
-        self.correct_two_touch_seam_button.pack(side=tk.LEFT, padx=7)
-
         auto_actions = ttk.Frame(touch_corner)
-        auto_actions.pack(fill=tk.X, padx=3, pady=3)
-        self.auto_start_correction_button = ttk.Button(
-            auto_actions,
-            text="AUTO START · wait → wall/base → compute",
-            command=self.run_automatic_start_correction,
-        )
-        self.auto_start_correction_button.pack(side=tk.LEFT, padx=(0, 6))
+        auto_actions.pack(fill=tk.X, padx=3, pady=(5, 3))
         self.auto_seam_correction_button = ttk.Button(
             auto_actions,
             text=(
-                "AUTO FULL · START wall/base → GOAL wall/base → "
-                "yaw-correct + save"
+                "AUTO ALL · START WAIT → WALL/BASE → GOAL WAIT → "
+                "WALL/BASE → COMPUTE/SAVE"
             ),
             command=self.run_automatic_seam_correction,
         )
@@ -4216,18 +4552,56 @@ class WeldActionGui:
             state=tk.DISABLED,
         )
         self.stop_auto_seam_button.pack(side=tk.LEFT, padx=3)
+
+        probe_actions = ttk.LabelFrame(
+            touch_corner, text="Manual / diagnostic"
+        )
+        probe_actions.pack(fill=tk.X, pady=3)
+        manual_probe_actions = ttk.Frame(probe_actions)
+        manual_probe_actions.pack(fill=tk.X, pady=(1, 2))
+        for label, kind in (
+            ("1 · START wall", "start_wall"),
+            ("2 · START base", "start_floor"),
+            ("3 · GOAL wall", "goal_wall"),
+            ("4 · GOAL base", "goal_floor"),
+        ):
+            ttk.Button(
+                manual_probe_actions,
+                text=label,
+                command=lambda selected=kind: (
+                    self.start_automatic_touch_probe(selected)
+                ),
+            ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            auto_actions,
+            manual_probe_actions,
+            text="Compute START",
+            command=lambda: self.compute_seam_endpoint("start"),
+        ).pack(side=tk.LEFT, padx=(12, 3))
+        ttk.Button(
+            manual_probe_actions,
+            text="Compute GOAL",
+            command=lambda: self.compute_seam_endpoint("goal"),
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            manual_probe_actions,
+            text="Compute full seam + save",
+            command=self.compute_two_touch_seam,
+        ).pack(side=tk.LEFT, padx=7)
+
+        manual_visual_actions = ttk.Frame(probe_actions)
+        manual_visual_actions.pack(fill=tk.X, pady=(1, 2))
+        ttk.Button(
+            manual_visual_actions,
             text="RViz seam",
             command=self.show_computed_seam_in_rviz,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            auto_actions,
+            manual_visual_actions,
             text="RViz touches",
             command=self.show_touch_geometry_in_rviz,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            auto_actions,
+            manual_visual_actions,
             text="PyPlot touches",
             command=self.show_touch_geometry_pyplot,
         ).pack(side=tk.LEFT, padx=3)
@@ -4252,7 +4626,10 @@ class WeldActionGui:
             ("Add D-WELD ON", lambda: self.add_digital_weld_step("on")),
             ("Add D-WELD OFF", lambda: self.add_digital_weld_step("off")),
             ("Add D-WELD SET", lambda: self.add_digital_weld_step("set")),
-            ("Build weld scenario (START enough)", self.build_sensed_weld_sequence),
+            (
+                "Build SAFE weld scenario (START enough)",
+                self.build_sensed_weld_sequence,
+            ),
             ("Add Sleep", self.add_sleep_sequence_step),
             ("Delete", self.delete_sequence_step),
             ("↑", lambda: self.move_sequence_step(-1)),
@@ -4279,7 +4656,10 @@ class WeldActionGui:
             textvariable=self.sequence_parallel_slot,
             width=5,
         ).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(sleep_editor, text="Step duration seconds").pack(side=tk.LEFT)
+        ttk.Label(
+            sleep_editor,
+            text="Output duration s (0 = until explicit OFF)",
+        ).pack(side=tk.LEFT)
         ttk.Spinbox(
             sleep_editor,
             from_=0.0,
@@ -4307,6 +4687,17 @@ class WeldActionGui:
             increment=1.0,
             textvariable=self.sequence_edit_velocity_percent,
             width=6,
+        ).pack(side=tk.LEFT, padx=4)
+        ttk.Label(sleep_editor, text="TCP mm/s (0=scale)").pack(
+            side=tk.LEFT, padx=(8, 2)
+        )
+        ttk.Spinbox(
+            sleep_editor,
+            from_=0.0,
+            to=500.0,
+            increment=0.5,
+            textvariable=self.sequence_edit_tcp_speed_mm_s,
+            width=7,
         ).pack(side=tk.LEFT, padx=4)
         ttk.Checkbutton(
             sleep_editor,
@@ -4456,7 +4847,7 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=(0, 18))
         ttk.Label(
             execution,
-            text="velocity scale",
+            text="scale",
         ).pack(side=tk.LEFT)
         ttk.Scale(
             execution,
@@ -4471,6 +4862,40 @@ class WeldActionGui:
 
         planning_settings = ttk.Frame(outer)
         planning_settings.pack(fill=tk.X, pady=(5, 0))
+        ttk.Label(planning_settings, text="Speed mode").pack(side=tk.LEFT)
+        ttk.Radiobutton(
+            planning_settings,
+            text="Velocity scale (%)",
+            variable=self.speed_mode,
+            value="scale",
+            command=self.speed_mode_changed,
+        ).pack(side=tk.LEFT, padx=(4, 6))
+        ttk.Radiobutton(
+            planning_settings,
+            text="TCP average speed",
+            variable=self.speed_mode,
+            value="tcp",
+            command=self.speed_mode_changed,
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        self.tcp_speed_spinbox = ttk.Spinbox(
+            planning_settings,
+            from_=0.1,
+            to=500.0,
+            increment=0.5,
+            textvariable=self.tcp_speed_mm_s,
+            width=7,
+            command=self.speed_mode_changed,
+        )
+        self.tcp_speed_spinbox.pack(side=tk.LEFT)
+        self.tcp_speed_spinbox.bind(
+            "<FocusOut>", lambda _event: self.speed_mode_changed()
+        )
+        self.tcp_speed_spinbox.bind(
+            "<Return>", lambda _event: self.speed_mode_changed()
+        )
+        ttk.Label(planning_settings, text="mm/s").pack(
+            side=tk.LEFT, padx=(2, 14)
+        )
         ttk.Label(planning_settings, text="Cartesian interpolation step mm").pack(
             side=tk.LEFT
         )
@@ -4682,6 +5107,9 @@ class WeldActionGui:
     def disconnect_hicomm(self):
         client = self.hicomm_client
         if client is not None:
+            self._finish_weld_feedback_record(
+                "disconnected", client.latest_status()
+            )
             self.clear_hicomm_test_outputs()
             threading.Thread(target=client.stop, daemon=True).start()
 
@@ -4698,6 +5126,10 @@ class WeldActionGui:
             state=tk.NORMAL if connected or retrying else tk.DISABLED
         )
         if not connected:
+            if self.hicomm_client is not None:
+                self._finish_weld_feedback_record(
+                    "connection lost", self.hicomm_client.latest_status()
+                )
             self.clear_hicomm_test_outputs()
         self._set_welder_test_controls(
             connected
@@ -4779,6 +5211,231 @@ class WeldActionGui:
                 )
             )
 
+    @staticmethod
+    def _weld_status_snapshot(status):
+        keys = (
+            "raw0",
+            "output_state",
+            "output_state_name",
+            "sequence_stage",
+            "arc_ack",
+            "wcr_detected",
+            "forward_ack",
+            "gas_ack",
+            "feedback_current_a",
+            "feedback_voltage_v",
+            "wire_feed_m_min",
+            "set_current_a",
+            "set_voltage_v",
+            "welder_error",
+            "db_unavailable",
+            "torch_collision",
+        )
+        return {key: status.get(key) for key in keys}
+
+    def _begin_weld_feedback_record(self, settings, execution_conditions=None):
+        conditions = copy.deepcopy(
+            execution_conditions or {"mode": "manual_arc"}
+        )
+        conditions["hicomm_cyclic_period_ms"] = PERIOD_SECONDS * 1000.0
+        conditions["arc_wait_recognition"] = True
+        conditions["arc_wait_main_welding"] = True
+        conditions["arc_wait_established"] = True
+        conditions["arc_establishment_timeout_s"] = 5.0
+        with self.weld_feedback_lock:
+            if self.active_weld_feedback_session is not None:
+                return
+            self.active_weld_feedback_session = {
+                "started_unix_time": time.time(),
+                "commanded": copy.deepcopy(settings),
+                "execution_conditions": conditions,
+                "rx_samples": 0,
+                "welding_samples": 0,
+                "wcr_seen": False,
+                "values": {
+                    "current_a": [],
+                    "voltage_v": [],
+                    "wire_feed_m_min": [],
+                },
+                "setting_echo": None,
+                "welding_setting_echo": None,
+                "last_welding_status": None,
+                "samples": [],
+            }
+
+    def _record_weld_feedback_sample(self, status):
+        with self.weld_feedback_lock:
+            session = self.active_weld_feedback_session
+            if session is None:
+                return
+            session["rx_samples"] += 1
+            session["setting_echo"] = {
+                "current_a": int(status.get("set_current_a", 0)),
+                "voltage_v": float(status.get("set_voltage_v", 0.0)),
+            }
+            sample = self._weld_status_snapshot(status)
+            sample["elapsed_s"] = max(
+                0.0, time.time() - float(session["started_unix_time"])
+            )
+            session["samples"].append(sample)
+            active = bool(
+                status.get("arc_ack")
+                or int(status.get("output_state", 0))
+                or status.get("wcr_detected")
+                or float(status.get("wire_feed_m_min", 0.0)) > 0.0
+                or int(status.get("feedback_current_a", 0)) > 0
+                or float(status.get("feedback_voltage_v", 0.0)) > 0.0
+            )
+            if not active:
+                return
+            session["welding_setting_echo"] = copy.deepcopy(
+                session["setting_echo"]
+            )
+            session["wcr_seen"] = bool(
+                session["wcr_seen"] or status.get("wcr_detected")
+            )
+            session["last_welding_status"] = self._weld_status_snapshot(status)
+            measurement = bool(
+                status.get("wcr_detected")
+                or float(status.get("wire_feed_m_min", 0.0)) > 0.0
+                or int(status.get("feedback_current_a", 0)) > 0
+                or float(status.get("feedback_voltage_v", 0.0)) > 0.0
+            )
+            if not measurement:
+                return
+            session["welding_samples"] += 1
+            current = float(status.get("feedback_current_a", 0.0))
+            voltage = float(status.get("feedback_voltage_v", 0.0))
+            wire_feed = float(status.get("wire_feed_m_min", 0.0))
+            if current > 0.0:
+                session["values"]["current_a"].append(current)
+            if voltage > 0.0:
+                session["values"]["voltage_v"].append(voltage)
+            if wire_feed > 0.0:
+                session["values"]["wire_feed_m_min"].append(wire_feed)
+
+    def _weld_feedback_directory(self):
+        return Path.home() / "ros2_ws" / "weld_feedback"
+
+    def _latest_weld_feedback_path(self):
+        return self._weld_feedback_directory() / "latest_weld_feedback.log"
+
+    def open_latest_weld_feedback_log(self):
+        path = self._latest_weld_feedback_path()
+        if not path.is_file():
+            self.error(f"No weld feedback log yet: {path}")
+            return
+        try:
+            subprocess.Popen(("xdg-open", str(path)))
+        except OSError as error:
+            self.error(f"Cannot open weld feedback log: {error}")
+
+    def plot_latest_weld_feedback(self):
+        path = self._latest_weld_feedback_path()
+        if not path.is_file():
+            self.error(f"No weld feedback log yet: {path}")
+            return
+        workspace_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
+        python = str(workspace_python if workspace_python.is_file() else sys.executable)
+        try:
+            subprocess.Popen((
+                python,
+                "-m",
+                "construct_robot.weld_feedback_plot",
+                str(path),
+            ))
+        except OSError as error:
+            self.error(f"Cannot launch weld feedback plot: {error}")
+            return
+        self.log(f"Weld feedback plot requested · {path}")
+
+    def _finish_weld_feedback_record(self, result, final_status=None):
+        with self.weld_feedback_lock:
+            session = self.active_weld_feedback_session
+            self.active_weld_feedback_session = None
+        if session is None:
+            return None
+
+        def statistics(values):
+            if not values:
+                return {"min": None, "average": None, "max": None}
+            return {
+                "min": float(min(values)),
+                "average": float(sum(values) / len(values)),
+                "max": float(max(values)),
+            }
+
+        ended = time.time()
+        document = {
+            "format_version": 1,
+            "result": str(result),
+            "started": time.strftime(
+                "%Y-%m-%d %H:%M:%S",
+                time.localtime(float(session["started_unix_time"])),
+            ),
+            "ended": time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(ended)
+            ),
+            "started_unix_time": float(session["started_unix_time"]),
+            "ended_unix_time": ended,
+            "elapsed_seconds": ended - float(session["started_unix_time"]),
+            "commanded": session["commanded"],
+            "rx_setting_echo": session["setting_echo"],
+            "rx_welding_setting_echo": session["welding_setting_echo"],
+            "execution_conditions": session["execution_conditions"],
+            "feedback": {
+                "rx_samples": int(session["rx_samples"]),
+                "welding_samples": int(session["welding_samples"]),
+                "wcr_seen": bool(session["wcr_seen"]),
+                "current_a": statistics(session["values"]["current_a"]),
+                "voltage_v": statistics(session["values"]["voltage_v"]),
+                "wire_feed_m_min": statistics(
+                    session["values"]["wire_feed_m_min"]
+                ),
+                "last_welding_status": session["last_welding_status"],
+                "final_status": (
+                    self._weld_status_snapshot(final_status)
+                    if final_status is not None
+                    else None
+                ),
+            },
+            "samples": session["samples"],
+        }
+        directory = self._weld_feedback_directory()
+        timestamp = (
+            time.strftime("%Y%m%d_%H%M%S", time.localtime(ended))
+            + f"_{int((ended % 1.0) * 1000.0):03d}"
+        )
+        history_path = directory / f"weld_feedback_{timestamp}.log"
+        latest_path = directory / "latest_weld_feedback.log"
+        try:
+            save_weld_feedback_log(history_path, document)
+            save_weld_feedback_log(latest_path, document)
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            self.post(self.error, f"Weld feedback save failed: {error}")
+            return None
+        workspace_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
+        python = str(
+            workspace_python if workspace_python.is_file() else sys.executable
+        )
+        try:
+            subprocess.Popen((
+                python,
+                "-m",
+                "construct_robot.weld_feedback_plot",
+                str(history_path),
+                str(latest_path),
+                "--no-show",
+            ))
+        except OSError as error:
+            self.post(self.error, f"Weld feedback plot launch failed: {error}")
+        self.post(
+            self.log,
+            f"WELD FEEDBACK SAVED · {history_path} · "
+            f"PNG generation requested · result={result}",
+        )
+        return history_path
+
     def _hicomm_status_received(self, status):
         """Integrate RX wire-feed speed before forwarding status to Tk."""
         timestamp = float(status.get("timestamp_monotonic", time.monotonic()))
@@ -4797,6 +5454,7 @@ class WeldActionGui:
                 elif status.get("reverse_ack"):
                     self.inching_reverse_mm += distance_mm
                     self.inching_total_mm -= distance_mm
+        self._record_weld_feedback_sample(status)
         self._log_hicomm_feedback(status, timestamp)
         self.post_latest(
             "hicomm_status", self.hicomm_status_changed, status
@@ -4958,15 +5616,30 @@ class WeldActionGui:
             return
         if enabled:
             self.hicomm_client.allow_outputs()
+        execution_conditions = (
+            {
+                "mode": "manual_arc_button",
+                "hicomm_source_ip": self.hicomm_source_ip.get().strip(),
+                "hicomm_welder_ip": self.hicomm_welder_ip.get().strip(),
+                "hicomm_port": int(self.hicomm_port.get()),
+            }
+            if enabled else None
+        )
         threading.Thread(
             target=self._manual_digital_weld_worker,
-            args=(enabled, settings),
+            args=(enabled, settings, execution_conditions),
             daemon=True,
         ).start()
 
-    def _manual_digital_weld_worker(self, enabled, settings):
+    def _manual_digital_weld_worker(
+        self, enabled, settings, execution_conditions
+    ):
         kind = "on" if enabled else "off"
-        success, message = self._execute_hicomm_weld(kind, settings)
+        success, message = self._execute_hicomm_weld(
+            kind,
+            settings,
+            execution_conditions,
+        )
         self.post(
             self.log,
             f"Hi-COMM ARC {kind.upper()} · "
@@ -4993,7 +5666,9 @@ class WeldActionGui:
                 f"digital weld settings are invalid: {error}"
             ) from error
 
-    def _execute_hicomm_weld(self, kind, settings):
+    def _execute_hicomm_weld(
+        self, kind, settings, execution_conditions=None
+    ):
         client = self.hicomm_client
         if client is None or not client.connected:
             return False, "Hi-COMM disconnected"
@@ -5005,6 +5680,9 @@ class WeldActionGui:
                 echo = client.setting_echo()
                 return True, f"recipe applied · RX echo={echo}"
             elif kind == "on":
+                self._begin_weld_feedback_record(
+                    settings, execution_conditions
+                )
                 status = client.arc_on(
                     wait_recognition=True,
                     wait_welding=True,
@@ -5030,10 +5708,14 @@ class WeldActionGui:
                 wait_idle=True,
                 wait_sequence_clear=True,
             )
+            feedback_path = self._finish_weld_feedback_record(
+                "completed", status
+            )
             return True, (
                 "ARC OFF sequence clear · "
                 f"output={status['output_state_name']} · "
-                f"stage={status.get('sequence_stage', 'unknown')}"
+                f"stage={status.get('sequence_stage', 'unknown')} · "
+                f"feedback={feedback_path or 'not recorded'}"
             )
         except Exception as error:
             # Match v5.2: an ARC feedback timeout/error does not itself alter
@@ -5042,6 +5724,10 @@ class WeldActionGui:
             # clear outputs.
             if kind != "on":
                 client.set_arc(False)
+                self._finish_weld_feedback_record(
+                    f"ARC {kind.upper()} failed: {error}",
+                    client.latest_status(),
+                )
             return False, str(error)
 
     def capture_corner_touch_now(self):
@@ -5059,12 +5745,6 @@ class WeldActionGui:
         self.plan_initial_state()
 
     def run_automatic_seam_correction(self):
-        self._run_automatic_seam_correction(start_only=False)
-
-    def run_automatic_start_correction(self):
-        self._run_automatic_seam_correction(start_only=True)
-
-    def _run_automatic_seam_correction(self, start_only):
         if self.seam_auto_running:
             self.error("Automatic seam correction is already running")
             return
@@ -5075,14 +5755,10 @@ class WeldActionGui:
             self.error("Automatic seam correction currently supports right arm")
             return
         required = (
-            ("weld_wait", "weld_start_wait", "weld_start")
-            if start_only
-            else (
-                "weld_start_wait",
-                "weld_start",
-                "weld_goal_wait",
-                "weld_end",
-            )
+            "weld_start_wait",
+            "weld_start",
+            "weld_goal_wait",
+            "weld_end",
         )
         missing = [
             TEACHING_POSES[name]
@@ -5109,32 +5785,17 @@ class WeldActionGui:
         if self.touch_input_states["right"]:
             self.error("DI8 is already ON; release it before auto correction")
             return
-        title = (
-            "Automatic START Seam Correction"
-            if start_only
-            else "Automatic Seam Correction"
-        )
-        description = (
-            "Execute START wall/floor touch probes automatically?\n\n"
-            "Weld wait → wall touch/return → floor touch/return\n"
-            "The START seam pose will be saved; both wait poses remain "
-            "unchanged."
-            if start_only
-            else
-            "Execute four physical touch probes automatically?\n\n"
-            "START wait → wall/floor → GOAL wait → wall/floor\n"
-            "Each DI8 edge performs controlled move_stop and return.\n"
-            "The corrected Weld start/goal TCP YAML files will be updated."
-        )
-        if not messagebox.askyesno(title, description):
+        if not messagebox.askyesno(
+            "Automatic Seam Correction",
+            "Execute the complete four-probe correction?\n\n"
+            "START wait → wall/base → GOAL wait → wall/base\n"
+            "→ compute seam/yaw → save START/GOAL YAML\n\n"
+            "Each DI8 edge stops the probe and returns to its probe start.\n"
+            "The taught START/GOAL wait poses remain unchanged.",
+        ):
             return
         wait_steps = {}
-        wait_names = (
-            ("weld_wait",)
-            if start_only
-            else ("weld_start_wait", "weld_goal_wait")
-        )
-        for wait_name in wait_names:
+        for wait_name in ("weld_start_wait", "weld_goal_wait"):
             group, names, positions, tcp = self.taught_robot_poses[wait_name]
             wait_steps[wait_name] = {
                 "type": "named_pose",
@@ -5153,19 +5814,17 @@ class WeldActionGui:
                 "planning_attempts": 1,
                 "planning_time": 1.0,
             }
-        workflow = [(
-            wait_steps["weld_wait" if start_only else "weld_start_wait"],
-            ("start_wall", "start_floor"),
-        )]
-        if not start_only:
-            workflow.append((
+        workflow = [
+            (
+                wait_steps["weld_start_wait"],
+                ("start_wall", "start_floor"),
+            ),
+            (
                 wait_steps["weld_goal_wait"],
                 ("goal_wall", "goal_floor"),
-            ))
-        for name in (
-            ("start_wall", "start_floor")
-            if start_only else CORNER_TOUCH_NAMES
-        ):
+            ),
+        ]
+        for name in CORNER_TOUCH_NAMES:
             self.seam_probe_touches[name] = None
             self.seam_probe_starts[name] = None
             self.seam_probe_stops[name] = None
@@ -5173,12 +5832,11 @@ class WeldActionGui:
         self.corrected_two_touch_seam = []
         self.seam_auto_running = True
         self.seam_auto_returned_kinds.clear()
-        self.auto_start_correction_button.configure(state=tk.DISABLED)
         self.auto_seam_correction_button.configure(state=tk.DISABLED)
         self.stop_auto_seam_button.configure(state=tk.NORMAL)
         threading.Thread(
             target=self._automatic_seam_correction_worker,
-            args=(tuple(workflow), start_only),
+            args=(tuple(workflow),),
             daemon=True,
         ).start()
 
@@ -5202,7 +5860,6 @@ class WeldActionGui:
         ).start()
 
     def auto_seam_stop_finished(self, success, message):
-        self.auto_start_correction_button.configure(state=tk.NORMAL)
         self.auto_seam_correction_button.configure(state=tk.NORMAL)
         self.stop_auto_seam_button.configure(state=tk.DISABLED)
         if success:
@@ -5318,7 +5975,7 @@ class WeldActionGui:
         )
         return True
 
-    def _automatic_seam_correction_worker(self, workflow, start_only=False):
+    def _automatic_seam_correction_worker(self, workflow):
         probe_index = 0
         group_total = len(workflow)
         probe_total = sum(len(kinds) for _step, kinds in workflow)
@@ -5410,31 +6067,13 @@ class WeldActionGui:
                         f"{kind} completed, but DI8 remained ON",
                     )
                     return
-            if not start_only and group_index == 1:
+            if group_index == 1:
                 self.post(
                     self._set_auto_seam_status,
-                    "START wall/floor complete · next: moving to "
+                    "START wall/base complete · next: moving to "
                     "5 · Weld goal wait pose",
                 )
-        self.post(
-            self._complete_automatic_start_correction
-            if start_only
-            else self._complete_automatic_seam_correction
-        )
-
-    def _complete_automatic_start_correction(self):
-        point = self.compute_seam_endpoint("start")
-        if point is None:
-            self._finish_automatic_seam_correction(
-                False, "START two-touch computation failed"
-            )
-            return
-        self.seam_auto_running = False
-        self.seam_auto_expected_kind = None
-        self.seam_auto_stage_event.set()
-        self.auto_start_correction_button.configure(state=tk.NORMAL)
-        self.auto_seam_correction_button.configure(state=tk.NORMAL)
-        self.stop_auto_seam_button.configure(state=tk.DISABLED)
+        self.post(self._complete_automatic_seam_correction)
 
     def _wait_for_di8_release(self, timeout):
         deadline = time.monotonic() + timeout
@@ -5486,7 +6125,6 @@ class WeldActionGui:
         self.seam_auto_running = False
         self.seam_auto_expected_kind = None
         self.seam_auto_stage_event.set()
-        self.auto_start_correction_button.configure(state=tk.NORMAL)
         self.auto_seam_correction_button.configure(state=tk.NORMAL)
         self.stop_auto_seam_button.configure(state=tk.DISABLED)
         if success:
@@ -5956,6 +6594,7 @@ class WeldActionGui:
             "velocity_scale": max(
                 0.01, min(1.0, self.velocity_percent.get() / 100.0)
             ),
+            "tcp_speed_m_s": self._selected_tcp_speed_m_s(),
             "interpolation_step": max(
                 0.0005,
                 min(0.02, float(self.interpolation_step_mm.get()) * 0.001),
@@ -6028,11 +6667,24 @@ class WeldActionGui:
             count = int(self.corner_touch_count.get())
             preview = linear_pose_waypoints(start, goal, count)
             self.node.publish_points(preview, self.show_path.get())
-            base_slot = int(self.sequence_parallel_slot.get())
+            base_slot = next_sequential_slot(
+                self.sequence_steps,
+                int(self.sequence_parallel_slot.get()),
+            )
+            if base_slot + 6 > 999:
+                raise ValueError(
+                    "Not enough free sequence slots for weld scenario"
+                )
+            scenario_id = f"weld-{time.monotonic_ns()}"
 
-            def named_step(name, stored, slot):
+            def managed(step, stage):
+                step["weld_scenario_id"] = scenario_id
+                step["weld_scenario_stage"] = stage
+                return step
+
+            def named_step(name, stored, slot, stage):
                 group, names, joints, tcp = stored
-                return {
+                return managed({
                     "type": "named_pose",
                     "pose_name": name,
                     "pose_label": TEACHING_POSES[name],
@@ -6044,11 +6696,12 @@ class WeldActionGui:
                         0.01,
                         min(1.0, self.velocity_percent.get() / 100.0),
                     ),
+                    "tcp_speed_m_s": self._selected_tcp_speed_m_s(),
                     "parallel_slot": slot,
                     "duration": 0.0,
                     "touch_guard": True,
                     "continue_after_touch": False,
-                }
+                }, stage)
 
             approach_start = self._sensed_motion_step(
                 (start,),
@@ -6057,30 +6710,47 @@ class WeldActionGui:
                 touch_guard=True,
             )
             approach_start["continue_after_touch"] = True
-            approach_start["accept_initial_touch"] = True
+            # A stale/high DI8 at START WAIT must never skip directly to ARC.
+            # Require a fresh rising edge, confirm standstill, then continue.
+            approach_start["accept_initial_touch"] = False
             steps = [
-                named_step("weld_start_wait", start_wait_data, base_slot),
-                approach_start,
-                {
+                named_step(
+                    "weld_start_wait", start_wait_data, base_slot, "start_wait"
+                ),
+                managed(approach_start, "start_contact"),
+                managed({
+                    "type": "digital_output",
+                    "port": TOUCH_SENSING_OUTPUT_PORT,
+                    "value": False,
+                    "parallel_slot": base_slot + 2,
+                    "duration": 0.0,
+                }, "touch_output_off"),
+                managed({
                     "type": "digital_weld", "command": "on",
                     "settings": copy.deepcopy(settings),
-                    "parallel_slot": base_slot + 2, "duration": 0.0,
-                },
-                self._sensed_motion_step(
+                    "parallel_slot": base_slot + 3, "duration": 0.0,
+                }, "arc_on"),
+                managed(self._sensed_motion_step(
                     (start, goal),
                     f"sensed_start_to_{goal_path_name}_weld_DI8_ignored",
                     base_slot + 3,
-                ),
-                {
+                ), "weld_motion"),
+                managed({
                     "type": "digital_weld", "command": "off",
                     "settings": None,
                     "parallel_slot": base_slot + 4, "duration": 0.0,
-                },
+                }, "arc_off"),
                 named_step(
-                    "weld_goal_wait", goal_wait_data, base_slot + 5
+                    "weld_goal_wait",
+                    goal_wait_data,
+                    base_slot + 5,
+                    "goal_wait",
                 ),
-                named_step("weld_finish", finish_data, base_slot + 6),
+                named_step(
+                    "weld_finish", finish_data, base_slot + 6, "finish"
+                ),
             ]
+            validate_managed_weld_sequence(steps, require_complete=True)
         except (ValueError, TypeError, tk.TclError) as error:
             self.error(f"Cannot build sensed weld sequence: {error}")
             return
@@ -6089,8 +6759,9 @@ class WeldActionGui:
         self.log(
             f"Built weld workflow from sensed START to {goal_source} · "
             f"{len(steps)} steps · slots {base_slot}..{base_slot + 6} · "
-            "START WAIT → START → D-WELD ON → GOAL → D-WELD OFF → "
-            "END WAIT → END · D-WELD ON only after START arrival"
+            "START WAIT → START/DI8 → DO4 OFF → "
+            "[D-WELD ON + GOAL motion in one slot] → "
+            "D-WELD OFF → GOAL WAIT → END"
         )
 
     def compute_two_touch_seam(self):
@@ -6222,7 +6893,6 @@ class WeldActionGui:
             self._publish_touch_geometry_if_ready(
                 endpoint, self.computed_seam_endpoints[endpoint]
             )
-        self.correct_two_touch_seam_button.configure(state=tk.NORMAL)
         self.corner_touch_status.configure(
             text=(
                 f"RAW + CORRECTED PREVIEW · {len(raw_points)} points · "
@@ -6311,7 +6981,6 @@ class WeldActionGui:
         self.node.publish_points(
             self.corrected_two_touch_seam, self.show_path.get()
         )
-        self.correct_two_touch_seam_button.configure(state=tk.DISABLED)
         self.corner_touch_status.configure(
             text=(
                 "CORRECTED SEAM ADOPTED · Weld start/goal YAML saved · "
@@ -6361,8 +7030,9 @@ class WeldActionGui:
             return
         try:
             interpolation = float(self.interpolation_step_mm.get()) * 0.001
-        except (ValueError, tk.TclError):
-            self.error("Cartesian interpolation step is invalid")
+            tcp_speed_m_s = self._selected_tcp_speed_m_s()
+        except (ValueError, tk.TclError) as error:
+            self.error(str(error))
             return
         try:
             slot, duration = self._sequence_slot_and_duration()
@@ -6374,6 +7044,7 @@ class WeldActionGui:
             "planning_group": self.planning_group.get(),
             "points": copy.deepcopy(self.points),
             "velocity_scale": max(0.01, min(1.0, self.velocity_percent.get() / 100.0)),
+            "tcp_speed_m_s": tcp_speed_m_s,
             "interpolation_step": interpolation,
             "path_kind": self.path_kind,
             "parallel_slot": slot,
@@ -6445,6 +7116,7 @@ class WeldActionGui:
             return
         try:
             slot, duration = self._sequence_slot_and_duration()
+            tcp_speed_m_s = self._selected_tcp_speed_m_s()
         except ValueError as error:
             self.error(str(error))
             return
@@ -6461,6 +7133,7 @@ class WeldActionGui:
                 0.01,
                 min(1.0, self.velocity_percent.get() / 100.0),
             ),
+            "tcp_speed_m_s": tcp_speed_m_s,
             "parallel_slot": slot,
             "duration": duration,
             "touch_guard": pose_name in DI8_GUARDED_TEACHING_POSES,
@@ -6566,10 +7239,16 @@ class WeldActionGui:
                     if step.get("touch_guard", False)
                     else " · DI8 IGNORED"
                 )
+                tcp_speed = float(step.get("tcp_speed_m_s", 0.0))
+                speed_detail = (
+                    f"TCP {tcp_speed * 1000.0:.2f} mm/s"
+                    if tcp_speed > 0.0
+                    else f"speed {step['velocity_scale']:.1%}"
+                )
                 detail = (
                     f"{step['planning_group']} · {len(step['points'])} poses · "
-                    f"speed {step['velocity_scale']:.0%} · "
-                    f"{step['path_kind']}{guard_detail} · {timing}"
+                    f"{speed_detail} · {step['path_kind']}{guard_detail} · "
+                    f"{timing}"
                 )
                 kind = "MOTION"
             elif step["type"] == "planned_trajectory":
@@ -6581,9 +7260,15 @@ class WeldActionGui:
                 )
             elif step["type"] == "named_pose":
                 kind = "GO TO POSE"
+                tcp_speed = float(step.get("tcp_speed_m_s", 0.0))
+                speed_detail = (
+                    f"TCP {tcp_speed * 1000.0:.2f} mm/s"
+                    if tcp_speed > 0.0
+                    else f"speed {step['velocity_scale']:.1%}"
+                )
                 detail = (
                     f"{step['pose_label']} · {step['planning_group']} · "
-                    f"speed {step['velocity_scale']:.0%} · {timing}"
+                    f"{speed_detail} · {timing}"
                 )
             elif step["type"] == "sleep":
                 kind = "SLEEP"
@@ -6601,6 +7286,9 @@ class WeldActionGui:
             elif step["type"] == "gas":
                 kind = f"GAS {'ON' if step['enabled'] else 'OFF'}"
                 detail = f"Hi-COMM shielding gas · {timing}"
+            elif step["type"] == "digital_output":
+                kind = f"DO{int(step['port'])} {'ON' if step['value'] else 'OFF'}"
+                detail = f"Rainbow control-box output · {timing}"
             else:
                 kind = f"INCH {step['direction'].upper()}"
                 detail = f"Hi-COMM timed wire feed · {timing}"
@@ -6626,6 +7314,9 @@ class WeldActionGui:
         if step["type"] in ("motion", "named_pose"):
             self.sequence_edit_velocity_percent.set(
                 float(step.get("velocity_scale", 0.2)) * 100.0
+            )
+            self.sequence_edit_tcp_speed_mm_s.set(
+                float(step.get("tcp_speed_m_s", 0.0)) * 1000.0
             )
             self.sequence_edit_touch_guard.set(
                 bool(step.get("touch_guard", False))
@@ -6665,6 +7356,7 @@ class WeldActionGui:
             self.error("Select a sequence step to edit")
             return
         step = self.sequence_steps[index]
+        original = copy.deepcopy(step)
         try:
             if step["type"] == "sleep":
                 seconds = float(self.sequence_sleep_seconds.get())
@@ -6680,6 +7372,10 @@ class WeldActionGui:
                 if not math.isfinite(speed) or not 1.0 <= speed <= 100.0:
                     raise ValueError("Selected motion speed must be in 1..100%")
                 step["velocity_scale"] = speed / 100.0
+                tcp_speed = float(self.sequence_edit_tcp_speed_mm_s.get())
+                if not math.isfinite(tcp_speed) or not 0.0 <= tcp_speed <= 500.0:
+                    raise ValueError("Selected TCP speed must be 0..500 mm/s")
+                step["tcp_speed_m_s"] = tcp_speed * 0.001
                 step["touch_guard"] = bool(
                     self.sequence_edit_touch_guard.get()
                 )
@@ -6693,7 +7389,11 @@ class WeldActionGui:
                 step["settings"] = copy.deepcopy(
                     self._digital_weld_settings()
                 )
+            validate_managed_weld_sequence(
+                self.sequence_steps, require_complete=True
+            )
         except (ValueError, tk.TclError) as error:
+            self.sequence_steps[index] = original
             self.error(f"Sequence edit failed: {error}")
             return
         self.refresh_sequence_table()
@@ -6765,6 +7465,11 @@ class WeldActionGui:
                 "Motion speed (%)",
                 float(step.get("velocity_scale", 0.2)) * 100.0,
             )
+            entry(
+                "tcp_speed_mm_s",
+                "TCP average speed (mm/s, 0=scale)",
+                float(step.get("tcp_speed_m_s", 0.0)) * 1000.0,
+            )
             if step["type"] == "motion":
                 entry(
                     "interpolation_mm",
@@ -6802,6 +7507,14 @@ class WeldActionGui:
                 "enabled", "Gas command",
                 "on" if step["enabled"] else "off", ("on", "off")
             )
+        elif step["type"] == "digital_output":
+            entry("port", "Rainbow DO port", step["port"])
+            choice(
+                "value",
+                "Output command",
+                "on" if step["value"] else "off",
+                ("on", "off"),
+            )
 
         def save():
             try:
@@ -6825,6 +7538,10 @@ class WeldActionGui:
                     if not 1.0 <= speed <= 100.0:
                         raise ValueError("Motion speed must be in 1..100%")
                     updated["velocity_scale"] = speed / 100.0
+                    tcp_speed = float(variables["tcp_speed_mm_s"].get())
+                    if not 0.0 <= tcp_speed <= 500.0:
+                        raise ValueError("TCP speed must be in 0..500 mm/s")
+                    updated["tcp_speed_m_s"] = tcp_speed * 0.001
                     updated["touch_guard"] = variables["touch_guard"].get()
                     updated["continue_after_touch"] = variables[
                         "continue_after_touch"
@@ -6861,6 +7578,17 @@ class WeldActionGui:
                         updated["settings"] = settings
                 elif updated["type"] == "gas":
                     updated["enabled"] = variables["enabled"].get() == "on"
+                elif updated["type"] == "digital_output":
+                    port = int(variables["port"].get())
+                    if not 0 <= port <= 15:
+                        raise ValueError("Rainbow DO port must be in 0..15")
+                    updated["port"] = port
+                    updated["value"] = variables["value"].get() == "on"
+                candidate_steps = copy.deepcopy(self.sequence_steps)
+                candidate_steps[index] = updated
+                validate_managed_weld_sequence(
+                    candidate_steps, require_complete=True
+                )
             except (ValueError, tk.TclError) as error:
                 messagebox.showerror("Invalid sequence value", str(error), parent=dialog)
                 return
@@ -6878,7 +7606,18 @@ class WeldActionGui:
         )
         ttk.Button(buttons, text="Apply", command=save).pack(side=tk.RIGHT, padx=3)
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        dialog.grab_set()
+
+        def grab_when_viewable():
+            try:
+                if dialog.winfo_exists() and dialog.winfo_viewable():
+                    dialog.grab_set()
+                elif dialog.winfo_exists():
+                    dialog.after(20, grab_when_viewable)
+            except tk.TclError:
+                # The editor may have been closed before the idle callback.
+                return
+
+        dialog.after_idle(grab_when_viewable)
 
     def delete_sequence_step(self):
         index = self._selected_sequence_index()
@@ -6902,6 +7641,121 @@ class WeldActionGui:
         self.refresh_sequence_table()
         self.sequence_table.selection_set(str(target))
 
+    @staticmethod
+    def _pose_execution_conditions(pose):
+        if not pose_is_valid(pose):
+            return None
+        return {
+            "position_m": {
+                "x": float(pose.position.x),
+                "y": float(pose.position.y),
+                "z": float(pose.position.z),
+            },
+            "orientation_xyzw": {
+                "x": float(pose.orientation.x),
+                "y": float(pose.orientation.y),
+                "z": float(pose.orientation.z),
+                "w": float(pose.orientation.w),
+            },
+        }
+
+    def _sequence_execution_conditions(
+        self, steps, indices, execute_requested, run_all
+    ):
+        recorded_steps = []
+        for stored_index, step in zip(indices, steps):
+            condition = {
+                "sequence_number": int(stored_index) + 1,
+                "type": step.get("type"),
+            }
+            for key in (
+                "parallel_slot",
+                "duration",
+                "planning_group",
+                "velocity_scale",
+                "tcp_speed_m_s",
+                "interpolation_step",
+                "path_kind",
+                "pose_name",
+                "pose_label",
+                "touch_guard",
+                "continue_after_touch",
+                "accept_initial_touch",
+                "allow_initial_touch_motion",
+                "command",
+                "port",
+                "value",
+                "enabled",
+                "direction",
+                "seconds",
+                "weld_scenario_id",
+                "weld_scenario_stage",
+            ):
+                if key in step:
+                    condition[key] = step[key]
+            if step.get("settings") is not None:
+                condition["settings"] = copy.deepcopy(step["settings"])
+            if step.get("type") == "motion":
+                points = step.get("points", ())
+                condition["waypoint_count"] = len(points)
+                condition["waypoints"] = [
+                    self._pose_execution_conditions(pose) for pose in points
+                ]
+            elif step.get("type") == "named_pose":
+                condition["target_tcp"] = self._pose_execution_conditions(
+                    step.get("tcp_pose")
+                )
+                condition["joint_names"] = list(step.get("joint_names", ()))
+                condition["joint_positions_rad"] = [
+                    float(value) for value in step.get("positions", ())
+                ]
+            elif step.get("type") == "planned_trajectory":
+                condition["trajectory_segments"] = len(
+                    step.get("trajectories", ())
+                )
+                condition["trajectory_point_count"] = int(
+                    step.get("point_count", 0)
+                )
+                condition["required_arms"] = list(
+                    step.get("required_arms", ())
+                )
+            recorded_steps.append(condition)
+        return {
+            "mode": "sequence_execute" if execute_requested else "sequence_plan",
+            "run_all": bool(run_all),
+            "touch_input_port": TOUCH_INPUT_PORT,
+            "touch_sensing_output_port": TOUCH_SENSING_OUTPUT_PORT,
+            "hicomm_source_ip": self.hicomm_source_ip.get().strip(),
+            "hicomm_welder_ip": self.hicomm_welder_ip.get().strip(),
+            "hicomm_port": int(self.hicomm_port.get()),
+            "gui_velocity_percent": float(self.velocity_percent.get()),
+            "gui_speed_mode": self.speed_mode.get(),
+            "gui_tcp_speed_mm_s": float(self.tcp_speed_mm_s.get()),
+            "gui_interpolation_step_mm": float(
+                self.interpolation_step_mm.get()
+            ),
+            "seam_wall_offset_mm": float(self.seam_wall_offset_mm.get()),
+            "seam_floor_offset_mm": float(self.seam_floor_offset_mm.get()),
+            "initial_di8": bool(
+                self.node.node_touch_input_states.get("right", False)
+            ),
+            "initial_do4": (
+                None
+                if self.node.node_digital_outputs.get("right") is None
+                or len(self.node.node_digital_outputs["right"])
+                <= TOUCH_SENSING_OUTPUT_PORT
+                else bool(
+                    self.node.node_digital_outputs["right"][
+                        TOUCH_SENSING_OUTPUT_PORT
+                    ]
+                )
+            ),
+            "robot_connected": copy.deepcopy(self.robot_connected),
+            "hicomm_connected": bool(self.hicomm_connected),
+            "execution_allowed": bool(self.execution_allowed),
+            "steps": recorded_steps,
+        }
+
     def run_sequence(self, run_all, execute_requested):
         if self.sequence_running:
             self.error("A sequence is already running")
@@ -6915,6 +7769,28 @@ class WeldActionGui:
             self.error("Add or select a sequence step")
             return
         steps = [copy.deepcopy(self.sequence_steps[index]) for index in indices]
+        try:
+            execution_conditions = self._sequence_execution_conditions(
+                steps, indices, execute_requested, run_all
+            )
+        except (TypeError, ValueError, tk.TclError) as error:
+            self.error(f"Cannot capture sequence execution conditions: {error}")
+            return
+        for step in steps:
+            if (
+                step.get("type") == "digital_weld"
+                and step.get("command") == "on"
+            ):
+                step["execution_conditions"] = copy.deepcopy(
+                    execution_conditions
+                )
+        try:
+            validate_managed_weld_sequence(
+                steps, require_complete=bool(run_all)
+            )
+        except (TypeError, ValueError) as error:
+            self.error(f"Unsafe generated weld scenario: {error}")
+            return
         if execute_requested:
             required_arms = set()
             for step in steps:
@@ -6924,6 +7800,8 @@ class WeldActionGui:
                     required_arms.add(
                         step["planning_group"].removesuffix("_manipulator")
                     )
+                elif step["type"] == "digital_output":
+                    required_arms.add("right")
             disconnected = [
                 arm for arm in sorted(required_arms)
                 if not self.robot_connected.get(arm, False)
@@ -7026,9 +7904,15 @@ class WeldActionGui:
             workers = []
 
             def run_member(result_key, member_step):
-                results[result_key] = self._run_sequence_step(
+                member_result = self._run_sequence_step(
                     member_step, execute_requested
                 )
+                results[result_key] = member_result
+                if execute_requested and not member_result[0]:
+                    client = self.hicomm_client
+                    if client is not None:
+                        client.inhibit_outputs()
+                    self.node.cancel_active_motion()
 
             for stored_index, step in members:
                 worker = threading.Thread(
@@ -7058,6 +7942,13 @@ class WeldActionGui:
             client = self.hicomm_client
             if client is not None:
                 client.clear_outputs()
+            self.node._set_digital_output_sync(
+                TOUCH_SENSING_OUTPUT_PORT, False
+            )
+            self._finish_weld_feedback_record(
+                "stopped" if self.sequence_stop_requested else f"failed: {message}",
+                client.latest_status() if client is not None else None,
+            )
         self.post(self._sequence_finished, success, message)
 
     def _run_sequence_step(self, step, execute_requested):
@@ -7081,11 +7972,13 @@ class WeldActionGui:
                 else "sleep interrupted"
             )
         if not execute_requested:
-            return True, "Hi-COMM timed command planned (no output sent)"
+            return True, "Equipment output command planned (no output sent)"
         duration = float(step.get("duration", 0.0))
         if step["type"] == "digital_weld":
             success, message = self._execute_hicomm_weld(
-                step["command"], step["settings"]
+                step["command"],
+                step["settings"],
+                step.get("execution_conditions"),
             )
             if not success:
                 return success, message
@@ -7126,6 +8019,25 @@ class WeldActionGui:
             except Exception as error:
                 client.set_command_bit(BIT_GAS, False)
                 return False, str(error)
+        if step["type"] == "digital_output":
+            port = int(step["port"])
+            enabled = bool(step["value"])
+            success, message = self.node._set_digital_output_sync(port, enabled)
+            if not success:
+                return False, f"DO{port} command failed: {message}"
+            if not enabled or duration <= 0.0:
+                return True, f"DO{port} {'ON' if enabled else 'OFF'} confirmed"
+            waited = self._interruptible_wait(duration)
+            off_success, off_message = self.node._set_digital_output_sync(
+                port, False
+            )
+            if not off_success:
+                return False, f"DO{port} timed OFF failed: {off_message}"
+            return waited, (
+                f"DO{port} ON for {duration:.3f} seconds, then OFF"
+                if waited
+                else f"DO{port} duration interrupted; OFF confirmed"
+            )
         return False, "unsupported sequence step"
 
     def _set_sequence_status(self, text):
@@ -7148,6 +8060,9 @@ class WeldActionGui:
         self.sequence_stop_requested = True
         if self.hicomm_client is not None:
             self.hicomm_client.inhibit_outputs()
+            self._finish_weld_feedback_record(
+                "operator stop", self.hicomm_client.latest_status()
+            )
         self.hicomm_inching_direction = None
         self.hicomm_gas_enabled.set(False)
         self.hicomm_arc_unlocked.set(False)
@@ -7181,7 +8096,6 @@ class WeldActionGui:
         self.node.active_touch_guard = None
         self.initial_plan_ready = False
         self._refresh_initial_position_controls()
-        self.auto_start_correction_button.configure(state=tk.NORMAL)
         self.auto_seam_correction_button.configure(state=tk.NORMAL)
         self.stop_auto_seam_button.configure(state=tk.DISABLED)
         self.corner_touch_status.configure(
@@ -8309,9 +9223,26 @@ class WeldActionGui:
         self.invalidate_approved_plan()
         self.initial_plan_ready = False
         self._refresh_initial_position_controls()
-        self.speed_label.configure(
-            text=f"{self.velocity_percent.get():.0f}%"
-        )
+        if self.speed_mode.get() == "tcp":
+            self.speed_label.configure(text="scale ignored in TCP mode")
+        else:
+            self.speed_label.configure(
+                text=f"{self.velocity_percent.get():.1f}%"
+            )
+
+    def speed_mode_changed(self):
+        self.update_speed_label()
+
+    def _selected_tcp_speed_m_s(self):
+        if self.speed_mode.get() != "tcp":
+            return 0.0
+        try:
+            speed_mm_s = float(self.tcp_speed_mm_s.get())
+        except (ValueError, tk.TclError) as error:
+            raise ValueError("TCP speed is invalid") from error
+        if not math.isfinite(speed_mm_s) or not 0.1 <= speed_mm_s <= 500.0:
+            raise ValueError("TCP speed must be in 0.1..500.0 mm/s")
+        return speed_mm_s * 0.001
 
     def plan_preview(self):
         if not self._selected_robot_connected():
@@ -8335,6 +9266,7 @@ class WeldActionGui:
         speed = max(0.01, min(1.0, self.velocity_percent.get() / 100.0))
         planning_group = self.planning_group.get()
         try:
+            tcp_speed_m_s = self._selected_tcp_speed_m_s()
             interpolation_step = (
                 float(self.interpolation_step_mm.get()) * 0.001
             )
@@ -8354,6 +9286,7 @@ class WeldActionGui:
                 execute_requested,
                 execute_requested,
                 planning_group,
+                tcp_speed_m_s,
             ),
             daemon=True,
         ).start()
@@ -8680,7 +9613,7 @@ class WeldActionGui:
                 ),
             )
 
-    def begin(self, velocity_scale, execute_requested):
+    def begin(self, velocity_scale, execute_requested, tcp_speed_m_s=0.0):
         self.bar["value"] = 0
         self.last_action_phase = ""
         self.plan_button.configure(state=tk.DISABLED)
@@ -8692,7 +9625,11 @@ class WeldActionGui:
         )
         self.pipeline_waiting(
             f"{operation} · "
-            f"speed={velocity_scale:.0%}"
+            + (
+                f"TCP average target={tcp_speed_m_s * 1000.0:.2f} mm/s"
+                if tcp_speed_m_s > 0.0
+                else f"velocity scale={velocity_scale:.1%}"
+            )
         )
 
     def progress(self, value, waypoint, pose, phase):

@@ -15,6 +15,7 @@ from construct_robot.cartesian_path_common import (
     linear_pose_waypoints,
     pose_is_valid,
     scale_trajectory_speed,
+    scale_trajectory_to_tcp_speed,
     slerp_quaternion,
     straight_waypoints,
     tip_link_for_group,
@@ -27,15 +28,18 @@ from construct_robot.cartesian_path_server import (
     rotate_vector,
 )
 from construct_msgs.action import CartesianPath
+import construct_robot.hicomm_welder as hicomm_welder_module
 from construct_robot.hicomm_welder import (
     BIT_ARC,
     BIT_FORWARD,
     BIT_REVERSE,
     CAPTURED_IDLE_REQUEST,
+    CAPTURED_WELDING_BASE_REQUEST_0102,
     HiCommWelderClient,
     OUTPUT_STATE_MAIN_WELD,
     PROFILE_INCHING,
     PROFILE_WELDING,
+    PROTOCOL_PROFILE_VERSION,
     TxState,
     build_request,
     decode_response,
@@ -49,18 +53,189 @@ from construct_robot.weld_action_gui import (
     corner_endpoint_from_two_touches,
     corrected_corner_seam_from_four_touches,
     digital_weld_recipe,
+    next_sequential_slot,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
     named_tcp_linear_waypoints,
     position_only_goal_constraints,
     tcp_pose_goal_constraints,
     save_seam_touch_yaml,
+    save_weld_feedback_log,
     seam_yaw,
     translated_wait_pose,
     two_touch_corner_seam,
     validate_digital_weld_settings,
+    validate_managed_weld_sequence,
     yaw_corrected_seam_poses,
 )
+from construct_robot.weld_feedback_plot import parse_weld_feedback_log
+
+
+def managed_weld_steps(base_slot=1):
+    scenario_id = "test-weld"
+    stages = (
+        ("start_wait", "named_pose", None, True, False),
+        ("start_contact", "motion", None, True, True),
+        ("touch_output_off", "digital_output", None, False, False),
+        ("arc_on", "digital_weld", "on", False, False),
+        ("weld_motion", "motion", None, False, False),
+        ("arc_off", "digital_weld", "off", False, False),
+        ("goal_wait", "named_pose", None, True, False),
+        ("finish", "named_pose", None, True, False),
+    )
+    stage_slot_offsets = {
+        "start_wait": 0,
+        "start_contact": 1,
+        "touch_output_off": 2,
+        "arc_on": 3,
+        "weld_motion": 3,
+        "arc_off": 4,
+        "goal_wait": 5,
+        "finish": 6,
+    }
+    result = []
+    for stage, kind, command, guard, continue_after in stages:
+        step = {
+            "type": kind,
+            "parallel_slot": base_slot + stage_slot_offsets[stage],
+            "duration": 0.0,
+            "touch_guard": guard,
+            "continue_after_touch": continue_after,
+            "weld_scenario_id": scenario_id,
+            "weld_scenario_stage": stage,
+        }
+        if command is not None:
+            step["command"] = command
+        if stage == "start_contact":
+            step["accept_initial_touch"] = False
+        elif stage == "touch_output_off":
+            step["port"] = 4
+            step["value"] = False
+        result.append(step)
+    return result
+
+
+def test_weld_scenario_uses_slots_after_existing_sequence():
+    existing = [
+        {"type": "motion", "parallel_slot": 2},
+        {"type": "digital_weld", "parallel_slot": 7},
+        {"type": "sleep", "seconds": 1.0},
+    ]
+    assert next_sequential_slot(existing, requested=3) == 8
+    assert next_sequential_slot([], requested=4) == 4
+
+
+def test_weld_feedback_log_is_persisted_atomically(tmp_path):
+    path = tmp_path / "latest_weld_feedback.log"
+    document = {
+        "format_version": 1,
+        "result": "completed",
+        "started": "2026-08-18 12:00:00",
+        "ended": "2026-08-18 12:00:01",
+        "elapsed_seconds": 1.0,
+        "commanded": {"current_a": 200, "voltage": 25.0},
+        "rx_setting_echo": {"current_a": 200, "voltage_v": 25.0},
+        "feedback": {
+            "rx_samples": 1,
+            "welding_samples": 1,
+            "wcr_seen": True,
+            "current_a": {"min": 197.0, "average": 197.5, "max": 198.0},
+            "voltage_v": {"min": 24.8, "average": 25.0, "max": 25.2},
+            "wire_feed_m_min": {"min": 7.4, "average": 7.5, "max": 7.6},
+        },
+        "samples": [{
+            "elapsed_s": 0.5,
+            "raw0": 0x2B,
+            "output_state_name": "main_weld",
+            "arc_ack": True,
+            "gas_ack": True,
+            "forward_ack": True,
+            "wcr_detected": True,
+            "feedback_current_a": 198,
+            "feedback_voltage_v": 25.2,
+            "wire_feed_m_min": 7.6,
+            "set_current_a": 200,
+            "set_voltage_v": 25.0,
+            "welder_error": 0,
+            "db_unavailable": False,
+            "torch_collision": False,
+        }],
+    }
+    save_weld_feedback_log(path, document)
+    content = path.read_text(encoding="utf-8")
+    assert "result=completed" in content
+    assert "OPERATOR OVERVIEW" in content
+    assert "REQUESTED : 200 A / 25.0 V" in content
+    assert "current_a.average=197.5" in content
+    assert "0x2B main_weld 1 1 1 1 198 25.2 7.6" in content
+    sections, samples = parse_weld_feedback_log(path)
+    assert sections["commanded"]["current_a"] == "200"
+    assert samples[0]["current_a"] == 198.0
+    assert samples[0]["voltage_v"] == 25.2
+
+
+def test_managed_weld_scenario_pairs_arc_on_with_weld_motion():
+    steps = managed_weld_steps()
+    assert validate_managed_weld_sequence(steps, require_complete=True)
+    assert steps[3]["parallel_slot"] == steps[4]["parallel_slot"]
+
+    unsafe = managed_weld_steps()
+    unsafe[4]["parallel_slot"] += 1
+    try:
+        validate_managed_weld_sequence(unsafe, require_complete=True)
+    except ValueError as error:
+        assert "share" in str(error) or "slot" in str(error)
+    else:
+        raise AssertionError("Separated generated ARC ON/motion was accepted")
+
+
+def test_manual_arc_on_cannot_share_a_robot_motion_slot():
+    unsafe = [
+        {
+            "type": "digital_weld",
+            "command": "on",
+            "parallel_slot": 3,
+            "duration": 0.0,
+        },
+        {"type": "motion", "parallel_slot": 3},
+    ]
+    try:
+        validate_managed_weld_sequence(unsafe)
+    except ValueError as error:
+        assert "cannot share slot 3" in str(error)
+    else:
+        raise AssertionError("Manual ARC ON/motion slot overlap was accepted")
+
+
+def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
+    stale_touch = managed_weld_steps()
+    stale_touch[1]["accept_initial_touch"] = True
+    try:
+        validate_managed_weld_sequence(stale_touch, require_complete=True)
+    except ValueError as error:
+        assert "new DI8 edge" in str(error)
+    else:
+        raise AssertionError("stale DI8 was accepted for generated START")
+
+    timed_arc = managed_weld_steps()
+    timed_arc[3]["duration"] = 3.0
+    try:
+        validate_managed_weld_sequence(timed_arc, require_complete=True)
+    except ValueError as error:
+        assert "duration must be 0" in str(error)
+    else:
+        raise AssertionError("timed generated ARC ON was accepted")
+
+    touch_output_on = managed_weld_steps()
+    touch_output_on[2]["value"] = True
+    try:
+        validate_managed_weld_sequence(
+            touch_output_on, require_complete=True
+        )
+    except ValueError as error:
+        assert "DO4 OFF before ARC ON" in str(error)
+    else:
+        raise AssertionError("Generated ARC accepted with DO4 ON")
 
 
 def test_di8_guarded_named_teaching_poses():
@@ -386,11 +561,14 @@ def test_linear_tcp_world_rotation_uses_world_axes():
 def test_hicomm_request_preserves_capture_and_sets_documented_fields():
     assert build_request(TxState()) == CAPTURED_IDLE_REQUEST
     assert CAPTURED_IDLE_REQUEST == bytes.fromhex(
-        "00 0C 00 64 00 64 00 32 00 00 00 00 33 33 00 00 "
+        "00 0C 00 64 00 64 00 32 00 00 00 00 32 32 00 00 "
         "0F 00 00 32 32 32 32 32 32 32 32 32 32 32 32 32 "
         "32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 "
         "32 09 00 00 00 00 00"
     )
+    assert PROTOCOL_PROFILE_VERSION == "v5.3-1120"
+    assert CAPTURED_WELDING_BASE_REQUEST_0102[12:14] == b"\x33\x33"
+    assert CAPTURED_IDLE_REQUEST[12:14] == b"\x32\x32"
     frame = build_request(
         TxState(command=BIT_ARC, current_a=123, voltage_tenths=234)
     )
@@ -506,6 +684,30 @@ def test_hicomm_arc_switches_back_to_successful_welding_profile():
     state = client.snapshot()
     assert state.base_profile == PROFILE_WELDING
     assert state.command == BIT_ARC
+
+
+def test_hicomm_v53_rx_drain_returns_after_one_complete_frame(monkeypatch):
+    client = HiCommWelderClient("127.0.0.1", "127.0.0.1")
+    received = []
+
+    class FakeSocket:
+        calls = 0
+
+        def recv(self, _size):
+            self.calls += 1
+            return bytes(71)
+
+    sock = FakeSocket()
+    monkeypatch.setattr(
+        hicomm_welder_module.select,
+        "select",
+        lambda *_args, **_kwargs: ([sock], [], []),
+    )
+    client._dispatch_status = lambda status: received.append(status)
+    client._drain_rx(sock, bytearray(), time.monotonic() + 1.0)
+
+    assert sock.calls == 1
+    assert len(received) == 1
 
 
 def test_hicomm_rejects_manual_test_command_during_arc():
@@ -850,14 +1052,45 @@ def test_approved_plan_signature_changes_with_path_or_speed():
     goal.planning_group = "right_manipulator"
     goal.interpolation_step = 0.005
     goal.velocity_scale = 0.2
+    goal.tcp_speed_m_s = 0.0
     goal.waypoints = [make_pose(x=0.1), make_pose(x=0.2)]
     original = CartesianPathActionServer.plan_signature(goal)
 
     goal.velocity_scale = 0.1
     assert CartesianPathActionServer.plan_signature(goal) != original
     goal.velocity_scale = 0.2
+    goal.tcp_speed_m_s = 0.01
+    assert CartesianPathActionServer.plan_signature(goal) != original
+    goal.tcp_speed_m_s = 0.0
     goal.waypoints[1].position.y = 0.001
     assert CartesianPathActionServer.plan_signature(goal) != original
+
+
+def test_tcp_speed_mode_sets_average_duration_without_exceeding_plan():
+    trajectory = RobotTrajectory()
+    point = JointTrajectoryPoint()
+    point.time_from_start.sec = 2
+    point.velocities = [1.0]
+    point.accelerations = [1.0]
+    trajectory.joint_trajectory.points.append(point)
+    waypoints = [make_pose(x=0.0), make_pose(x=0.1)]
+
+    scale, achieved = scale_trajectory_to_tcp_speed(
+        trajectory, waypoints, 0.025
+    )
+    assert math.isclose(scale, 0.5)
+    assert trajectory.joint_trajectory.points[-1].time_from_start.sec == 4
+    assert math.isclose(achieved, 0.025)
+
+    fast_trajectory = RobotTrajectory()
+    fast_point = JointTrajectoryPoint()
+    fast_point.time_from_start.sec = 2
+    fast_trajectory.joint_trajectory.points.append(fast_point)
+    scale, achieved = scale_trajectory_to_tcp_speed(
+        fast_trajectory, waypoints, 0.1
+    )
+    assert math.isclose(scale, 1.0)
+    assert math.isclose(achieved, 0.05)
 
 
 def test_cartesian_action_is_motion_only():
