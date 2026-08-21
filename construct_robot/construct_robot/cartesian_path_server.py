@@ -20,6 +20,7 @@ from construct_robot.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     cartesian_path_length,
     pose_is_valid,
+    retime_trajectory_constant_velocity,
     scale_trajectory_speed,
     scale_trajectory_to_tcp_speed,
     slerp_quaternion,
@@ -31,6 +32,7 @@ from construct_robot.cartesian_path_common import (
 FUTURE_POLL_PERIOD = 0.01
 PLANNING_TIMEOUT = 30.0
 EXECUTION_TIMEOUT = 120.0
+LINEAR_TCP_RAMP_DURATION_S = 1.0
 
 
 def interpolate_pose(start: Pose, goal: Pose, ratio: float) -> Pose:
@@ -280,14 +282,44 @@ class CartesianPathActionServer(Node):
                 effective_waypoints,
                 request.tcp_speed_m_s,
             )
-            speed_description = (
-                f"TCP target={request.tcp_speed_m_s * 1000.0:.2f}mm/s, "
-                f"planned average={achieved_speed * 1000.0:.2f}mm/s, "
-                f"timing_scale={applied_scale:.3f}"
-            )
         else:
             scale_trajectory_speed(response.solution, request.velocity_scale)
-            speed_description = f"velocity_scale={request.velocity_scale:.2f}"
+
+        if request.linear_motion_profile:
+            retime_trajectory_constant_velocity(
+                response.solution,
+                ramp_duration_s=(
+                    LINEAR_TCP_RAMP_DURATION_S
+                    if request.tcp_speed_m_s > 0.0
+                    else None
+                ),
+            )
+
+        if request.tcp_speed_m_s > 0.0:
+            final_duration = trajectory_duration_seconds(response.solution)
+            path_length = cartesian_path_length(effective_waypoints)
+            final_average = (
+                path_length / final_duration if final_duration > 1e-9 else 0.0
+            )
+            if request.linear_motion_profile:
+                speed_description = (
+                    f"TCP cruise target={request.tcp_speed_m_s * 1000.0:.2f}mm/s, "
+                    f"planned cruise={achieved_speed * 1000.0:.2f}mm/s, "
+                    f"planned average={final_average * 1000.0:.2f}mm/s, "
+                    f"ramp={LINEAR_TCP_RAMP_DURATION_S:.2f}s each, "
+                    f"timing_scale={applied_scale:.3f}, profile=linear"
+                )
+            else:
+                speed_description = (
+                    f"TCP average target={request.tcp_speed_m_s * 1000.0:.2f}mm/s, "
+                    f"planned average={final_average * 1000.0:.2f}mm/s, "
+                    f"timing_scale={applied_scale:.3f}, profile=s_curve"
+                )
+        else:
+            speed_description = (
+                f"velocity_scale={request.velocity_scale:.2f}, "
+                f"profile={'linear' if request.linear_motion_profile else 's_curve'}"
+            )
 
         if publish:
             self.publish_trajectories(
@@ -329,6 +361,7 @@ class CartesianPathActionServer(Node):
             request.interpolation_step,
             request.velocity_scale,
             request.tcp_speed_m_s,
+            request.linear_motion_profile,
             tuple(pose_values),
         )
 
@@ -547,8 +580,11 @@ class CartesianPathActionServer(Node):
             duration = trajectory_duration_seconds(moveit_plan.solution)
             length = cartesian_path_length(request.waypoints)
             achieved = length / duration if duration > 1e-9 else 0.0
+            target_kind = (
+                "cruise target" if request.linear_motion_profile else "average target"
+            )
             speed_text = (
-                f"TCP target {request.tcp_speed_m_s * 1000.0:.2f} mm/s · "
+                f"TCP {target_kind} {request.tcp_speed_m_s * 1000.0:.2f} mm/s · "
                 f"planned average {achieved * 1000.0:.2f} mm/s"
             )
         elif request.tcp_speed_m_s > 0.0:
@@ -557,10 +593,13 @@ class CartesianPathActionServer(Node):
             )
         else:
             speed_text = f"{request.velocity_scale:.0%} velocity scale"
+        profile_text = (
+            "linear profile" if request.linear_motion_profile else "S-curve profile"
+        )
         result.message = (
             f"Path for '{request.planning_group}' {completion} · "
             f"{len(sampled_path)} samples at "
-            f"{speed_text}"
+            f"{speed_text} · {profile_text}"
         )
         result.final_pose = request.waypoints[-1]
         result.sampled_path = sampled_path

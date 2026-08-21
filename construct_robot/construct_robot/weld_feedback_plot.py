@@ -22,7 +22,6 @@ SAMPLE_COLUMNS = (
     "collision",
 )
 
-
 def parse_weld_feedback_log(path):
     """Return scalar sections and time-series samples from one feedback log."""
     path = Path(path).expanduser()

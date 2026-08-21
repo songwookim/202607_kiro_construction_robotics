@@ -14,11 +14,13 @@ from construct_robot.cartesian_path_common import (
     circle_waypoints,
     linear_pose_waypoints,
     pose_is_valid,
+    retime_trajectory_constant_velocity,
     scale_trajectory_speed,
     scale_trajectory_to_tcp_speed,
     slerp_quaternion,
     straight_waypoints,
     tip_link_for_group,
+    trajectory_duration_seconds,
     weaving_from_path,
     weaving_waypoints,
 )
@@ -53,6 +55,7 @@ from construct_robot.weld_action_gui import (
     corner_endpoint_from_two_touches,
     corrected_corner_seam_from_four_touches,
     digital_weld_recipe,
+    fixed_tilt_wait_reference_poses,
     next_sequential_slot,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
@@ -64,6 +67,7 @@ from construct_robot.weld_action_gui import (
     seam_yaw,
     translated_wait_pose,
     two_touch_corner_seam,
+    update_weld_scenario_motion_values,
     validate_digital_weld_settings,
     validate_managed_weld_sequence,
     yaw_corrected_seam_poses,
@@ -160,6 +164,24 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
             "db_unavailable": False,
             "torch_collision": False,
         }],
+        "tcp_trajectory": [{
+            "elapsed_s": 0.6,
+            "x_m": 0.1,
+            "y_m": 0.2,
+            "z_m": 0.3,
+            "qx": 0.0,
+            "qy": 0.0,
+            "qz": 0.0,
+            "qw": 1.0,
+            "speed_m_s": 0.0025,
+            "tf_stamp_s": 1234.5,
+            "along_mm": 25.0,
+            "remaining_mm": 125.0,
+            "cross_track_mm": 0.04,
+            "progress": 0.0,
+            "waypoint_index": -1,
+            "phase": "ACTUAL_TF",
+        }],
     }
     save_weld_feedback_log(path, document)
     content = path.read_text(encoding="utf-8")
@@ -172,6 +194,8 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
     assert sections["commanded"]["current_a"] == "200"
     assert samples[0]["current_a"] == 198.0
     assert samples[0]["voltage_v"] == 25.2
+    assert "tf_stamp_s along_mm remaining_mm cross_track_mm" in content
+    assert "1234.500000000 25.000 125.000 0.040" in content
 
 
 def test_managed_weld_scenario_pairs_arc_on_with_weld_motion():
@@ -320,6 +344,49 @@ def test_sensed_seam_yaw_rotates_taught_orientations_and_uses_sensed_xyz():
     assert math.isclose(corrected_start.orientation.w, math.sqrt(0.5))
 
 
+def test_fixed_tilt_wait_references_apply_the_same_local_y_rotation():
+    start_wait = make_pose(0.0, 0.0, 0.2)
+    goal_wait = make_pose(1.0, 0.0, 0.2)
+    start, goal = fixed_tilt_wait_reference_poses(
+        start_wait, goal_wait, -15.0
+    )
+    expected_y = math.sin(math.radians(-7.5))
+    expected_w = math.cos(math.radians(7.5))
+    assert math.isclose(start.orientation.y, expected_y, abs_tol=1e-9)
+    assert math.isclose(start.orientation.w, expected_w, abs_tol=1e-9)
+    assert start.orientation == goal.orientation
+    assert start.position == start_wait.position
+    assert goal.position == goal_wait.position
+
+
+def test_fixed_tilt_wait_references_reject_unsafe_tilt_range():
+    start_wait = make_pose()
+    goal_wait = make_pose(1.0)
+    for value in (-180.1, 180.1, math.nan):
+        try:
+            fixed_tilt_wait_reference_poses(start_wait, goal_wait, value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid fixed tilt {value} was accepted")
+
+
+def test_fixed_tilt_wait_references_accept_all_three_tool_axes():
+    start_wait = make_pose(0.0, 0.0, 0.2)
+    goal_wait = make_pose(1.0, 0.0, 0.2)
+    start, goal = fixed_tilt_wait_reference_poses(
+        start_wait,
+        goal_wait,
+        tilt_y_deg=-15.0,
+        tilt_x_deg=10.0,
+        tilt_z_deg=20.0,
+    )
+    assert start.orientation == goal.orientation
+    assert not math.isclose(start.orientation.x, 0.0, abs_tol=1e-9)
+    assert not math.isclose(start.orientation.y, 0.0, abs_tol=1e-9)
+    assert not math.isclose(start.orientation.z, 0.0, abs_tol=1e-9)
+
+
 def test_corner_endpoint_and_wait_alignment_for_world_x_seam():
     wall = make_pose(0.4, 0.2, 0.5)
     floor = make_pose(0.4, 0.6, 0.1)
@@ -441,6 +508,58 @@ def make_pose(x=0.0, y=0.0, z=0.0, quaternion=(0.0, 0.0, 0.0, 1.0)):
         pose.orientation.w,
     ) = quaternion
     return pose
+
+
+def test_weld_motion_builder_edit_updates_linked_process_steps():
+    seam_start = make_pose(x=0.0)
+    seam_goal = make_pose(x=0.150)
+    wait = make_pose(x=-0.020, z=0.010)
+    scenario_id = "weld-edit-test"
+    steps = [
+        {
+            "type": "motion",
+            "role": "lead_in",
+            "related_weld_scenario_id": scenario_id,
+            "points": (wait, make_pose(x=-0.010)),
+        },
+        {
+            "type": "motion",
+            "weld_scenario_id": scenario_id,
+            "weld_scenario_stage": "weld_motion",
+            "usable_seam_start": seam_start,
+            "usable_seam_goal": seam_goal,
+            "points": (make_pose(x=-0.010), make_pose(x=0.155)),
+            "lead_in_mm": 10.0,
+            "lead_out_mm": 5.0,
+            "tcp_speed_m_s": 0.003,
+            "weld_tcp_speed_mm_s": 3.0,
+        },
+        {
+            "type": "digital_weld",
+            "command": "off",
+            "weld_scenario_id": scenario_id,
+            "weld_scenario_stage": "arc_off",
+            "tcp_speed_m_s": 0.003,
+        },
+    ]
+
+    updated = update_weld_scenario_motion_values(
+        steps,
+        1,
+        tcp_speed_mm_s=2.5,
+        lead_in_mm=12.0,
+        lead_out_mm=8.0,
+    )
+
+    assert math.isclose(updated[1]["tcp_speed_m_s"], 0.0025)
+    assert updated[1]["weld_tcp_speed_mm_s"] == 2.5
+    assert math.isclose(updated[1]["points"][0].position.x, -0.012)
+    assert math.isclose(updated[1]["points"][1].position.x, 0.158)
+    assert math.isclose(updated[0]["points"][-1].position.x, -0.012)
+    assert math.isclose(updated[2]["tcp_speed_m_s"], 0.0025)
+    assert updated[2]["lead_in_mm"] == 12.0
+    assert updated[2]["lead_out_mm"] == 8.0
+    assert steps[1]["tcp_speed_m_s"] == 0.003
 
 
 def test_tip_link_for_supported_groups():
@@ -621,19 +740,22 @@ def test_hicomm_response_decodes_arc_feedback_and_error():
     assert decoded["sequence_stage"] == "welding_feedback"
     assert decoded["feedback_current_a"] == 121
     assert decoded["feedback_voltage_v"] == 21.9
+    assert decoded["wire_feed_m_min"] == 3.2
     assert decoded["welder_error"] == 7
 
 
-def test_digital_weld_defaults_match_captured_welding_profile():
+def test_digital_weld_defaults_match_current_production_recipe():
     settings = validate_digital_weld_settings(
         DEFAULT_DIGITAL_WELD_SETTINGS
     )
-    assert settings["current_a"] == 100
-    assert settings["voltage_tenths"] == 100
-    assert settings["voltage"] == 10.0
-    assert build_request(TxState(**digital_weld_recipe(settings))) == (
-        CAPTURED_IDLE_REQUEST
-    )
+    assert settings["current_a"] == 200
+    assert settings["voltage_tenths"] == 250
+    assert settings["voltage"] == 25.0
+    assert settings["pre_gas_s"] == 0.7
+    frame = build_request(TxState(**digital_weld_recipe(settings)))
+    assert int.from_bytes(frame[3:5], "little") == 200
+    assert int.from_bytes(frame[5:7], "little") == 250
+    assert int.from_bytes(frame[8:10], "little") == 70
 
 
 def test_digital_weld_recipe_excludes_gui_timing_metadata():
@@ -1009,6 +1131,85 @@ def test_trajectory_velocity_scaling_changes_time_velocity_acceleration():
     assert list(scaled.accelerations) == [1.0]
 
 
+def test_linear_retime_preserves_duration_and_endpoints():
+    trajectory = RobotTrajectory()
+    point_count = 40
+    total_time = 4.0
+    for index in range(point_count):
+        point = JointTrajectoryPoint()
+        ratio = index / (point_count - 1)
+        # Smoothstep: a stand-in for MoveIt's jerk-limited S-curve shape.
+        eased = 3.0 * ratio ** 2 - 2.0 * ratio ** 3
+        point.positions = [eased]
+        elapsed = ratio * total_time
+        point.time_from_start.sec = int(elapsed)
+        point.time_from_start.nanosec = int(
+            round((elapsed - int(elapsed)) * 1e9)
+        )
+        trajectory.joint_trajectory.points.append(point)
+
+    original_duration = trajectory_duration_seconds(trajectory)
+    retime_trajectory_constant_velocity(trajectory, ramp_fraction=0.2)
+
+    assert math.isclose(
+        trajectory_duration_seconds(trajectory), original_duration, abs_tol=1e-6
+    )
+    points = trajectory.joint_trajectory.points
+    assert math.isclose(points[0].positions[0], 0.0, abs_tol=1e-9)
+    assert math.isclose(points[-1].positions[0], 1.0, abs_tol=1e-9)
+    assert points[0].velocities[0] == 0.0
+    assert points[-1].velocities[0] == 0.0
+
+    times = [
+        p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in points
+    ]
+    assert all(b >= a for a, b in zip(times, times[1:]))
+
+    cruise = [p.velocities[0] for p in points[15:25]]
+    assert max(cruise) - min(cruise) < 1e-6
+
+
+def test_linear_retime_fixed_ramp_preserves_nominal_cruise_speed():
+    trajectory = RobotTrajectory()
+    for index in range(5):
+        point = JointTrajectoryPoint()
+        point.positions = [index / 4.0]
+        point.time_from_start.sec = index
+        trajectory.joint_trajectory.points.append(point)
+
+    retime_trajectory_constant_velocity(trajectory, ramp_duration_s=1.0)
+
+    points = trajectory.joint_trajectory.points
+    assert math.isclose(trajectory_duration_seconds(trajectory), 5.0)
+    middle_times = [
+        point.time_from_start.sec + point.time_from_start.nanosec * 1e-9
+        for point in points[1:4]
+    ]
+    assert middle_times == [1.5, 2.5, 3.5]
+    assert math.isclose(points[2].velocities[0], 0.25)
+
+
+def test_linear_retime_rejects_bad_ramp_fraction():
+    trajectory = RobotTrajectory()
+    for value in (0.0, 3.0, 5.0):
+        point = JointTrajectoryPoint()
+        point.positions = [value]
+        trajectory.joint_trajectory.points.append(point)
+    trajectory.joint_trajectory.points[-1].time_from_start.sec = 1
+    try:
+        retime_trajectory_constant_velocity(trajectory, ramp_fraction=0.6)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for ramp_fraction > 0.5")
+    try:
+        retime_trajectory_constant_velocity(trajectory, ramp_duration_s=0.0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for zero ramp duration")
+
+
 def test_weaving_path_starts_and_ends_on_centerline():
     start = make_pose(1.0, 2.0, 3.0)
     points = weaving_waypoints(
@@ -1063,6 +1264,10 @@ def test_approved_plan_signature_changes_with_path_or_speed():
     assert CartesianPathActionServer.plan_signature(goal) != original
     goal.tcp_speed_m_s = 0.0
     goal.waypoints[1].position.y = 0.001
+    assert CartesianPathActionServer.plan_signature(goal) != original
+    goal.waypoints[1].position.y = 0.0
+    assert CartesianPathActionServer.plan_signature(goal) == original
+    goal.linear_motion_profile = True
     assert CartesianPathActionServer.plan_signature(goal) != original
 
 

@@ -435,6 +435,112 @@ def scale_trajectory_speed(trajectory, velocity_scale: float):
     return trajectory
 
 
+def retime_trajectory_constant_velocity(
+    trajectory, ramp_fraction=0.2, ramp_duration_s=None
+):
+    """Reshape a RobotTrajectory's timing into a constant-velocity trapezoid.
+
+    Positions and point order are untouched; only timing (and the
+    velocities/accelerations derived from it) change, in place. This trades
+    MoveIt's jerk-limited S-curve (smooth but always accelerating/
+    decelerating) for a cruise at constant speed bounded by linear ramps.
+    Positions and waypoints remain unchanged.
+
+    By default, ``ramp_fraction`` is the fraction of the total duration spent
+    accelerating and, symmetrically, decelerating (each end), while preserving
+    the input duration.
+
+    When ``ramp_duration_s`` is provided, the input average path speed becomes
+    the constant cruise speed.  A fixed ramp of that duration is added at each
+    end; together the two half-speed ramps add one ramp duration to the total
+    trajectory time.  This mode is intended for a physical TCP-speed target:
+    the target is the steady welding speed, not the whole-path average.
+    """
+    if not 0.0 < ramp_fraction <= 0.5:
+        raise ValueError("ramp_fraction must be in (0.0, 0.5]")
+    points = trajectory.joint_trajectory.points
+    if len(points) < 2:
+        return trajectory
+
+    total_time = trajectory_duration_seconds(trajectory)
+    if total_time <= 1e-9:
+        return trajectory
+
+    # Cumulative joint-space Euclidean distance as a path-progress metric.
+    # This needs no forward kinematics and stays monotonic along the path.
+    distances = [0.0]
+    for previous, current in zip(points, points[1:]):
+        step = math.sqrt(sum(
+            (b - a) ** 2
+            for a, b in zip(previous.positions, current.positions)
+        ))
+        distances.append(distances[-1] + step)
+    total_distance = distances[-1]
+    if total_distance <= 1e-9:
+        return trajectory
+
+    if ramp_duration_s is None:
+        ramp_time = ramp_fraction * total_time
+        cruise_speed = total_distance / (total_time - ramp_time)
+    else:
+        requested_ramp_time = float(ramp_duration_s)
+        if not math.isfinite(requested_ramp_time) or requested_ramp_time <= 0.0:
+            raise ValueError("ramp_duration_s must be finite and greater than zero")
+        nominal_duration = total_time
+        ramp_time = min(requested_ramp_time, nominal_duration)
+        cruise_speed = total_distance / nominal_duration
+        total_time = nominal_duration + ramp_time
+    ramp_distance = 0.5 * cruise_speed * ramp_time
+
+    def time_for_distance(distance):
+        if distance <= ramp_distance:
+            return math.sqrt(2.0 * ramp_time * distance / cruise_speed)
+        if distance >= total_distance - ramp_distance:
+            remaining = total_distance - distance
+            return total_time - math.sqrt(
+                2.0 * ramp_time * remaining / cruise_speed
+            )
+        return ramp_time + (distance - ramp_distance) / cruise_speed
+
+    new_times = [time_for_distance(distance) for distance in distances]
+    for index in range(1, len(new_times)):
+        if new_times[index] < new_times[index - 1]:
+            new_times[index] = new_times[index - 1]
+
+    for point, t in zip(points, new_times):
+        point.time_from_start.sec = int(t)
+        point.time_from_start.nanosec = int(round((t - int(t)) * 1e9))
+        if point.time_from_start.nanosec >= 1_000_000_000:
+            point.time_from_start.sec += 1
+            point.time_from_start.nanosec -= 1_000_000_000
+
+    joint_count = len(points[0].positions)
+    last = len(points) - 1
+
+    def finite_difference(values, index):
+        if index == 0 or index == last:
+            return [0.0] * joint_count
+        dt = new_times[index + 1] - new_times[index - 1]
+        if dt <= 1e-9:
+            return [0.0] * joint_count
+        return [
+            (values[index + 1][joint] - values[index - 1][joint]) / dt
+            for joint in range(joint_count)
+        ]
+
+    positions = [list(point.positions) for point in points]
+    velocities = [
+        finite_difference(positions, index) for index in range(len(points))
+    ]
+    accelerations = [
+        finite_difference(velocities, index) for index in range(len(points))
+    ]
+    for point, velocity, acceleration in zip(points, velocities, accelerations):
+        point.velocities = velocity
+        point.accelerations = acceleration
+    return trajectory
+
+
 def trajectory_duration_seconds(trajectory):
     """Return the final JointTrajectory timestamp in seconds."""
     points = trajectory.joint_trajectory.points
