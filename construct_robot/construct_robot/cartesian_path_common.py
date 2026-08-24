@@ -279,8 +279,14 @@ def weaving_from_path(
     cycles,
     samples_per_cycle,
     transverse_axis="tool_y",
+    transverse_vector=None,
 ):
-    """Resample an existing taught seam and add transverse sinusoidal weave."""
+    """Resample a seam and add transverse sinusoidal weave.
+
+    ``transverse_vector`` is a World-frame direction supplied by a sensed
+    geometry pipeline.  When present it takes priority over the generic
+    tool/world-axis selector, while manual paths retain the old behavior.
+    """
     if len(source_points) < 2:
         raise ValueError("Teach at least two source points before weaving")
     if not math.isfinite(amplitude) or amplitude <= 0.0:
@@ -341,9 +347,11 @@ def weaving_from_path(
                 second.position.z - first.position.z,
             )
         )
-        preferred = axis_vectors[transverse_axis]
-        if transverse_axis.startswith("tool_"):
-            preferred = _quaternion_rotate(pose.orientation, preferred)
+        preferred = transverse_vector
+        if preferred is None:
+            preferred = axis_vectors[transverse_axis]
+            if transverse_axis.startswith("tool_"):
+                preferred = _quaternion_rotate(pose.orientation, preferred)
         dot = sum(a * b for a, b in zip(preferred, tangent))
         transverse = tuple(
             preferred[index] - dot * tangent[index] for index in range(3)
@@ -370,6 +378,128 @@ def weaving_from_path(
         pose.position.x += transverse[0] * offset
         pose.position.y += transverse[1] * offset
         pose.position.z += transverse[2] * offset
+        points.append(pose)
+    return points
+
+
+def circular_weaving_from_path(
+    source_points,
+    radius,
+    cycles,
+    samples_per_cycle,
+    radial_axis="tool_y",
+    radial_vector=None,
+):
+    """Resample a seam and orbit its centerline with a circular TCP weave.
+
+    The selected radial axis is projected perpendicular to the local path
+    tangent; the second radial axis is derived orthogonally.  A one-cycle
+    smooth ramp at each end brings the path onto/off the circle at the seam
+    centerline, avoiding a discontinuous jump from a straight lead-in/out.
+    TCP orientation follows the unmodified source path.
+    """
+    if len(source_points) < 2:
+        raise ValueError("Teach at least two source points before weaving")
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("Circle weave radius must be positive and finite")
+    if cycles < 1 or samples_per_cycle < 8:
+        raise ValueError(
+            "Circle weave requires cycles >= 1 and samples/cycle >= 8"
+        )
+    axis_vectors = {
+        "tool_x": (1.0, 0.0, 0.0),
+        "tool_y": (0.0, 1.0, 0.0),
+        "tool_z": (0.0, 0.0, 1.0),
+        "world_x": (1.0, 0.0, 0.0),
+        "world_y": (0.0, 1.0, 0.0),
+        "world_z": (0.0, 0.0, 1.0),
+    }
+    if radial_axis not in axis_vectors:
+        raise ValueError(f"Unsupported circle-weave radial axis: {radial_axis}")
+
+    segment_lengths = []
+    for first, second in zip(source_points[:-1], source_points[1:]):
+        segment_lengths.append(math.sqrt(
+            (second.position.x - first.position.x) ** 2
+            + (second.position.y - first.position.y) ** 2
+            + (second.position.z - first.position.z) ** 2
+        ))
+    total_length = sum(segment_lengths)
+    if total_length < 1e-9:
+        raise ValueError("Taught seam has zero length")
+
+    sample_count = cycles * samples_per_cycle
+    points = []
+    segment_index = 0
+    distance_before_segment = 0.0
+    for sample_index in range(sample_count + 1):
+        ratio = sample_index / sample_count
+        target_distance = total_length * ratio
+        while (
+            segment_index < len(segment_lengths) - 1
+            and target_distance
+            > distance_before_segment + segment_lengths[segment_index]
+        ):
+            distance_before_segment += segment_lengths[segment_index]
+            segment_index += 1
+        segment_length = segment_lengths[segment_index]
+        local_ratio = (
+            0.0 if segment_length < 1e-12
+            else (target_distance - distance_before_segment) / segment_length
+        )
+        first = source_points[segment_index]
+        second = source_points[segment_index + 1]
+        pose = _interpolate_pose(first, second, local_ratio)
+        tangent = _normalize_vector((
+            second.position.x - first.position.x,
+            second.position.y - first.position.y,
+            second.position.z - first.position.z,
+        ))
+        preferred = radial_vector
+        if preferred is None:
+            preferred = axis_vectors[radial_axis]
+            if radial_axis.startswith("tool_"):
+                preferred = _quaternion_rotate(pose.orientation, preferred)
+        projection = sum(a * b for a, b in zip(preferred, tangent))
+        primary = tuple(
+            preferred[index] - projection * tangent[index]
+            for index in range(3)
+        )
+        try:
+            primary = _normalize_vector(primary)
+        except ValueError:
+            fallback = min(
+                axis_vectors.values(),
+                key=lambda axis: abs(sum(a * b for a, b in zip(axis, tangent))),
+            )
+            fallback_projection = sum(
+                a * b for a, b in zip(fallback, tangent)
+            )
+            primary = _normalize_vector(tuple(
+                fallback[index] - fallback_projection * tangent[index]
+                for index in range(3)
+            ))
+        secondary = _normalize_vector((
+            tangent[1] * primary[2] - tangent[2] * primary[1],
+            tangent[2] * primary[0] - tangent[0] * primary[2],
+            tangent[0] * primary[1] - tangent[1] * primary[0],
+        ))
+        phase_cycles = cycles * ratio
+        ramp = min(1.0, phase_cycles, cycles - phase_cycles)
+        envelope = math.sin(0.5 * math.pi * max(0.0, ramp)) ** 2
+        phase = 2.0 * math.pi * phase_cycles
+        primary_offset = radius * envelope * math.cos(phase)
+        secondary_offset = radius * envelope * math.sin(phase)
+        for axis, first_component, second_component in zip(
+            ("x", "y", "z"), primary, secondary
+        ):
+            setattr(
+                pose.position,
+                axis,
+                getattr(pose.position, axis)
+                + primary_offset * first_component
+                + secondary_offset * second_component,
+            )
         points.append(pose)
     return points
 

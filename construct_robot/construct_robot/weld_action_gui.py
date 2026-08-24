@@ -1,4 +1,5 @@
 import copy
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import queue
@@ -50,6 +51,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from construct_msgs.action import CartesianPath
 from construct_robot.cartesian_path_common import (
     circle_waypoints,
+    circular_weaving_from_path,
     linear_pose_waypoints,
     pose_is_valid,
     scale_trajectory_speed,
@@ -179,6 +181,7 @@ DEFAULT_DIGITAL_WELD_SETTINGS = {
 
 WELD_SCENARIO_STAGE_ORDER = (
     "start_wait",
+    "start_safe",
     "start_contact",
     "touch_output_off",
     "arc_on",
@@ -186,6 +189,7 @@ WELD_SCENARIO_STAGE_ORDER = (
     "arc_off",
     "goal_wait",
     "finish",
+    "touch_output_on",
 )
 
 
@@ -345,15 +349,16 @@ def validate_managed_weld_sequence(steps, require_complete=False):
                         raise ValueError(
                             "Triggered ARC OFF must share the continuous weld-motion slot"
                         )
+            elif stage == "start_safe" and step.get("touch_guard", False):
+                raise ValueError("Safe approach motion must not use the DI8 guard")
             elif stage == "start_contact":
-                if (
-                    not step.get("touch_guard", False)
-                    or not step.get("continue_after_touch", False)
+                if step.get("touch_guard", False) and (
+                    not step.get("continue_after_touch", False)
                     or step.get("accept_initial_touch", False)
                 ):
                     raise ValueError(
-                        "START contact must require a new DI8 edge, stop, "
-                        "then continue"
+                        "Guarded START contact must require a new DI8 edge, "
+                        "stop, then continue"
                     )
             elif stage == "touch_output_off" and (
                 step.get("type") != "digital_output"
@@ -362,6 +367,14 @@ def validate_managed_weld_sequence(steps, require_complete=False):
             ):
                 raise ValueError(
                     "Generated scenario must turn DO4 OFF before ARC ON"
+                )
+            elif stage == "touch_output_on" and (
+                step.get("type") != "digital_output"
+                or int(step.get("port", -1)) != TOUCH_SENSING_OUTPUT_PORT
+                or not bool(step.get("value", False))
+            ):
+                raise ValueError(
+                    "Generated scenario must restore DO4 ON after finish"
                 )
             elif stage == "weld_motion":
                 if step.get("touch_guard", False):
@@ -724,6 +737,343 @@ def seam_direction(start, goal, *, xy_only=False):
     )
     return _unit_vector(direction, "seam direction")
 
+
+def _quaternion_rotate_vector(orientation, vector):
+    """Rotate a 3-vector by a geometry_msgs quaternion."""
+    q = (
+        float(orientation.x),
+        float(orientation.y),
+        float(orientation.z),
+        float(orientation.w),
+    )
+    norm = math.sqrt(sum(value * value for value in q))
+    if norm < 1e-12:
+        raise ValueError("orientation quaternion has near-zero length")
+    qx, qy, qz, qw = (value / norm for value in q)
+    vx, vy, vz = (float(value) for value in vector)
+    tx = 2.0 * (qy * vz - qz * vy)
+    ty = 2.0 * (qz * vx - qx * vz)
+    tz = 2.0 * (qx * vy - qy * vx)
+    return (
+        vx + qw * tx + qy * tz - qz * ty,
+        vy + qw * ty + qz * tx - qx * tz,
+        vz + qw * tz + qx * ty - qy * tx,
+    )
+
+
+@dataclass
+class CorrectedSeamGeometry:
+    """Actual two-plane seam line and projected taught endpoints."""
+
+    start: Pose
+    goal: Pose
+    taught_start: tuple
+    taught_goal: tuple
+    origin: tuple
+    d_teach: tuple
+    d_real: tuple
+    e_a: tuple
+    e_w: tuple
+    wall_normal: tuple
+    wall_plane_value: float
+    floor_normal: tuple
+    floor_plane_value: float
+    length_before: float
+    length_after: float
+    direction_dot: float
+    safe_start: Pose = None
+    lead_start: Pose = None
+
+
+def compute_surface_plane(normal, touch_points, offset=0.0):
+    """Estimate unit-normal plane n·x=c from touch points and a probe hint.
+
+    With START and GOAL contacts, their connecting vector lies in the real
+    surface.  Projecting the configured probe-normal hint perpendicular to
+    that vector captures workpiece tilt while selecting the otherwise
+    ambiguous plane normal.  A single contact retains the hint as fallback.
+    """
+    normal_hint = _unit_vector(normal, "surface probe-normal hint")
+    positions = []
+    for point in touch_points:
+        if isinstance(point, Pose):
+            if not pose_is_valid(point):
+                raise ValueError("surface touch pose is invalid")
+            positions.append(_pose_position_tuple(point))
+        else:
+            values = tuple(float(value) for value in point)
+            if len(values) != 3 or not all(math.isfinite(value) for value in values):
+                raise ValueError("surface touch point must be a finite XYZ vector")
+            positions.append(values)
+    if not positions:
+        raise ValueError("surface plane needs at least one touch point")
+    normal = normal_hint
+    if len(positions) >= 2:
+        first, second = max(
+            (
+                (first, second)
+                for index, first in enumerate(positions[:-1])
+                for second in positions[index + 1:]
+            ),
+            key=lambda pair: math.dist(pair[0], pair[1]),
+        )
+        span = tuple(second[index] - first[index] for index in range(3))
+        if math.sqrt(_vector_dot(span, span)) > 1e-6:
+            tangent = _unit_vector(span, "surface touch span")
+            projection = _vector_dot(normal_hint, tangent)
+            normal = _unit_vector(
+                tuple(
+                    normal_hint[index] - projection * tangent[index]
+                    for index in range(3)
+                ),
+                "probe hint projected onto sensed surface normal",
+            )
+    plane_value = (
+        sum(_vector_dot(normal, point) for point in positions) / len(positions)
+        + float(offset)
+    )
+    if not math.isfinite(plane_value):
+        raise ValueError("surface plane value is not finite")
+    return normal, plane_value
+
+
+def compute_real_seam_direction(wall_normal, floor_normal, d_teach):
+    """Return the oriented intersection direction of two surface planes."""
+    wall_normal = _unit_vector(wall_normal, "wall normal")
+    floor_normal = _unit_vector(floor_normal, "floor normal")
+    d_teach = _unit_vector(d_teach, "taught seam direction")
+    cross = _vector_cross(wall_normal, floor_normal)
+    cross_norm = math.sqrt(_vector_dot(cross, cross))
+    if cross_norm < 1e-6:
+        raise ValueError(
+            "wall and floor normals are nearly parallel; actual seam line "
+            "cannot be determined"
+        )
+    d_real = tuple(value / cross_norm for value in cross)
+    alignment = _vector_dot(d_real, d_teach)
+    if alignment < 0.0:
+        d_real = tuple(-value for value in d_real)
+        alignment = -alignment
+    if alignment < 1e-6:
+        raise ValueError(
+            "actual seam direction is nearly perpendicular to taught START→GOAL"
+        )
+    return d_real
+
+
+def compute_plane_intersection_line(
+    wall_normal,
+    wall_plane_value,
+    floor_normal,
+    floor_plane_value,
+    direction_reference=None,
+):
+    """Return the minimum-norm point and direction of two planes' line."""
+    wall_normal = _unit_vector(wall_normal, "wall normal")
+    floor_normal = _unit_vector(floor_normal, "floor normal")
+    reference = (
+        direction_reference
+        if direction_reference is not None
+        else _vector_cross(wall_normal, floor_normal)
+    )
+    direction = compute_real_seam_direction(
+        wall_normal, floor_normal, reference
+    )
+    normal_dot = _vector_dot(wall_normal, floor_normal)
+    denominator = 1.0 - normal_dot * normal_dot
+    if denominator < 1e-12:
+        raise ValueError(
+            "wall and floor normals are nearly parallel; no stable plane "
+            "intersection exists"
+        )
+    wall_coefficient = (
+        float(wall_plane_value) - normal_dot * float(floor_plane_value)
+    ) / denominator
+    floor_coefficient = (
+        float(floor_plane_value) - normal_dot * float(wall_plane_value)
+    ) / denominator
+    origin = tuple(
+        wall_coefficient * wall_normal[index]
+        + floor_coefficient * floor_normal[index]
+        for index in range(3)
+    )
+    return origin, direction
+
+
+def project_point_to_line(point, origin, direction):
+    """Orthogonally project a Pose/XYZ point onto origin+t*direction."""
+    position = _pose_position_tuple(point) if isinstance(point, Pose) else tuple(point)
+    if len(position) != 3 or not all(math.isfinite(float(v)) for v in position):
+        raise ValueError("point to project must be a finite XYZ vector")
+    origin = tuple(float(value) for value in origin)
+    direction = _unit_vector(direction, "line direction")
+    parameter = _vector_dot(
+        direction,
+        tuple(float(position[index]) - origin[index] for index in range(3)),
+    )
+    return tuple(
+        origin[index] + parameter * direction[index] for index in range(3)
+    )
+
+
+def compute_seam_local_frame(
+    d_real,
+    wall_normal,
+    floor_normal,
+    approach_reference=None,
+):
+    """Build orthonormal travel/weave/approach axes for the actual seam."""
+    d_real = _unit_vector(d_real, "actual seam direction")
+    wall_normal = _unit_vector(wall_normal, "wall normal")
+    floor_normal = _unit_vector(floor_normal, "floor normal")
+    approach = _unit_vector(
+        tuple(wall_normal[index] + floor_normal[index] for index in range(3)),
+        "wall/floor approach bisector",
+    )
+    if approach_reference is not None:
+        reference = _unit_vector(approach_reference, "taught TCP approach")
+        if _vector_dot(approach, reference) < 0.0:
+            approach = tuple(-value for value in approach)
+    weave = _unit_vector(
+        _vector_cross(d_real, approach), "geometry-derived weave direction"
+    )
+    approach = _unit_vector(
+        _vector_cross(weave, d_real), "orthogonalized approach direction"
+    )
+    return d_real, weave, approach
+
+
+def compute_corrected_seam_endpoints(taught_start, taught_goal, origin, d_real):
+    """Project taught longitudinal endpoints onto the actual seam line."""
+    start_xyz = project_point_to_line(taught_start, origin, d_real)
+    goal_xyz = project_point_to_line(taught_goal, origin, d_real)
+    start = copy.deepcopy(taught_start)
+    goal = copy.deepcopy(taught_goal)
+    start.position.x, start.position.y, start.position.z = start_xyz
+    goal.position.x, goal.position.y, goal.position.z = goal_xyz
+    corrected_direction = seam_direction(start, goal)
+    direction_dot = _vector_dot(corrected_direction, d_real)
+    if direction_dot < 1.0 - 1e-6:
+        raise ValueError(
+            "projected START→GOAL direction does not match actual seam line "
+            f"(dot={direction_dot:.9f})"
+        )
+    return start, goal, direction_dot
+
+
+def compute_corrected_seam_geometry(
+    taught_start,
+    taught_goal,
+    wall_plane,
+    floor_plane,
+    approach_reference=None,
+):
+    """Compute a two-plane seam line and project taught endpoints onto it."""
+    if not pose_is_valid(taught_start) or not pose_is_valid(taught_goal):
+        raise ValueError("taught START/GOAL poses must be valid")
+    d_teach = seam_direction(taught_start, taught_goal)
+    wall_normal = _unit_vector(wall_plane[0], "wall normal")
+    floor_normal = _unit_vector(floor_plane[0], "floor normal")
+    d_real = compute_real_seam_direction(
+        wall_normal, floor_normal, d_teach
+    )
+    origin, line_direction = compute_plane_intersection_line(
+        wall_normal,
+        wall_plane[1],
+        floor_normal,
+        floor_plane[1],
+        d_teach,
+    )
+    # Both helpers use the same sign reference; retain the explicit direction
+    # result as a consistency check against future implementation changes.
+    if _vector_dot(d_real, line_direction) < 1.0 - 1e-9:
+        raise ValueError("inconsistent actual seam directions")
+    start, goal, direction_dot = compute_corrected_seam_endpoints(
+        taught_start, taught_goal, origin, d_real
+    )
+    d_real, e_w, e_a = compute_seam_local_frame(
+        d_real,
+        wall_normal,
+        floor_normal,
+        approach_reference,
+    )
+    before = math.dist(
+        _pose_position_tuple(taught_start), _pose_position_tuple(taught_goal)
+    )
+    after = math.dist(_pose_position_tuple(start), _pose_position_tuple(goal))
+    return CorrectedSeamGeometry(
+        start=start,
+        goal=goal,
+        taught_start=_pose_position_tuple(taught_start),
+        taught_goal=_pose_position_tuple(taught_goal),
+        origin=origin,
+        d_teach=d_teach,
+        d_real=d_real,
+        e_a=e_a,
+        e_w=e_w,
+        wall_normal=wall_normal,
+        wall_plane_value=float(wall_plane[1]),
+        floor_normal=floor_normal,
+        floor_plane_value=float(floor_plane[1]),
+        length_before=before,
+        length_after=after,
+        direction_dot=direction_dot,
+    )
+
+
+def compute_safe_weld_approach(
+    corrected_start,
+    d_real,
+    e_a,
+    safe_distance_m,
+    lead_distance_m,
+):
+    """Return fixed-attitude safe and pre-start poses for corner approach."""
+    if not pose_is_valid(corrected_start):
+        raise ValueError("corrected weld START pose is invalid")
+    d_real = _unit_vector(d_real, "actual seam direction")
+    e_a = _unit_vector(e_a, "torch approach direction")
+    if abs(_vector_dot(d_real, e_a)) > 1e-6:
+        raise ValueError("actual seam and torch approach directions are not orthogonal")
+    safe_distance_m = float(safe_distance_m)
+    lead_distance_m = float(lead_distance_m)
+    if not math.isfinite(safe_distance_m) or safe_distance_m <= 0.0:
+        raise ValueError("safe approach distance must be positive and finite")
+    if not math.isfinite(lead_distance_m) or lead_distance_m < 0.0:
+        raise ValueError("pre-start lead distance must be non-negative and finite")
+
+    lead_pose = copy.deepcopy(corrected_start)
+    for index, axis in enumerate(("x", "y", "z")):
+        setattr(
+            lead_pose.position,
+            axis,
+            getattr(corrected_start.position, axis)
+            - lead_distance_m * d_real[index],
+        )
+    safe_pose = copy.deepcopy(lead_pose)
+    for index, axis in enumerate(("x", "y", "z")):
+        setattr(
+            safe_pose.position,
+            axis,
+            getattr(lead_pose.position, axis) + safe_distance_m * e_a[index],
+        )
+
+    safe_offset = tuple(
+        getattr(safe_pose.position, axis) - getattr(lead_pose.position, axis)
+        for axis in ("x", "y", "z")
+    )
+    if _vector_dot(_unit_vector(safe_offset), e_a) < 1.0 - 1e-6:
+        raise ValueError("safe approach offset is not aligned with e_a")
+    if lead_distance_m > 1e-9:
+        lead_vector = tuple(
+            getattr(corrected_start.position, axis)
+            - getattr(lead_pose.position, axis)
+            for axis in ("x", "y", "z")
+        )
+        if _vector_dot(_unit_vector(lead_vector), d_real) < 1.0 - 1e-6:
+            raise ValueError("pre-start lead is not aligned with d_real")
+    return safe_pose, lead_pose
+
 # lead 는 weld seam 의 시작점과 끝점을 기준으로, 용접을 시작하기 전과 끝난 후에 로봇이 움직일 수 있는 여유 공간을 제공하는 포즈를 계산하는 함수입니다.
 # lead out은 arc off를 하면서 로봇이 움직일 수 있는 여유 공간을 제공하는 포즈를 계산합니다.
 def seam_lead_poses(start, goal, lead_in_m=0.0, lead_out_m=0.0):
@@ -803,10 +1153,22 @@ def update_weld_scenario_motion_values(
         lead_in_mm * 0.001,
         lead_out_mm * 0.001,
     )
-    motion["points"] = (
-        copy.deepcopy(lead_start if lead_in_mm > 1e-6 else seam_start),
-        copy.deepcopy(lead_end if lead_out_mm > 1e-6 else seam_goal),
-    )
+    if motion.get("weld_weave_enabled", False):
+        core_points = tuple(motion.get("usable_weld_points", ()))
+        if len(core_points) < 2:
+            raise ValueError("Generated weave motion has no usable weave points")
+        updated_points = []
+        if lead_in_mm > 1e-6:
+            updated_points.append(copy.deepcopy(lead_start))
+        updated_points.extend(copy.deepcopy(core_points))
+        if lead_out_mm > 1e-6:
+            updated_points.append(copy.deepcopy(lead_end))
+        motion["points"] = tuple(updated_points)
+    else:
+        motion["points"] = (
+            copy.deepcopy(lead_start if lead_in_mm > 1e-6 else seam_start),
+            copy.deepcopy(lead_end if lead_out_mm > 1e-6 else seam_goal),
+        )
     motion["lead_start"] = copy.deepcopy(lead_start)
     motion["lead_end"] = copy.deepcopy(lead_end)
     motion["lead_in_mm"] = lead_in_mm
@@ -837,7 +1199,31 @@ def update_weld_scenario_motion_values(
             points = tuple(linked.get("points", ()))
             if not points:
                 raise ValueError("Lead-in approach has no path points")
-            linked["points"] = points[:-1] + (copy.deepcopy(lead_start),)
+            if linked.get("safe_retract_geometry", False):
+                e_a = _unit_vector(
+                    linked.get("safe_approach_direction", ()),
+                    "saved safe approach direction",
+                )
+                safe_distance_m = (
+                    float(linked.get("safe_approach_mm", 0.0)) * 0.001
+                )
+                if safe_distance_m <= 0.0:
+                    raise ValueError("Saved safe approach distance is invalid")
+                safe_over_lead = copy.deepcopy(lead_start)
+                for index, axis in enumerate(("x", "y", "z")):
+                    setattr(
+                        safe_over_lead.position,
+                        axis,
+                        getattr(lead_start.position, axis)
+                        + safe_distance_m * e_a[index],
+                    )
+                linked["points"] = (
+                    copy.deepcopy(points[0]),
+                    safe_over_lead,
+                    copy.deepcopy(lead_start),
+                )
+            else:
+                linked["points"] = points[:-1] + (copy.deepcopy(lead_start),)
             linked["lead_start"] = copy.deepcopy(lead_start)
             linked["lead_in_mm"] = lead_in_mm
             linked["lead_out_mm"] = lead_out_mm
@@ -1429,12 +1815,19 @@ def read_last_execution_settings(path):
         ("weld_adaptive_baseline_mm", float),
         ("weld_lead_in_mm", float),
         ("weld_lead_out_mm", float),
+        ("weld_safe_approach_mm", float),
+        ("weld_pre_start_lead_mm", float),
         ("weld_arc_off_delay_ms", float),
         ("weld_arc_stabilize_s", float),
         ("weld_tcp_speed_mm_s", float),
         ("weld_fixed_tilt_x_deg", float),
         ("weld_fixed_tilt_y_deg", float),
         ("weld_fixed_tilt_z_deg", float),
+        ("weld_weave_pattern", str),
+        ("weld_weave_amplitude_mm", float),
+        ("weld_weave_cycles", lambda value: int(float(value))),
+        ("weld_weave_samples_per_cycle", lambda value: int(float(value))),
+        ("weld_weave_axis", str),
     ):
         value = cast("execution_conditions", key, converter)
         if value is not None:
@@ -1445,6 +1838,11 @@ def read_last_execution_settings(path):
     )
     if adaptive_enabled is not None:
         motion["weld_adaptive_line_energy"] = adaptive_enabled
+    weave_enabled = cast_bool(
+        "execution_conditions", "weld_weave_enabled"
+    )
+    if weave_enabled is not None:
+        motion["weld_weave_enabled"] = weave_enabled
 
     return {"settings": settings, "motion": motion}
 
@@ -3622,10 +4020,16 @@ class WeldGuiNode(Node):
         cycles,
         samples_per_cycle,
         transverse_axis,
+        pattern,
         visible,
     ):
         try:
-            points = weaving_from_path(
+            generator = (
+                circular_weaving_from_path
+                if pattern == "circle"
+                else weaving_from_path
+            )
+            points = generator(
                 source_points,
                 amplitude,
                 cycles,
@@ -3639,8 +4043,9 @@ class WeldGuiNode(Node):
         self.ui.post(self.ui.set_new_points, points, "weave")
         self.ui.post(
             self.ui.log,
-            f"Applied weave to taught seam · amplitude=±{amplitude:.3f} m, "
-            f"cycles={cycles}, axis={transverse_axis}",
+            f"Applied {pattern} weave to taught seam · "
+            f"radius/amplitude={amplitude:.3f} m, cycles={cycles}, "
+            f"axis={transverse_axis}",
         )
 
     def capture_tcp(self, replace_index, visible, planning_group):
@@ -4849,11 +5254,25 @@ class WeldActionGui:
         self.interpolation_step_mm = tk.DoubleVar(value=5.0)
         self.linear_motion_profile = tk.BooleanVar(value=True)
         self.show_path = tk.BooleanVar(value=True)
-        self.weave_amplitude_mm = tk.DoubleVar(value=3.0)
-        self.weave_cycles = tk.IntVar(value=4)
-        self.weave_samples = tk.IntVar(value=8)
-        self.weave_axis = tk.StringVar(value="tool_y")
+        self.weave_amplitude_mm = tk.DoubleVar(
+            value=last_execution_motion.get("weld_weave_amplitude_mm", 3.0)
+        )
+        self.weave_cycles = tk.IntVar(
+            value=last_execution_motion.get("weld_weave_cycles", 4)
+        )
+        self.weave_samples = tk.IntVar(
+            value=last_execution_motion.get("weld_weave_samples_per_cycle", 8)
+        )
+        self.weave_axis = tk.StringVar(
+            value=last_execution_motion.get("weld_weave_axis", "tool_y")
+        )
         self.weave_base = tk.StringVar(value="linear")
+        self.weave_pattern = tk.StringVar(
+            value=last_execution_motion.get("weld_weave_pattern", "sine")
+        )
+        self.weld_weave_enabled = tk.BooleanVar(
+            value=last_execution_motion.get("weld_weave_enabled", False)
+        )
         self.straight_reference = tk.StringVar(value="world")
         self.straight_axis = tk.StringVar(value="+X")
         self.straight_start_mode = tk.StringVar(value="Current TCP")
@@ -4912,7 +5331,7 @@ class WeldActionGui:
         self.wall_probe_axis = tk.StringVar(value="AUTO ⟂ taught seam (XY)")
         self.floor_probe_axis = tk.StringVar(value="World Z")
         self.seam_orientation_mode = tk.StringVar(
-            value="Follow sensed seam yaw"
+            value=WAIT_FIXED_TILT_ORIENTATION_MODE
         )
         self.weld_fixed_tilt_x_deg = tk.DoubleVar(
             value=last_execution_motion.get("weld_fixed_tilt_x_deg", 0.0)
@@ -4937,13 +5356,20 @@ class WeldActionGui:
         self.touch_settle_seconds = tk.DoubleVar(value=0.7)
         self.seam_wall_offset_mm = tk.DoubleVar(value=0.0)
         self.seam_floor_offset_mm = tk.DoubleVar(value=0.0)
+        self.weld_safe_approach_mm = tk.DoubleVar(
+            value=last_execution_motion.get("weld_safe_approach_mm", 30.0)
+        )
+        self.weld_pre_start_lead_mm = tk.DoubleVar(
+            value=last_execution_motion.get("weld_pre_start_lead_mm", 10.0)
+        )
         # Current qualified starting values. They are copied into a generated
         # weld scenario at Build time, so the generated sequence is immutable
         # even if the GUI is edited afterwards.
-        # Use a qualified 10 mm run-in every launch.  Old feedback logs often
-        # contain the former 5 mm value, which is too short to isolate arc
-        # establishment and acceleration from the usable seam.
-        self.weld_lead_in_mm = tk.DoubleVar(value=10.0)
+        # Prefer the value that actually ran in the loaded/latest feedback log.
+        # Ten millimetres remains the fallback for a fresh installation.
+        self.weld_lead_in_mm = tk.DoubleVar(
+            value=last_execution_motion.get("weld_lead_in_mm", 10.0)
+        )
         self.weld_lead_out_mm = tk.DoubleVar(
             value=last_execution_motion.get("weld_lead_out_mm", 5.0)
         )
@@ -4990,6 +5416,7 @@ class WeldActionGui:
         }
         self.raw_two_touch_seam = []
         self.corrected_two_touch_seam = []
+        self.corrected_seam_geometry = None
         self.computed_seam_endpoints = {"start": None, "goal": None}
         self.computed_seam_wait_points = {"start": None, "goal": None}
         self.seam_teaching_reference = None
@@ -5628,8 +6055,9 @@ class WeldActionGui:
             tcp_teaching,
             text=(
                 "Seam correction reference: legacy modes use TCP 1 + TCP 2; "
-                "Wait + fixed-tilt mode needs only START WAIT + GOAL WAIT. "
-                "Corrected Weld START/GOAL are generated and saved automatically."
+                "Wait + fixed-tilt mode derives the seam from START/GOAL WAIT. "
+                "Corrected START/GOAL are generated automatically; Weld END is "
+                "required for the final return move."
             ),
         ).pack(anchor=tk.W, pady=(0, 2))
 
@@ -5685,6 +6113,14 @@ class WeldActionGui:
             text="Generate weave path",
             command=self.generate_weave,
         ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(weaving, text="pattern").pack(side=tk.LEFT)
+        ttk.Combobox(
+            weaving,
+            textvariable=self.weave_pattern,
+            values=("sine", "circle"),
+            state="readonly",
+            width=7,
+        ).pack(side=tk.LEFT, padx=(3, 8))
         ttk.Label(weaving, text="base").pack(side=tk.LEFT)
         ttk.Combobox(
             weaving,
@@ -5839,6 +6275,35 @@ class WeldActionGui:
             ),
         ).pack(side=tk.LEFT, padx=(8, 0))
 
+        safe_approach_controls = ttk.Frame(touch_corner)
+        safe_approach_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(
+            safe_approach_controls, text="Safe approach distance mm"
+        ).pack(side=tk.LEFT)
+        ttk.Spinbox(
+            safe_approach_controls,
+            from_=1.0,
+            to=200.0,
+            increment=1.0,
+            textvariable=self.weld_safe_approach_mm,
+            width=7,
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(
+            safe_approach_controls, text="Pre-start lead distance mm"
+        ).pack(side=tk.LEFT)
+        ttk.Spinbox(
+            safe_approach_controls,
+            from_=0.0,
+            to=100.0,
+            increment=1.0,
+            textvariable=self.weld_pre_start_lead_mm,
+            width=7,
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(
+            safe_approach_controls,
+            text="touch-corrected path: safe → -e_a → lead → +d_real → START",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
         weld_lead_controls = ttk.Frame(touch_corner)
         weld_lead_controls.pack(fill=tk.X, pady=(0, 3))
         ttk.Label(
@@ -5889,6 +6354,54 @@ class WeldActionGui:
                 "weld stroke uses fixed TCP target; global scale remains for approach/return"
             ),
         ).pack(side=tk.LEFT, padx=(8, 0))
+
+        weld_weave_controls = ttk.Frame(touch_corner)
+        weld_weave_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Checkbutton(
+            weld_weave_controls,
+            text="use weave in weld scenario",
+            variable=self.weld_weave_enabled,
+        ).pack(side=tk.LEFT)
+        ttk.Label(weld_weave_controls, text="pattern").pack(
+            side=tk.LEFT, padx=(10, 2)
+        )
+        ttk.Combobox(
+            weld_weave_controls,
+            textvariable=self.weave_pattern,
+            values=("sine", "circle"),
+            state="readonly",
+            width=7,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(weld_weave_controls, text="amplitude/radius mm").pack(
+            side=tk.LEFT
+        )
+        ttk.Spinbox(
+            weld_weave_controls, from_=0.1, to=50.0, increment=0.1,
+            textvariable=self.weave_amplitude_mm, width=6,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(weld_weave_controls, text="cycles").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            weld_weave_controls, from_=1, to=100, increment=1,
+            textvariable=self.weave_cycles, width=5,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(weld_weave_controls, text="samples/cycle").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            weld_weave_controls, from_=4, to=50, increment=1,
+            textvariable=self.weave_samples, width=5,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(weld_weave_controls, text="radial/transverse axis").pack(
+            side=tk.LEFT
+        )
+        ttk.Combobox(
+            weld_weave_controls,
+            textvariable=self.weave_axis,
+            values=(
+                "tool_x", "tool_y", "tool_z",
+                "world_x", "world_y", "world_z",
+            ),
+            state="readonly",
+            width=10,
+        ).pack(side=tk.LEFT, padx=(3, 8))
 
         adaptive_controls = ttk.Frame(touch_corner)
         adaptive_controls.pack(fill=tk.X, pady=(0, 3))
@@ -7183,12 +7696,15 @@ class WeldActionGui:
         )
         if not path:
             return
+        execution_defaults = read_last_execution_settings(path).get("motion", {})
+        applied_defaults, invalid_defaults = (
+            self._apply_loaded_weld_motion_defaults(execution_defaults)
+        )
         teaching_raw, touch_raw = read_teaching_and_touch_snapshot(path)
-        if not teaching_raw and not touch_raw:
+        if not teaching_raw and not touch_raw and not applied_defaults:
             self.error(
-                f"No teaching/touch snapshot found in {Path(path).name} "
-                "(log predates this feature, or no poses were taught yet "
-                "when it ran)"
+                f"No teaching/touch snapshot or reusable weld motion settings "
+                f"found in {Path(path).name}"
             )
             return
 
@@ -7258,10 +7774,93 @@ class WeldActionGui:
                 if applied_touches
                 else ""
             )
+            + (
+                f", defaults={', '.join(applied_defaults)}"
+                if applied_defaults else ""
+            )
         )
+        skipped.extend(invalid_defaults)
         if skipped:
             summary += f" · skipped: {', '.join(skipped)}"
         self.log(summary)
+
+    def _apply_loaded_weld_motion_defaults(self, motion):
+        """Apply persisted seam-motion values to the next Build defaults."""
+        specifications = (
+            ("weld_fixed_tilt_x_deg", self.weld_fixed_tilt_x_deg, -180.0, 180.0),
+            ("weld_fixed_tilt_y_deg", self.weld_fixed_tilt_y_deg, -180.0, 180.0),
+            ("weld_fixed_tilt_z_deg", self.weld_fixed_tilt_z_deg, -180.0, 180.0),
+            ("weld_lead_in_mm", self.weld_lead_in_mm, 0.0, 100.0),
+            ("weld_lead_out_mm", self.weld_lead_out_mm, 0.0, 100.0),
+            (
+                "weld_safe_approach_mm",
+                self.weld_safe_approach_mm,
+                1.0,
+                200.0,
+            ),
+            (
+                "weld_pre_start_lead_mm",
+                self.weld_pre_start_lead_mm,
+                0.0,
+                100.0,
+            ),
+            ("weld_tcp_speed_mm_s", self.weld_tcp_speed_mm_s, 0.1, 100.0),
+        )
+        applied = []
+        invalid = []
+        for key, variable, minimum, maximum in specifications:
+            if key not in motion:
+                continue
+            try:
+                value = float(motion[key])
+            except (TypeError, ValueError):
+                invalid.append(f"{key} (not numeric)")
+                continue
+            if not math.isfinite(value) or not minimum <= value <= maximum:
+                invalid.append(f"{key} (outside {minimum:g}..{maximum:g})")
+                continue
+            variable.set(value)
+            applied.append(key)
+        if any(key.startswith("weld_fixed_tilt_") for key in applied):
+            self.seam_orientation_mode.set(WAIT_FIXED_TILT_ORIENTATION_MODE)
+            self._update_seam_yaw_status()
+        for key, variable, allowed in (
+            ("weld_weave_pattern", self.weave_pattern, {"sine", "circle"}),
+            (
+                "weld_weave_axis",
+                self.weave_axis,
+                {"tool_x", "tool_y", "tool_z", "world_x", "world_y", "world_z"},
+            ),
+        ):
+            if key not in motion:
+                continue
+            value = str(motion[key]).strip().lower()
+            if value not in allowed:
+                invalid.append(f"{key} (unsupported {value})")
+                continue
+            variable.set(value)
+            applied.append(key)
+        for key, variable, minimum, maximum in (
+            ("weld_weave_amplitude_mm", self.weave_amplitude_mm, 0.1, 50.0),
+            ("weld_weave_cycles", self.weave_cycles, 1, 100),
+            ("weld_weave_samples_per_cycle", self.weave_samples, 4, 50),
+        ):
+            if key not in motion:
+                continue
+            try:
+                value = float(motion[key])
+            except (TypeError, ValueError):
+                invalid.append(f"{key} (not numeric)")
+                continue
+            if not math.isfinite(value) or not minimum <= value <= maximum:
+                invalid.append(f"{key} (outside {minimum:g}..{maximum:g})")
+                continue
+            variable.set(int(value) if isinstance(variable, tk.IntVar) else value)
+            applied.append(key)
+        if "weld_weave_enabled" in motion:
+            self.weld_weave_enabled.set(bool(motion["weld_weave_enabled"]))
+            applied.append("weld_weave_enabled")
+        return applied, invalid
 
     def _finish_weld_feedback_record(self, result, final_status=None):
         with self.weld_feedback_lock:
@@ -7807,6 +8406,11 @@ class WeldActionGui:
             delay_s = max(0.0, float(step.get("arc_off_delay_s", 0.0)))
             configured_speed = max(0.0, float(step.get("tcp_speed_m_s", 0.0)))
             adaptive_enabled = bool(step.get("adaptive_line_energy", False))
+            path_to_seam_speed_factor = float(
+                step.get("path_to_seam_speed_factor", 1.0)
+            )
+            if not 0.0 < path_to_seam_speed_factor <= 1.0:
+                raise ValueError("invalid path/seam speed factor")
         except (TypeError, ValueError):
             return False, "ARC OFF watcher timing is invalid"
 
@@ -7903,16 +8507,16 @@ class WeldActionGui:
                 else 0.0
             )
             if adaptive_speed > 1e-6:
-                trigger_speed = adaptive_speed
-                speed_source = "adaptive_line_energy_speed"
+                trigger_speed = adaptive_speed * path_to_seam_speed_factor
+                speed_source = "adaptive_line_energy_along_seam_speed"
                 speed_ready = True
             elif configured_speed > 1e-6:
-                trigger_speed = configured_speed
-                speed_source = "tcp_speed_setpoint"
+                trigger_speed = configured_speed * path_to_seam_speed_factor
+                speed_source = "tcp_setpoint_projected_along_seam"
                 speed_ready = True
             else:
-                trigger_speed = measured_speed
-                speed_source = "actual_tf_speed"
+                trigger_speed = measured_speed * path_to_seam_speed_factor
+                speed_source = "actual_tf_speed_projected_along_seam"
                 # Require several real samples so one timestamp jump cannot arm
                 # the pre-OFF calculation.
                 speed_ready = valid_speed_samples >= 3 and trigger_speed > 1e-4
@@ -8014,6 +8618,7 @@ class WeldActionGui:
                 self.seam_probe_stops[name] = None
         self.raw_two_touch_seam = []
         self.corrected_two_touch_seam = []
+        self.corrected_seam_geometry = None
         self.computed_seam_endpoints = {"start": None, "goal": None}
         self.computed_seam_wait_points = {"start": None, "goal": None}
         self.seam_auto_returned_kinds.clear()
@@ -8040,13 +8645,14 @@ class WeldActionGui:
             return
         fixed_tilt_mode = self._wait_fixed_tilt_mode_enabled()
         required = (
-            ("weld_start_wait", "weld_goal_wait")
+            ("weld_start_wait", "weld_goal_wait", "weld_finish")
             if fixed_tilt_mode
             else (
                 "weld_start_wait",
                 "weld_start",
                 "weld_goal_wait",
                 "weld_end",
+                "weld_finish",
             )
         )
         missing = [
@@ -8087,7 +8693,8 @@ class WeldActionGui:
             "Automatic Seam Correction",
             "Execute the complete four-probe correction?\n\n"
             "START wait → wall/base → GOAL wait → wall/base\n"
-            "→ compute seam/yaw → save START/GOAL YAML\n\n"
+            "→ compute seam/yaw → save START/GOAL YAML\n"
+            "→ move to 7 · Weld end pose\n\n"
             f"{orientation_note}\n\n"
             "Each DI8 edge stops the probe and returns to its probe start.\n"
             "The taught START/GOAL wait poses remain unchanged.",
@@ -8241,7 +8848,6 @@ class WeldActionGui:
                 )
                 if teaching_reference is None:
                     return False
-                pose_name = "weld_start" if endpoint == "start" else "weld_end"
                 (
                     _reference,
                     wall_normal,
@@ -8249,16 +8855,15 @@ class WeldActionGui:
                     _wall_label,
                     _floor_label,
                 ) = self._seam_geometry_settings(require_teaching=True)
-                seam_point = generalized_corner_endpoint_from_two_touches(
-                    wall,
-                    floor,
-                    teaching_reference[pose_name][3],
-                    teaching_reference["weld_start"][3],
-                    teaching_reference["weld_end"][3],
+                geometry = self._compute_touch_corrected_seam_geometry(
+                    teaching_reference,
                     wall_normal,
                     floor_normal,
                     float(self.seam_wall_offset_mm.get()) * 0.001,
                     float(self.seam_floor_offset_mm.get()) * 0.001,
+                )
+                seam_point = (
+                    geometry.start if endpoint == "start" else geometry.goal
                 )
             self.node.publish_touch_geometry(
                 endpoint, wall, floor, seam_point
@@ -8455,12 +9060,60 @@ class WeldActionGui:
             )
             return
         success = self.path_kind == "di8_four_touch_corrected"
-        self._finish_automatic_seam_correction(
+        if not success:
+            self._finish_automatic_seam_correction(
+                False, "corrected seam could not be adopted"
+            )
+            return
+        finish_data = self.taught_robot_poses.get("weld_finish")
+        if finish_data is None or finish_data[0] != "right_manipulator":
+            self._finish_automatic_seam_correction(
+                False, "7 · Weld end pose is unavailable"
+            )
+            return
+        group, names, joints, tcp = finish_data
+        finish_step = {
+            "type": "named_pose",
+            "pose_name": "weld_finish",
+            "pose_label": TEACHING_POSES["weld_finish"],
+            "planning_group": group,
+            "joint_names": tuple(names),
+            "positions": tuple(joints),
+            "tcp_pose": copy.deepcopy(tcp),
+            "velocity_scale": max(
+                0.01, min(1.0, self.velocity_percent.get() / 100.0)
+            ),
+            "tcp_speed_m_s": 0.0,
+            "touch_guard": True,
+            "continue_after_touch": False,
+            "planning_attempts": 5,
+            "planning_time": 5.0,
+        }
+        self._set_auto_seam_status(
+            "CORRECTION SAVED · moving to 7 · Weld end pose"
+        )
+        threading.Thread(
+            target=self._automatic_seam_end_pose_worker,
+            args=(finish_step,),
+            daemon=True,
+        ).start()
+
+    def _automatic_seam_end_pose_worker(self, finish_step):
+        if not self.seam_auto_running:
+            return
+        success, message = self.node.run_sequence_named_pose(
+            finish_step, True
+        )
+        if not self.seam_auto_running:
+            return
+        self.post(
+            self._finish_automatic_seam_correction,
             success,
             (
-                "four touches complete; corrected path and YAML adopted"
+                "four touches complete; corrected path/YAML adopted; "
+                "reached 7 · Weld end pose"
                 if success
-                else "corrected seam could not be adopted"
+                else f"correction saved, but Weld end move failed: {message}"
             ),
         )
 
@@ -8516,6 +9169,122 @@ class WeldActionGui:
             "floor", teaching_reference
         )
         return teaching_reference, wall_normal, floor_normal, wall_label, floor_label
+
+    def _compute_touch_corrected_seam_geometry(
+        self,
+        teaching_reference,
+        wall_normal,
+        floor_normal,
+        wall_offset,
+        floor_offset,
+        *,
+        log_debug=False,
+    ):
+        """Estimate common surface planes and their projected seam segment."""
+        wall_touches = [
+            self.seam_probe_touches[name]
+            for name in ("start_wall", "goal_wall")
+            if self.seam_probe_touches.get(name) is not None
+        ]
+        floor_touches = [
+            self.seam_probe_touches[name]
+            for name in ("start_floor", "goal_floor")
+            if self.seam_probe_touches.get(name) is not None
+        ]
+        if not wall_touches or not floor_touches:
+            raise ValueError(
+                "actual seam geometry needs at least one wall and one floor touch"
+            )
+        taught_start = teaching_reference["weld_start"][3]
+        taught_goal = teaching_reference["weld_end"][3]
+        wall_plane = compute_surface_plane(
+            wall_normal, wall_touches, wall_offset
+        )
+        floor_plane = compute_surface_plane(
+            floor_normal, floor_touches, floor_offset
+        )
+        start_tool_z = _quaternion_rotate_vector(
+            taught_start.orientation, (0.0, 0.0, 1.0)
+        )
+        goal_tool_z = _quaternion_rotate_vector(
+            taught_goal.orientation, (0.0, 0.0, 1.0)
+        )
+        approach_reference = tuple(
+            start_tool_z[index] + goal_tool_z[index] for index in range(3)
+        )
+        try:
+            approach_reference = _unit_vector(
+                approach_reference, "mean taught Tool +Z approach"
+            )
+        except ValueError:
+            approach_reference = _unit_vector(
+                start_tool_z, "taught START Tool +Z approach"
+            )
+        geometry = compute_corrected_seam_geometry(
+            taught_start,
+            taught_goal,
+            wall_plane,
+            floor_plane,
+            approach_reference,
+        )
+        start_wait_data = self.taught_robot_poses.get("weld_start_wait")
+        if start_wait_data is not None and pose_is_valid(start_wait_data[3]):
+            wait_outward = tuple(
+                getattr(start_wait_data[3].position, axis)
+                - getattr(geometry.start.position, axis)
+                for axis in ("x", "y", "z")
+            )
+            # The taught WAIT is the strongest available sign convention for
+            # "away from workpiece".  Only its sign is used; e_a remains the
+            # orthogonal wall/floor-normal bisector.
+            if math.sqrt(_vector_dot(wait_outward, wait_outward)) > 1e-4:
+                geometry.d_real, geometry.e_w, geometry.e_a = (
+                    compute_seam_local_frame(
+                        geometry.d_real,
+                        geometry.wall_normal,
+                        geometry.floor_normal,
+                        wait_outward,
+                    )
+                )
+        self.corrected_seam_geometry = geometry
+        if log_debug:
+            self._log_corrected_seam_geometry(geometry)
+        return geometry
+
+    def _log_corrected_seam_geometry(self, geometry):
+        vector = lambda values: "(" + ", ".join(
+            f"{float(value):+.6f}" for value in values
+        ) + ")"
+        position = lambda pose: vector(_pose_position_tuple(pose))
+        angle_deg = math.degrees(math.acos(max(
+            -1.0, min(1.0, _vector_dot(geometry.d_teach, geometry.d_real))
+        )))
+        self.log(
+            "SEAM GEOMETRY DEBUG · "
+            f"d_teach={vector(geometry.d_teach)} · "
+            f"wall_normal={vector(geometry.wall_normal)}, "
+            f"c_w={geometry.wall_plane_value:+.6f} · "
+            f"floor_normal={vector(geometry.floor_normal)}, "
+            f"c_f={geometry.floor_plane_value:+.6f} · "
+            f"d_real={vector(geometry.d_real)} · P0={vector(geometry.origin)}"
+        )
+        self.log(
+            "SEAM PROJECTION DEBUG · "
+            f"P_start_teach={vector(geometry.taught_start)} · "
+            f"P_start_corrected={position(geometry.start)} · "
+            f"P_goal_teach={vector(geometry.taught_goal)} · "
+            f"P_goal_corrected={position(geometry.goal)}"
+        )
+        self.log(
+            "SEAM FRAME DEBUG · "
+            f"e_a={vector(geometry.e_a)} · e_w={vector(geometry.e_w)} · "
+            f"length_before={geometry.length_before:.6f} m · "
+            f"length_after={geometry.length_after:.6f} m · "
+            f"angle(d_teach,d_real)={angle_deg:.4f} deg · "
+            f"dot(d_real,e_a)={_vector_dot(geometry.d_real, geometry.e_a):+.3e} · "
+            f"dot(d_real,e_w)={_vector_dot(geometry.d_real, geometry.e_w):+.3e} · "
+            f"dot(e_a,e_w)={_vector_dot(geometry.e_a, geometry.e_w):+.3e}"
+        )
 
     def start_automatic_touch_probe(self, kind, skip_confirmation=False):
         if kind not in CORNER_TOUCH_NAMES:
@@ -8756,16 +9525,19 @@ class WeldActionGui:
                 wall_label,
                 floor_label,
             ) = self._seam_geometry_settings(require_teaching=True)
-            point = generalized_corner_endpoint_from_two_touches(
-                wall,
-                floor,
-                teaching_reference[pose_name][3],
-                teaching_reference["weld_start"][3],
-                teaching_reference["weld_end"][3],
+            geometry = self._compute_touch_corrected_seam_geometry(
+                teaching_reference,
                 wall_normal,
                 floor_normal,
                 wall_offset,
                 floor_offset,
+                log_debug=all(
+                    self.seam_probe_touches.get(name) is not None
+                    for name in CORNER_TOUCH_NAMES
+                ),
+            )
+            point = copy.deepcopy(
+                geometry.start if endpoint == "start" else geometry.goal
             )
             wait_point = copy.deepcopy(wait_data[3])
         except (ValueError, tk.TclError) as error:
@@ -8835,6 +9607,13 @@ class WeldActionGui:
                     "start": corrected_start,
                     "goal": corrected_goal,
                 }
+                if self.corrected_seam_geometry is not None:
+                    self.corrected_seam_geometry.start = copy.deepcopy(
+                        corrected_start
+                    )
+                    self.corrected_seam_geometry.goal = copy.deepcopy(
+                        corrected_goal
+                    )
                 self._update_seam_yaw_status(
                     self.computed_seam_endpoints["start"],
                     self.computed_seam_endpoints["goal"],
@@ -9096,6 +9875,8 @@ class WeldActionGui:
             count = int(self.corner_touch_count.get())
             lead_in_mm = float(self.weld_lead_in_mm.get())
             lead_out_mm = float(self.weld_lead_out_mm.get())
+            safe_approach_mm = float(self.weld_safe_approach_mm.get())
+            pre_start_lead_mm = float(self.weld_pre_start_lead_mm.get())
             arc_off_delay_ms = float(self.weld_arc_off_delay_ms.get())
             weld_tcp_speed_mm_s = float(self.weld_tcp_speed_mm_s.get())
             adaptive_enabled = bool(self.weld_adaptive_line_energy.get())
@@ -9103,6 +9884,12 @@ class WeldActionGui:
             adaptive_max_percent = float(self.weld_adaptive_max_percent.get())
             adaptive_filter_tau_s = float(self.weld_adaptive_filter_tau_s.get())
             adaptive_baseline_mm = float(self.weld_adaptive_baseline_mm.get())
+            weave_enabled = bool(self.weld_weave_enabled.get())
+            weave_pattern = self.weave_pattern.get().strip().lower()
+            weave_amplitude_mm = float(self.weave_amplitude_mm.get())
+            weave_cycles = int(self.weave_cycles.get())
+            weave_samples = int(self.weave_samples.get())
+            weave_axis = self.weave_axis.get().strip().lower()
             if (
                 not math.isfinite(weld_tcp_speed_mm_s)
                 or not 0.1 <= weld_tcp_speed_mm_s <= 100.0
@@ -9112,6 +9899,10 @@ class WeldActionGui:
                 raise ValueError("weld lead-in must be in 0..100 mm")
             if not 0.0 <= lead_out_mm <= 100.0:
                 raise ValueError("weld lead-out must be in 0..100 mm")
+            if not 1.0 <= safe_approach_mm <= 200.0:
+                raise ValueError("safe approach distance must be in 1..200 mm")
+            if not 0.0 <= pre_start_lead_mm <= 100.0:
+                raise ValueError("pre-start lead distance must be in 0..100 mm")
             if not 0.0 <= arc_off_delay_ms <= 2000.0:
                 raise ValueError("ARC OFF lead time must be in 0..2000 ms")
             if not 40.0 <= adaptive_min_percent <= 100.0:
@@ -9124,6 +9915,18 @@ class WeldActionGui:
                 raise ValueError("adaptive electrical filter must be in 0.2..5.0 s")
             if not 3.0 <= adaptive_baseline_mm <= 30.0:
                 raise ValueError("adaptive baseline length must be in 3..30 mm")
+            if weave_pattern not in ("sine", "circle"):
+                raise ValueError("weld weave pattern must be sine or circle")
+            if not 0.1 <= weave_amplitude_mm <= 50.0:
+                raise ValueError("weld weave amplitude/radius must be 0.1..50 mm")
+            if not 1 <= weave_cycles <= 100:
+                raise ValueError("weld weave cycles must be in 1..100")
+            minimum_samples = 8 if weave_pattern == "circle" else 4
+            if not minimum_samples <= weave_samples <= 50:
+                raise ValueError(
+                    f"{weave_pattern} weld weave samples/cycle must be in "
+                    f"{minimum_samples}..50"
+                )
             # Welding orientation is already finalized by seam correction.
             # In fixed-tilt mode it comes from WAIT + one Tool-XYZ RPY offset; in the
             # legacy modes it comes from the endpoint teaching.  Never apply a
@@ -9138,10 +9941,117 @@ class WeldActionGui:
             )
             has_lead_in = lead_in_mm > 1e-6
             has_lead_out = lead_out_mm > 1e-6
+            safe_approach = None
+            approach_lead = None
+            if start_is_sensed:
+                if self.corrected_seam_geometry is None:
+                    raise ValueError(
+                        "touch-corrected START has no computed seam local frame"
+                    )
+                safe_approach, approach_lead = compute_safe_weld_approach(
+                    start,
+                    self.corrected_seam_geometry.d_real,
+                    self.corrected_seam_geometry.e_a,
+                    safe_approach_mm * 0.001,
+                    pre_start_lead_mm * 0.001,
+                )
+                self.corrected_seam_geometry.safe_start = copy.deepcopy(
+                    safe_approach
+                )
+                self.corrected_seam_geometry.lead_start = copy.deepcopy(
+                    approach_lead
+                )
+                approach_vector = _unit_vector(tuple(
+                    getattr(approach_lead.position, axis)
+                    - getattr(safe_approach.position, axis)
+                    for axis in ("x", "y", "z")
+                ))
+                approach_alignment = _vector_dot(
+                    approach_vector,
+                    tuple(-value for value in self.corrected_seam_geometry.e_a),
+                )
+                lead_alignment = 1.0
+                if pre_start_lead_mm > 1e-6:
+                    lead_vector = _unit_vector(tuple(
+                        getattr(start.position, axis)
+                        - getattr(approach_lead.position, axis)
+                        for axis in ("x", "y", "z")
+                    ))
+                    lead_alignment = _vector_dot(
+                        lead_vector, self.corrected_seam_geometry.d_real
+                    )
+                fmt = lambda pose: "(" + ", ".join(
+                    f"{getattr(pose.position, axis):+.6f}"
+                    for axis in ("x", "y", "z")
+                ) + ")"
+                fmt_vector = lambda values: "(" + ", ".join(
+                    f"{float(value):+.6f}" for value in values
+                ) + ")"
+                self.log(
+                    "SAFE WELD APPROACH DEBUG · "
+                    f"P_start={fmt(start)} · "
+                    f"d_real={fmt_vector(self.corrected_seam_geometry.d_real)} · "
+                    f"e_a={fmt_vector(self.corrected_seam_geometry.e_a)} · "
+                    f"safe={safe_approach_mm:.1f} mm · "
+                    f"pre-start lead={pre_start_lead_mm:.1f} mm · "
+                    f"P_safe={fmt(safe_approach)} · "
+                    f"P_lead={fmt(approach_lead)} · "
+                    f"align(approach,-e_a)={approach_alignment:.9f} · "
+                    f"align(lead,d_real)={lead_alignment:.9f}"
+                )
+            seam_centerline = linear_pose_waypoints(start, goal, count)
+            if weave_enabled:
+                geometry_weave_direction = (
+                    self.corrected_seam_geometry.e_w
+                    if (
+                        (start_is_sensed or goal_is_sensed)
+                        and self.corrected_seam_geometry is not None
+                    )
+                    else None
+                )
+                weave_generator = (
+                    circular_weaving_from_path
+                    if weave_pattern == "circle"
+                    else weaving_from_path
+                )
+                usable_weld_points = weave_generator(
+                    seam_centerline,
+                    weave_amplitude_mm * 0.001,
+                    weave_cycles,
+                    weave_samples,
+                    weave_axis,
+                    geometry_weave_direction,
+                )
+                if geometry_weave_direction is not None:
+                    self.log(
+                        "Touch-corrected weave uses geometry-derived e_w="
+                        f"({geometry_weave_direction[0]:+.6f}, "
+                        f"{geometry_weave_direction[1]:+.6f}, "
+                        f"{geometry_weave_direction[2]:+.6f})"
+                    )
+            else:
+                usable_weld_points = seam_centerline
+            seam_distance_m = math.sqrt(sum(
+                (getattr(goal.position, axis) - getattr(start.position, axis)) ** 2
+                for axis in ("x", "y", "z")
+            ))
+            usable_path_distance_m = sum(
+                math.sqrt(sum(
+                    (getattr(second.position, axis) - getattr(first.position, axis)) ** 2
+                    for axis in ("x", "y", "z")
+                ))
+                for first, second in zip(
+                    usable_weld_points[:-1], usable_weld_points[1:]
+                )
+            )
+            path_to_seam_speed_factor = (
+                seam_distance_m / usable_path_distance_m
+                if usable_path_distance_m > 1e-9 else 1.0
+            )
             preview = []
             if has_lead_in:
                 preview.append(copy.deepcopy(lead_start))
-            preview.extend(linear_pose_waypoints(start, goal, count))
+            preview.extend(copy.deepcopy(usable_weld_points))
             if has_lead_out:
                 preview.append(copy.deepcopy(lead_end))
             self.node.publish_points(preview, self.show_path.get())
@@ -9149,9 +10059,14 @@ class WeldActionGui:
                 self.sequence_steps,
                 int(self.sequence_parallel_slot.get()),
             )
-            weld_slot = base_slot + (4 if has_lead_in else 3)
+            safe_slot_count = 1 if safe_approach is not None else 0
+            contact_slot = base_slot + 1 + safe_slot_count
+            touch_output_off_slot = contact_slot + 1
+            lead_in_slot = touch_output_off_slot + 1
+            weld_slot = touch_output_off_slot + 1 + (1 if has_lead_in else 0)
             finish_slot = weld_slot + 2
-            if finish_slot > 999:
+            final_slot = finish_slot + 1
+            if final_slot > 999:
                 raise ValueError(
                     "Not enough free sequence slots for weld scenario"
                 )
@@ -9179,15 +10094,22 @@ class WeldActionGui:
                     "tcp_speed_m_s": self._selected_tcp_speed_m_s(),
                     "parallel_slot": slot,
                     "duration": 0.0,
-                    "touch_guard": True,
+                    "touch_guard": False,
                     "continue_after_touch": False,
                 }, stage)
 
+            near_approach_points = (
+                (approach_lead, start)
+                if approach_lead is not None and pre_start_lead_mm > 1e-6
+                else (start,)
+            )
             approach_start = self._sensed_motion_step(
-                (start,),
-                f"start_wait_to_{start_path_name}_DI8_guarded",
-                base_slot + 1,
-                touch_guard=True,
+                near_approach_points,
+                f"safe_to_pre_start_to_{start_path_name}_DI8"
+                if safe_approach is not None
+                else f"start_wait_to_{start_path_name}_DI8",
+                contact_slot,
+                touch_guard=False,
             )
             approach_start["continue_after_touch"] = True
             # A stale/high DI8 at START WAIT must never skip directly to ARC.
@@ -9196,39 +10118,88 @@ class WeldActionGui:
             approach_start.update({
                 "role": "approach",
             })
-            steps = [
-                named_step(
-                    "weld_start_wait", start_wait_data, base_slot, "start_wait"
-                ),
+            approach_start.update({
+                "safe_approach_mm": safe_approach_mm,
+                "pre_start_lead_mm": pre_start_lead_mm,
+                "safe_approach": copy.deepcopy(safe_approach),
+                "approach_lead": copy.deepcopy(approach_lead),
+                "collision_checking": True,
+            })
+            steps = [named_step(
+                "weld_start_wait", start_wait_data, base_slot, "start_wait"
+            )]
+            if safe_approach is not None:
+                safe_motion = self._sensed_motion_step(
+                    (safe_approach,),
+                    f"{start_path_name}_safe_approach_collision_checked",
+                    base_slot + 1,
+                    touch_guard=False,
+                )
+                safe_motion.update({
+                    "role": "safe_approach",
+                    "safe_approach_mm": safe_approach_mm,
+                    "pre_start_lead_mm": pre_start_lead_mm,
+                    "safe_approach": copy.deepcopy(safe_approach),
+                    "approach_lead": copy.deepcopy(approach_lead),
+                    "collision_checking": True,
+                })
+                steps.append(managed(safe_motion, "start_safe"))
+            steps.extend([
                 managed(approach_start, "start_contact"),
                 managed({
                     "type": "digital_output",
                     "port": TOUCH_SENSING_OUTPUT_PORT,
                     "value": False,
-                    "parallel_slot": base_slot + 2,
+                    "parallel_slot": touch_output_off_slot,
                     "duration": 0.0,
                 }, "touch_output_off"),
-            ]
+            ])
 
             if has_lead_in:
-                # The START touch leaves the wire at the physical seam.  Do not
-                # drag it backwards along the workpiece to create run-in distance.
-                # Retract through the taught START WAIT pose first, then approach
-                # the tangential lead-in point with ARC still OFF.
-                start_wait_tcp = copy.deepcopy(
-                    self.computed_seam_wait_points.get("start")
-                    or start_wait_data[3]
-                )
-                # START contact is already at the taught welding attitude.
-                # Retract to the safe WAIT XYZ without rotating back upright,
-                # then continue to LEAD-IN with the same welding attitude. This
-                # removes the redundant upright -> taught -> upright -> taught
-                # sequence before ARC start.
-                start_wait_tcp.orientation = copy.deepcopy(start.orientation)
+                if safe_approach is not None:
+                    safe_over_start, _unused_start = compute_safe_weld_approach(
+                        start,
+                        self.corrected_seam_geometry.d_real,
+                        self.corrected_seam_geometry.e_a,
+                        safe_approach_mm * 0.001,
+                        0.0,
+                    )
+                    safe_over_weld_lead, computed_weld_lead = (
+                        compute_safe_weld_approach(
+                            start,
+                            self.corrected_seam_geometry.d_real,
+                            self.corrected_seam_geometry.e_a,
+                            safe_approach_mm * 0.001,
+                            lead_in_mm * 0.001,
+                        )
+                    )
+                    lead_position_points = (
+                        safe_over_start,
+                        safe_over_weld_lead,
+                        computed_weld_lead,
+                    )
+                    lead_position_label = (
+                        f"{start_path_name}_lift_translate_descend_to_"
+                        "weld_lead_in_arc_off"
+                    )
+                    retraction_reference = safe_over_start
+                else:
+                    # Legacy/non-sensed path retains the taught WAIT clearance.
+                    start_wait_tcp = copy.deepcopy(
+                        self.computed_seam_wait_points.get("start")
+                        or start_wait_data[3]
+                    )
+                    start_wait_tcp.orientation = copy.deepcopy(start.orientation)
+                    lead_position_points = (start_wait_tcp, lead_start)
+                    lead_position_label = (
+                        f"{start_path_name}_retract_via_wait_to_"
+                        "weld_lead_in_arc_off"
+                    )
+                    retraction_reference = start_wait_tcp
                 lead_position = self._sensed_motion_step(
-                    (start_wait_tcp, lead_start),
-                    f"{start_path_name}_retract_via_wait_to_weld_lead_in_arc_off",
-                    base_slot + 3,
+                    lead_position_points,
+                    lead_position_label,
+                    lead_in_slot,
                 )
                 lead_position["lead_in_mm"] = lead_in_mm
                 lead_position["lead_out_mm"] = lead_out_mm
@@ -9236,23 +10207,43 @@ class WeldActionGui:
                 lead_position.update({
                     "role": "lead_in",
                     "related_weld_scenario_id": scenario_id,
-                    "start_wait_tcp": copy.deepcopy(start_wait_tcp),
+                    "start_wait_tcp": copy.deepcopy(retraction_reference),
+                    "collision_checking": True,
+                    "safe_retract_geometry": safe_approach is not None,
+                    "safe_approach_mm": safe_approach_mm,
+                    "safe_approach_direction": (
+                        tuple(self.corrected_seam_geometry.e_a)
+                        if safe_approach is not None
+                        else None
+                    ),
                 })
                 steps.append(lead_position)
 
-            # Keep the physical weld motion as ONE straight endpoint-to-endpoint
-            # Cartesian segment. START/GOAL remain logical welding landmarks for
-            # ARC control only; they are intentionally NOT trajectory waypoints.
-            # This avoids forcing MoveIt to time-parameterize intermediate
-            # START/GOAL waypoints inside the same weld stroke.
-            motion_start = copy.deepcopy(lead_start if has_lead_in else start)
-            motion_end = copy.deepcopy(lead_end if has_lead_out else goal)
-            weld_points = (motion_start, motion_end)
+            if weave_enabled:
+                weld_points = []
+                if has_lead_in:
+                    weld_points.append(copy.deepcopy(lead_start))
+                weld_points.extend(copy.deepcopy(usable_weld_points))
+                if has_lead_out:
+                    weld_points.append(copy.deepcopy(lead_end))
+                weld_points = tuple(weld_points)
+            else:
+                # A non-weaving weld stays one endpoint-to-endpoint segment;
+                # START/GOAL are logical ARC landmarks, not timing waypoints.
+                motion_start = copy.deepcopy(
+                    lead_start if has_lead_in else start
+                )
+                motion_end = copy.deepcopy(
+                    lead_end if has_lead_out else goal
+                )
+                weld_points = (motion_start, motion_end)
 
             weld_motion = self._sensed_motion_step(
                 weld_points,
                 (
-                    f"continuous_lead_to_lead_over_{goal_path_name}_DI8_ignored"
+                    f"continuous_{weave_pattern}_weave_over_{goal_path_name}_DI8_ignored"
+                    if weave_enabled
+                    else f"continuous_lead_to_lead_over_{goal_path_name}_DI8_ignored"
                     if has_lead_in or has_lead_out
                     else f"continuous_{start_path_name}_to_{goal_path_name}_weld_DI8_ignored"
                 ),
@@ -9273,6 +10264,13 @@ class WeldActionGui:
                 "tcp_speed_m_s": weld_tcp_speed_mm_s * 0.001,
                 "linear_motion_profile": True,
                 "weld_tcp_speed_mm_s": weld_tcp_speed_mm_s,
+                "weld_weave_enabled": weave_enabled,
+                "weld_weave_pattern": weave_pattern,
+                "weld_weave_amplitude_mm": weave_amplitude_mm,
+                "weld_weave_cycles": weave_cycles,
+                "weld_weave_samples_per_cycle": weave_samples,
+                "weld_weave_axis": weave_axis,
+                "usable_weld_points": copy.deepcopy(usable_weld_points),
                 "adaptive_line_energy": adaptive_enabled,
                 "adaptive_min_factor": adaptive_min_percent / 100.0,
                 "adaptive_max_factor": adaptive_max_percent / 100.0,
@@ -9295,6 +10293,8 @@ class WeldActionGui:
                 "fixed_tool_z_tilt_deg": float(
                     self.weld_fixed_tilt_z_deg.get()
                 ),
+                "safe_approach_mm": safe_approach_mm,
+                "pre_start_lead_mm": pre_start_lead_mm,
             })
 
             steps.extend([
@@ -9316,6 +10316,7 @@ class WeldActionGui:
                     "tcp_speed_m_s": float(weld_motion.get("tcp_speed_m_s", 0.0)),
                     "velocity_scale": float(weld_motion.get("velocity_scale", 0.0)),
                     "adaptive_line_energy": adaptive_enabled,
+                    "path_to_seam_speed_factor": path_to_seam_speed_factor,
                 }, "arc_off"),
                 named_step(
                     "weld_goal_wait",
@@ -9326,6 +10327,13 @@ class WeldActionGui:
                 named_step(
                     "weld_finish", finish_data, weld_slot + 2, "finish"
                 ),
+                managed({
+                    "type": "digital_output",
+                    "port": TOUCH_SENSING_OUTPUT_PORT,
+                    "value": True,
+                    "parallel_slot": final_slot,
+                    "duration": 0.0,
+                }, "touch_output_on"),
             ])
             validate_managed_weld_sequence(steps, require_complete=True)
         except (ValueError, TypeError, tk.TclError) as error:
@@ -9335,9 +10343,17 @@ class WeldActionGui:
         self.refresh_sequence_table(select_last=True)
         self.log(
             f"Built weld workflow from {start_source} to {goal_source} · "
-            f"{len(steps)} steps · slots {base_slot}..{finish_slot} · "
+            f"{len(steps)} steps · slots {base_slot}..{final_slot} · "
             f"lead-in={lead_in_mm:.1f} mm / lead-out={lead_out_mm:.1f} mm · "
+            f"safe approach={safe_approach_mm:.1f} mm / "
+            f"pre-start lead={pre_start_lead_mm:.1f} mm · "
             f"weld TCP={weld_tcp_speed_mm_s:.2f} mm/s nominal · "
+            + (
+                f"weave={weave_pattern} {weave_amplitude_mm:.1f} mm · "
+                f"{weave_cycles} cycles · {weave_samples} samples/cycle · "
+                f"axis={weave_axis} · "
+                if weave_enabled else "weave=OFF · "
+            )
             + (
                 f"adaptive line-energy=ON ({adaptive_min_percent:.0f}..{adaptive_max_percent:.0f}%, "
                 f"filter={adaptive_filter_tau_s:.1f}s, baseline={adaptive_baseline_mm:.0f}mm) · "
@@ -9353,14 +10369,23 @@ class WeldActionGui:
             f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°) · "
-            "START WAIT(upright) → START/DI8(teaching attitude) → DO4 OFF → "
             + (
-                "WAIT-XYZ retract (keep teaching attitude) → LEAD-IN → "
-                if has_lead_in else ""
+                "START WAIT → SAFE(weld attitude) → PRE-START → START/DI8 → DO4 OFF → "
+                if safe_approach is not None
+                else "START WAIT → START/DI8(teaching attitude) → DO4 OFF → "
+            )
+            + (
+                (
+                    "e_a SAFE corridor → WELD LEAD-IN → "
+                    if safe_approach is not None
+                    else "WAIT-XYZ retract (keep teaching attitude) → LEAD-IN → "
+                )
+                if has_lead_in
+                else ""
             )
             + "[pre-gas → D-WELD ON/ARC established → stabilize → endpoint-only LEAD→LEAD motion "
             "(START/GOAL are logical ARC landmarks) + pre-GOAL ARC-OFF watcher] "
-            "→ GOAL WAIT → END"
+            "→ GOAL WAIT → END → DO4 ON"
         )
 
     def build_initial_scenario(self):
@@ -9477,28 +10502,16 @@ class WeldActionGui:
                 wall_label,
                 floor_label,
             ) = self._seam_geometry_settings(require_teaching=True)
-            sensed_start = generalized_corner_endpoint_from_two_touches(
-                self.seam_probe_touches["start_wall"],
-                self.seam_probe_touches["start_floor"],
-                start_data[3],
-                start_data[3],
-                end_data[3],
+            geometry = self._compute_touch_corrected_seam_geometry(
+                teaching_reference,
                 wall_normal,
                 floor_normal,
                 wall_offset,
                 floor_offset,
+                log_debug=True,
             )
-            sensed_goal = generalized_corner_endpoint_from_two_touches(
-                self.seam_probe_touches["goal_wall"],
-                self.seam_probe_touches["goal_floor"],
-                end_data[3],
-                start_data[3],
-                end_data[3],
-                wall_normal,
-                floor_normal,
-                wall_offset,
-                floor_offset,
-            )
+            sensed_start = copy.deepcopy(geometry.start)
+            sensed_goal = copy.deepcopy(geometry.goal)
             corrected_points = linear_pose_waypoints(sensed_start, sensed_goal, count)
             # Raw touch geometry is diagnostic.  The adopted seam uses sensed
             # endpoint XYZ and rotates both taught welding orientations by the
@@ -9524,6 +10537,8 @@ class WeldActionGui:
             corrected_points[:] = linear_pose_waypoints(
                 corrected_start, corrected_goal, count
             )
+            geometry.start = copy.deepcopy(corrected_start)
+            geometry.goal = copy.deepcopy(corrected_goal)
         except ValueError as error:
             self.error(f"Four-touch seam generation failed: {error}")
             return
@@ -9964,6 +10979,12 @@ class WeldActionGui:
                     if step.get("adaptive_line_energy", False)
                     else ""
                 )
+                weave_detail = (
+                    f" · {step.get('weld_weave_pattern', 'sine')} weave "
+                    f"{float(step.get('weld_weave_amplitude_mm', 0.0)):.1f} mm"
+                    if step.get("weld_weave_enabled", False)
+                    else ""
+                )
                 lead_detail = (
                     f" · lead {float(step.get('lead_in_mm', 0.0)):.1f}/"
                     f"{float(step.get('lead_out_mm', 0.0)):.1f} mm"
@@ -9972,7 +10993,7 @@ class WeldActionGui:
                 )
                 detail = (
                     f"{step['planning_group']} · {len(step['points'])} poses · "
-                    f"{speed_detail}{lead_detail}{adaptive_detail} · "
+                    f"{speed_detail}{lead_detail}{weave_detail}{adaptive_detail} · "
                     f"{step['path_kind']}{guard_detail} · {timing}"
                 )
                 kind = "MOTION"
@@ -10701,6 +11722,24 @@ class WeldActionGui:
                 if effective_weld_motion is not None
                 else self.weld_fixed_tilt_z_deg.get()
             ),
+            "weld_weave_enabled": bool(effective_motion_value(
+                "weld_weave_enabled", self.weld_weave_enabled.get()
+            )),
+            "weld_weave_pattern": str(effective_motion_value(
+                "weld_weave_pattern", self.weave_pattern.get()
+            )),
+            "weld_weave_amplitude_mm": float(effective_motion_value(
+                "weld_weave_amplitude_mm", self.weave_amplitude_mm.get()
+            )),
+            "weld_weave_cycles": int(effective_motion_value(
+                "weld_weave_cycles", self.weave_cycles.get()
+            )),
+            "weld_weave_samples_per_cycle": int(effective_motion_value(
+                "weld_weave_samples_per_cycle", self.weave_samples.get()
+            )),
+            "weld_weave_axis": str(effective_motion_value(
+                "weld_weave_axis", self.weave_axis.get()
+            )),
             # These are effective scenario values, not live Seam Correction
             # widgets.  The per-step snapshot below and this summary therefore
             # cannot disagree after a Builder edit.
@@ -10709,6 +11748,12 @@ class WeldActionGui:
             )),
             "weld_lead_out_mm": float(effective_motion_value(
                 "lead_out_mm", self.weld_lead_out_mm.get()
+            )),
+            "weld_safe_approach_mm": float(effective_motion_value(
+                "safe_approach_mm", self.weld_safe_approach_mm.get()
+            )),
+            "weld_pre_start_lead_mm": float(effective_motion_value(
+                "pre_start_lead_mm", self.weld_pre_start_lead_mm.get()
             )),
             "weld_tcp_speed_mm_s": float(effective_motion_value(
                 "tcp_speed_m_s", float(self.weld_tcp_speed_mm_s.get()) * 0.001
@@ -11674,7 +12719,9 @@ class WeldActionGui:
         pitch_mm = seam_length * 1000.0 / max(cycles, 1)
         self.weave_summary.configure(
             text=(
-                f"±{amplitude * 1000.0:.1f} mm · "
+                f"{self.weave_pattern.get()} "
+                f"{'±' if self.weave_pattern.get() == 'sine' else 'R='}"
+                f"{amplitude * 1000.0:.1f} mm · "
                 f"pitch≈{pitch_mm:.1f} mm · {cycles} cycles"
             )
         )
@@ -11686,6 +12733,7 @@ class WeldActionGui:
                 cycles,
                 samples,
                 self.weave_axis.get(),
+                self.weave_pattern.get(),
                 self.show_path.get(),
             ),
             daemon=True,
@@ -12534,6 +13582,17 @@ class WeldActionGui:
                     ),
                     "fixed_tool_z_tilt_deg": float(
                         self.weld_fixed_tilt_z_deg.get()
+                    ),
+                    "weld_lead_in_mm": float(self.weld_lead_in_mm.get()),
+                    "weld_lead_out_mm": float(self.weld_lead_out_mm.get()),
+                    "weld_safe_approach_mm": float(
+                        self.weld_safe_approach_mm.get()
+                    ),
+                    "weld_pre_start_lead_mm": float(
+                        self.weld_pre_start_lead_mm.get()
+                    ),
+                    "weld_tcp_speed_mm_s": float(
+                        self.weld_tcp_speed_mm_s.get()
                     ),
                 },
             )

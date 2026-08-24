@@ -12,6 +12,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 from construct_robot.cartesian_path_common import (
     circle_waypoints,
+    circular_weaving_from_path,
     linear_pose_waypoints,
     pose_is_valid,
     retime_trajectory_constant_velocity,
@@ -54,13 +55,21 @@ from construct_robot.weld_action_gui import (
     corner_seam_from_touches,
     corner_endpoint_from_two_touches,
     corrected_corner_seam_from_four_touches,
+    compute_corrected_seam_geometry,
+    compute_plane_intersection_line,
+    compute_real_seam_direction,
+    compute_safe_weld_approach,
+    compute_seam_local_frame,
+    compute_surface_plane,
     digital_weld_recipe,
     fixed_tilt_wait_reference_poses,
     next_sequential_slot,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
+    project_point_to_line,
     named_tcp_linear_waypoints,
     position_only_goal_constraints,
+    read_last_execution_settings,
     tcp_pose_goal_constraints,
     save_seam_touch_yaml,
     save_weld_feedback_log,
@@ -86,6 +95,7 @@ def managed_weld_steps(base_slot=1):
         ("arc_off", "digital_weld", "off", False, False),
         ("goal_wait", "named_pose", None, True, False),
         ("finish", "named_pose", None, True, False),
+        ("touch_output_on", "digital_output", None, False, False),
     )
     stage_slot_offsets = {
         "start_wait": 0,
@@ -96,6 +106,7 @@ def managed_weld_steps(base_slot=1):
         "arc_off": 4,
         "goal_wait": 5,
         "finish": 6,
+        "touch_output_on": 7,
     }
     result = []
     for stage, kind, command, guard, continue_after in stages:
@@ -115,6 +126,9 @@ def managed_weld_steps(base_slot=1):
         elif stage == "touch_output_off":
             step["port"] = 4
             step["value"] = False
+        elif stage == "touch_output_on":
+            step["port"] = 4
+            step["value"] = True
         result.append(step)
     return result
 
@@ -198,6 +212,39 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
     assert "1234.500000000 25.000 125.000 0.040" in content
 
 
+def test_last_log_restores_tilt_leads_tcp_and_circle_weave_defaults(tmp_path):
+    path = tmp_path / "weld.log"
+    path.write_text(
+        "[execution_conditions]\n"
+        "weld_fixed_tilt_x_deg=2.5\n"
+        "weld_fixed_tilt_y_deg=-15.0\n"
+        "weld_fixed_tilt_z_deg=4.0\n"
+        "weld_lead_in_mm=12.0\n"
+        "weld_lead_out_mm=7.0\n"
+        "weld_safe_approach_mm=35.0\n"
+        "weld_pre_start_lead_mm=8.0\n"
+        "weld_tcp_speed_mm_s=3.2\n"
+        "weld_weave_enabled=True\n"
+        "weld_weave_pattern=circle\n"
+        "weld_weave_amplitude_mm=2.0\n"
+        "weld_weave_cycles=6\n"
+        "weld_weave_samples_per_cycle=12\n"
+        "weld_weave_axis=tool_y\n",
+        encoding="utf-8",
+    )
+    motion = read_last_execution_settings(path)["motion"]
+    assert motion["weld_fixed_tilt_x_deg"] == 2.5
+    assert motion["weld_fixed_tilt_y_deg"] == -15.0
+    assert motion["weld_fixed_tilt_z_deg"] == 4.0
+    assert motion["weld_lead_in_mm"] == 12.0
+    assert motion["weld_lead_out_mm"] == 7.0
+    assert motion["weld_safe_approach_mm"] == 35.0
+    assert motion["weld_pre_start_lead_mm"] == 8.0
+    assert motion["weld_tcp_speed_mm_s"] == 3.2
+    assert motion["weld_weave_enabled"] is True
+    assert motion["weld_weave_pattern"] == "circle"
+
+
 def test_managed_weld_scenario_pairs_arc_on_with_weld_motion():
     steps = managed_weld_steps()
     assert validate_managed_weld_sequence(steps, require_complete=True)
@@ -232,6 +279,11 @@ def test_manual_arc_on_cannot_share_a_robot_motion_slot():
 
 
 def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
+    unguarded_start = managed_weld_steps()
+    unguarded_start[1]["touch_guard"] = False
+    unguarded_start[1]["continue_after_touch"] = False
+    validate_managed_weld_sequence(unguarded_start, require_complete=True)
+
     stale_touch = managed_weld_steps()
     stale_touch[1]["accept_initial_touch"] = True
     try:
@@ -260,6 +312,17 @@ def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
         assert "DO4 OFF before ARC ON" in str(error)
     else:
         raise AssertionError("Generated ARC accepted with DO4 ON")
+
+    final_touch_output_off = managed_weld_steps()
+    final_touch_output_off[-1]["value"] = False
+    try:
+        validate_managed_weld_sequence(
+            final_touch_output_off, require_complete=True
+        )
+    except ValueError as error:
+        assert "restore DO4 ON" in str(error)
+    else:
+        raise AssertionError("Generated scenario accepted final DO4 OFF")
 
 
 def test_di8_guarded_named_teaching_poses():
@@ -560,6 +623,50 @@ def test_weld_motion_builder_edit_updates_linked_process_steps():
     assert updated[2]["lead_in_mm"] == 12.0
     assert updated[2]["lead_out_mm"] == 8.0
     assert steps[1]["tcp_speed_m_s"] == 0.003
+
+
+def test_weld_motion_edit_keeps_safe_lead_in_corridor_geometry():
+    seam_start = make_pose(0.0, 0.0, 0.0)
+    seam_goal = make_pose(0.1, 0.0, 0.0)
+    scenario_id = "safe-lead-edit"
+    steps = [
+        {
+            "type": "motion",
+            "role": "lead_in",
+            "related_weld_scenario_id": scenario_id,
+            "points": (
+                make_pose(0.0, 0.0, 0.03),
+                make_pose(-0.01, 0.0, 0.03),
+                make_pose(-0.01, 0.0, 0.0),
+            ),
+            "safe_retract_geometry": True,
+            "safe_approach_mm": 30.0,
+            "safe_approach_direction": (0.0, 0.0, 1.0),
+        },
+        {
+            "type": "motion",
+            "weld_scenario_id": scenario_id,
+            "weld_scenario_stage": "weld_motion",
+            "usable_seam_start": seam_start,
+            "usable_seam_goal": seam_goal,
+            "points": (make_pose(-0.01), seam_goal),
+        },
+        {
+            "type": "digital_weld",
+            "command": "off",
+            "weld_scenario_id": scenario_id,
+            "weld_scenario_stage": "arc_off",
+        },
+    ]
+    updated = update_weld_scenario_motion_values(
+        steps, 1, tcp_speed_mm_s=3.0, lead_in_mm=20.0, lead_out_mm=0.0
+    )
+    corridor = updated[0]["points"]
+    assert math.isclose(corridor[0].position.z, 0.03)
+    assert math.isclose(corridor[1].position.x, -0.02)
+    assert math.isclose(corridor[1].position.z, 0.03)
+    assert math.isclose(corridor[2].position.x, -0.02)
+    assert math.isclose(corridor[2].position.z, 0.0)
 
 
 def test_tip_link_for_supported_groups():
@@ -1246,6 +1353,202 @@ def test_weaving_is_applied_to_existing_taught_line():
     assert math.isclose(points[3].position.y, 0.196)
     assert math.isclose(points[0].position.y, 0.2)
     assert math.isclose(points[-1].position.y, 0.2)
+
+
+def test_geometry_vector_overrides_generic_weave_axis():
+    source = [make_pose(0.0, 0.0, 0.0), make_pose(0.1, 0.0, 0.0)]
+    points = weaving_from_path(
+        source,
+        amplitude=0.004,
+        cycles=1,
+        samples_per_cycle=4,
+        transverse_axis="tool_y",
+        transverse_vector=(0.0, 0.0, 1.0),
+    )
+    assert math.isclose(points[1].position.y, 0.0, abs_tol=1e-12)
+    assert math.isclose(points[1].position.z, 0.004, abs_tol=1e-12)
+
+
+def test_vector_seam_geometry_projects_taught_endpoints_to_actual_line():
+    taught_start = make_pose(0.1, 0.2, 0.3)
+    taught_goal = make_pose(1.1, 0.25, 0.35)
+    wall_plane = compute_surface_plane(
+        (0.0, 2.0, 0.0),
+        [make_pose(0.0, 0.5, 0.0), make_pose(1.0, 0.5, 0.0)],
+    )
+    floor_plane = compute_surface_plane(
+        (0.0, 0.0, 3.0),
+        [make_pose(0.0, 0.0, 0.1), make_pose(1.0, 0.0, 0.1)],
+    )
+    geometry = compute_corrected_seam_geometry(
+        taught_start,
+        taught_goal,
+        wall_plane,
+        floor_plane,
+        approach_reference=(0.0, 0.0, 1.0),
+    )
+    assert geometry.wall_normal == (0.0, 1.0, 0.0)
+    assert geometry.floor_normal == (0.0, 0.0, 1.0)
+    assert math.isclose(geometry.wall_plane_value, 0.5)
+    assert math.isclose(geometry.floor_plane_value, 0.1)
+    assert geometry.d_real == (1.0, 0.0, 0.0)
+    assert all(math.isclose(a, b) for a, b in zip(
+        geometry.origin, (0.0, 0.5, 0.1)
+    ))
+    assert math.isclose(geometry.start.position.x, 0.1)
+    assert math.isclose(geometry.goal.position.x, 1.1)
+    for pose in (geometry.start, geometry.goal):
+        assert math.isclose(pose.position.y, 0.5)
+        assert math.isclose(pose.position.z, 0.1)
+    assert geometry.direction_dot > 1.0 - 1e-9
+    assert abs(sum(a * b for a, b in zip(geometry.d_real, geometry.e_a))) < 1e-12
+    assert abs(sum(a * b for a, b in zip(geometry.d_real, geometry.e_w))) < 1e-12
+    assert abs(sum(a * b for a, b in zip(geometry.e_a, geometry.e_w))) < 1e-12
+
+
+def test_surface_touch_spans_tilt_normals_and_real_seam_direction():
+    actual_direction = tuple(
+        value / math.sqrt(1.05) for value in (1.0, -0.1, 0.2)
+    )
+    wall_start = (0.0, 0.5, 0.1)
+    floor_start = (0.0, 0.45, 0.2)
+    wall_goal = tuple(
+        wall_start[index] + actual_direction[index] for index in range(3)
+    )
+    floor_goal = tuple(
+        floor_start[index] + actual_direction[index] for index in range(3)
+    )
+    wall_normal, wall_value = compute_surface_plane(
+        (0.0, 1.0, 0.0), [wall_start, wall_goal]
+    )
+    floor_normal, floor_value = compute_surface_plane(
+        (0.0, 0.0, 1.0), [floor_start, floor_goal]
+    )
+    assert abs(sum(a * b for a, b in zip(wall_normal, actual_direction))) < 1e-12
+    assert abs(sum(a * b for a, b in zip(floor_normal, actual_direction))) < 1e-12
+    assert math.isclose(sum(value * value for value in wall_normal), 1.0)
+    assert math.isclose(sum(value * value for value in floor_normal), 1.0)
+    d_real = compute_real_seam_direction(
+        wall_normal, floor_normal, (1.0, 0.0, 0.0)
+    )
+    assert sum(a * b for a, b in zip(d_real, actual_direction)) > 1.0 - 1e-9
+    origin, _direction = compute_plane_intersection_line(
+        wall_normal,
+        wall_value,
+        floor_normal,
+        floor_value,
+        (1.0, 0.0, 0.0),
+    )
+    assert math.isclose(sum(a * b for a, b in zip(wall_normal, origin)), wall_value)
+    assert math.isclose(sum(a * b for a, b in zip(floor_normal, origin)), floor_value)
+
+
+def test_seam_geometry_helpers_orient_line_and_reject_parallel_planes():
+    direction = compute_real_seam_direction(
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (1.0, 0.0, 0.0),
+    )
+    assert direction == (1.0, 0.0, 0.0)
+    origin, line_direction = compute_plane_intersection_line(
+        (0.0, 1.0, 0.0), 0.4,
+        (0.0, 0.0, 1.0), 0.2,
+        (1.0, 0.0, 0.0),
+    )
+    assert origin == (0.0, 0.4, 0.2)
+    assert line_direction == (1.0, 0.0, 0.0)
+    assert project_point_to_line((0.7, 9.0, -2.0), origin, line_direction) == (
+        0.7, 0.4, 0.2
+    )
+    d_real, e_w, e_a = compute_seam_local_frame(
+        line_direction,
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, -1.0),
+    )
+    assert d_real == line_direction
+    assert e_a[2] < 0.0
+    assert math.isclose(sum(value * value for value in e_w), 1.0)
+    try:
+        compute_real_seam_direction(
+            (1.0, 0.0, 0.0),
+            (1.0, 1e-9, 0.0),
+            (0.0, 1.0, 0.0),
+        )
+    except ValueError as error:
+        assert "nearly parallel" in str(error)
+    else:
+        raise AssertionError("nearly parallel sensed planes were accepted")
+
+
+def test_safe_weld_approach_uses_fixed_orientation_and_orthogonal_segments():
+    corrected_start = make_pose(
+        1.0,
+        0.5,
+        0.2,
+        quaternion=(0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)),
+    )
+    d_real = (1.0, 0.0, 0.0)
+    e_a = (0.0, 0.0, 1.0)
+    safe, lead = compute_safe_weld_approach(
+        corrected_start, d_real, e_a, 0.03, 0.01
+    )
+    assert math.isclose(lead.position.x, 0.99)
+    assert math.isclose(lead.position.y, 0.5)
+    assert math.isclose(lead.position.z, 0.2)
+    assert math.isclose(safe.position.x, 0.99)
+    assert math.isclose(safe.position.y, 0.5)
+    assert math.isclose(safe.position.z, 0.23)
+    assert safe.orientation == corrected_start.orientation
+    assert lead.orientation == corrected_start.orientation
+    approach = (
+        lead.position.x - safe.position.x,
+        lead.position.y - safe.position.y,
+        lead.position.z - safe.position.z,
+    )
+    approach_norm = math.sqrt(sum(value * value for value in approach))
+    assert math.isclose(
+        sum(
+            approach[index] / approach_norm * -e_a[index]
+            for index in range(3)
+        ),
+        1.0,
+    )
+    zero_lead_safe, zero_lead = compute_safe_weld_approach(
+        corrected_start, d_real, e_a, 0.03, 0.0
+    )
+    assert zero_lead.position == corrected_start.position
+    assert math.isclose(zero_lead_safe.position.z, 0.23)
+
+
+def test_circular_weaving_orbits_path_and_returns_to_centerline():
+    source = [make_pose(0.0, 0.0, 0.0), make_pose(0.1, 0.0, 0.0)]
+    points = circular_weaving_from_path(
+        source,
+        radius=0.003,
+        cycles=4,
+        samples_per_cycle=12,
+        radial_axis="world_y",
+    )
+    assert len(points) == 49
+    assert points[0].position == source[0].position
+    assert points[-1].position == source[-1].position
+    radial_distances = [
+        math.hypot(point.position.y, point.position.z) for point in points
+    ]
+    assert math.isclose(max(radial_distances), 0.003, abs_tol=1e-9)
+    assert any(abs(point.position.y) > 0.002 for point in points)
+    assert any(abs(point.position.z) > 0.002 for point in points)
+
+
+def test_circular_weaving_requires_enough_samples():
+    source = [make_pose(), make_pose(0.1)]
+    try:
+        circular_weaving_from_path(source, 0.003, 2, 7)
+    except ValueError as error:
+        assert "samples/cycle" in str(error)
+    else:
+        raise AssertionError("undersampled circle weave was accepted")
 
 
 def test_approved_plan_signature_changes_with_path_or_speed():
