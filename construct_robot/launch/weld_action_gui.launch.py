@@ -44,6 +44,11 @@ LAUNCH_ARGUMENTS = (
     ("hicomm_source_ip", "192.168.1.2", "Local Hi-COMM interface IP"),
     ("hicomm_welder_ip", "192.168.1.10", "Hi-COMM controller IP"),
     ("hicomm_port", "60000", "Hi-COMM controller TCP port"),
+    ("fastech_ip", "192.168.0.3", "Fastech Ezi-IO IP address"),
+    ("fastech_board_id", "0", "Fastech Ezi-IO board ID"),
+    ("fastech_poll_period_s", "0.01", "Fastech I/O polling period"),
+    ("fastech_reconnect_period_s", "1.0", "Fastech reconnect period"),
+    ("fastech_auto_connect", "true", "Connect Fastech at startup"),
 )
 MOVEIT_ARGUMENTS = (
     "left_robot_ip",
@@ -112,6 +117,33 @@ def generate_launch_description():
             "planning_frame": "World",
         }],
     )
+    fastech_io = Node(
+        package="construct_robot",
+        executable="fastech_io_node",
+        output="screen",
+        parameters=[{
+            "ip_address": ParameterValue(
+                LaunchConfiguration("fastech_ip"),
+                value_type=str,
+            ),
+            "board_id": ParameterValue(
+                LaunchConfiguration("fastech_board_id"),
+                value_type=int,
+            ),
+            "poll_period_s": ParameterValue(
+                LaunchConfiguration("fastech_poll_period_s"),
+                value_type=float,
+            ),
+            "reconnect_period_s": ParameterValue(
+                LaunchConfiguration("fastech_reconnect_period_s"),
+                value_type=float,
+            ),
+            "auto_connect": ParameterValue(
+                LaunchConfiguration("fastech_auto_connect"),
+                value_type=bool,
+            ),
+        }],
+    )
     gui = Node(
         package="construct_robot",
         executable="weld_action_gui",
@@ -146,6 +178,18 @@ def generate_launch_description():
                 LaunchConfiguration("hicomm_port"),
                 value_type=int,
             ),
+            "fastech_ip": ParameterValue(
+                LaunchConfiguration("fastech_ip"),
+                value_type=str,
+            ),
+            "fastech_board_id": ParameterValue(
+                LaunchConfiguration("fastech_board_id"),
+                value_type=int,
+            ),
+            "fastech_poll_period_s": ParameterValue(
+                LaunchConfiguration("fastech_poll_period_s"),
+                value_type=float,
+            ),
         }],
     )
     # Avoid stale Fast DDS shared-memory locks by keeping the complete launch
@@ -161,5 +205,5 @@ def generate_launch_description():
     return LaunchDescription(
         [force_udp_transport, local_ros_graph]
         + declarations
-        + [moveit, cartesian_server, gui]
+        + [moveit, cartesian_server, fastech_io, gui]
     )

@@ -24,6 +24,7 @@
   <depend>sensor_msgs</depend>
   <depend>shape_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>

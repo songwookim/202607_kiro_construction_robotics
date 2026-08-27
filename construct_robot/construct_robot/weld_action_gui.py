@@ -43,12 +43,15 @@ from rbpodo_msgs.msg import SystemState
 from rbpodo_msgs.srv import MoveStop, SetDigitalOutput
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
-from std_msgs.msg import Empty
+from std_msgs.msg import Bool, Empty
+from std_srvs.srv import SetBool, Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
+from construct_msgs.msg import DigitalIoState
+from construct_msgs.srv import SetDigitalOutput as FastechSetDigitalOutput
 from construct_robot.cartesian_path_common import (
     circle_waypoints,
     circular_weaving_from_path,
@@ -76,9 +79,6 @@ from construct_robot.hicomm_welder import (
     TxState,
     build_request,
 )
-from construct_robot.fastech_ethernet import FastechEthernetClient
-
-
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
 FASTECH_GUI_CHANNELS = {
     0: "Touch sensing",
@@ -91,7 +91,6 @@ FASTECH_GUI_CHANNELS = {
 FASTECH_TOUCH_INPUT_PORT = 0
 FASTECH_TOUCH_OUTPUT_PORT = 0
 FASTECH_TOUCH_BACKEND = "fastech_ethernet"
-FASTECH_POLL_PERIOD_S = 0.01
 
 # Kept for the Controller Digital I/O test panel and later legacy inspection.
 # Production touch sensing no longer consumes these Rainbow ports.
@@ -2168,6 +2167,9 @@ class WeldGuiNode(Node):
         self.declare_parameter("hicomm_source_ip", "192.168.1.2")
         self.declare_parameter("hicomm_welder_ip", "192.168.1.10")
         self.declare_parameter("hicomm_port", 60000)
+        self.declare_parameter("fastech_ip", "192.168.0.3")
+        self.declare_parameter("fastech_board_id", 0)
+        self.declare_parameter("fastech_poll_period_s", 0.01)
         self.cartesian_motion_client = ActionClient(
             self, CartesianPath, "cartesian_path"
         )
@@ -2226,6 +2228,22 @@ class WeldGuiNode(Node):
             SetDigitalOutput,
             "/right_rbpodo_hardware/set_digital_output",
         )
+        self.fastech_touch_enable_client = self.create_client(
+            SetBool,
+            "/touch/enable",
+        )
+        self.fastech_set_output_client = self.create_client(
+            FastechSetDigitalOutput,
+            "/fastech/set_output",
+        )
+        self.fastech_connect_client = self.create_client(
+            Trigger,
+            "/fastech/connect",
+        )
+        self.fastech_disconnect_client = self.create_client(
+            Trigger,
+            "/fastech/disconnect",
+        )
         self.move_stop_clients = {
             arm: self.create_client(
                 MoveStop,
@@ -2254,6 +2272,7 @@ class WeldGuiNode(Node):
         self.touch_guard_triggered = threading.Event()
         self.touch_guard_stop_complete = threading.Event()
         self.touch_guard_stop_success = False
+        self.fastech_io_connected = False
         self.fastech_touch_input_state = None
         self.node_touch_input_states = {"left": None, "right": None}
         self.legacy_node_touch_input_states = {"left": None, "right": None}
@@ -2342,6 +2361,21 @@ class WeldGuiNode(Node):
             self._joint_state,
             10,
         )
+        fastech_qos = QoSProfile(depth=1)
+        fastech_qos.reliability = ReliabilityPolicy.RELIABLE
+        fastech_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.create_subscription(
+            Bool,
+            "/touch/contact",
+            self._fastech_touch_contact,
+            fastech_qos,
+        )
+        self.create_subscription(
+            DigitalIoState,
+            "/fastech/io_state",
+            self._fastech_io_state,
+            fastech_qos,
+        )
         self.ui.post(
             self.ui.set_execution_configuration,
             self.get_parameter("expected_execute_motion").value,
@@ -2351,6 +2385,82 @@ class WeldGuiNode(Node):
             self.get_parameter("hicomm_source_ip").value,
             self.get_parameter("hicomm_welder_ip").value,
             self.get_parameter("hicomm_port").value,
+        )
+        self.ui.post(
+            self.ui.set_fastech_configuration,
+            self.get_parameter("fastech_ip").value,
+            self.get_parameter("fastech_board_id").value,
+            self.get_parameter("fastech_poll_period_s").value,
+        )
+
+    def _fastech_touch_contact(self, message):
+        if not self.fastech_io_connected:
+            return
+        self.update_fastech_touch_input(message.data)
+
+    def _fastech_io_state(self, message):
+        self.fastech_io_connected = bool(message.connected)
+        if not message.connected:
+            self.clear_fastech_touch_input()
+        self.ui.post_latest(
+            "fastech_io",
+            self.ui.update_fastech_io,
+            message,
+        )
+
+    @staticmethod
+    def _call_service_sync(client, request, service_name, timeout=3.0):
+        if not client.wait_for_service(timeout_sec=1.0):
+            return False, f"ROS service unavailable: {service_name}"
+        completed = threading.Event()
+        result = {}
+
+        def response_ready(future):
+            try:
+                result["response"] = future.result()
+            except Exception as error:
+                result["error"] = str(error)
+            finally:
+                completed.set()
+
+        client.call_async(request).add_done_callback(response_ready)
+        if not completed.wait(timeout):
+            return False, f"ROS service timeout: {service_name}"
+        if "error" in result:
+            return False, result["error"]
+        response = result["response"]
+        return bool(response.success), str(response.message)
+
+    def set_fastech_output_sync(self, channel, enabled):
+        if int(channel) == FASTECH_TOUCH_OUTPUT_PORT:
+            request = SetBool.Request()
+            request.data = bool(enabled)
+            return self._call_service_sync(
+                self.fastech_touch_enable_client,
+                request,
+                "/touch/enable",
+            )
+        request = FastechSetDigitalOutput.Request()
+        request.channel = int(channel)
+        request.value = bool(enabled)
+        return self._call_service_sync(
+            self.fastech_set_output_client,
+            request,
+            "/fastech/set_output",
+        )
+
+    def set_fastech_connection_sync(self, connect):
+        client = (
+            self.fastech_connect_client
+            if connect
+            else self.fastech_disconnect_client
+        )
+        service_name = "/fastech/connect" if connect else "/fastech/disconnect"
+        return self._call_service_sync(
+            client,
+            Trigger.Request(),
+            service_name,
+            timeout=5.0,
         )
 
     def _system_state(self, message, arm):
@@ -2372,7 +2482,7 @@ class WeldGuiNode(Node):
         self.robot_feedback_seen[arm] = True
 
     def update_fastech_touch_input(self, touch_active):
-        """Consume the production Fastech DI0 edge from its polling thread."""
+        """Consume the production Fastech DI0 edge from /touch/contact."""
         touch_active = bool(touch_active)
         probe = self.active_touch_probe
         guard = self.active_touch_guard
@@ -5514,11 +5624,10 @@ class WeldActionGui:
         self.unlock_all_do_ports = tk.BooleanVar(value=False)
         self.fastech_ip = tk.StringVar(value="192.168.0.3")
         self.fastech_board_id = tk.IntVar(value=0)
-        self.fastech_client = None
+        self.fastech_poll_rate_hz = 100.0
         self.fastech_connected = False
         self.fastech_connecting = False
-        self.fastech_poll_stop = threading.Event()
-        self.fastech_previous_snapshot = None
+        self.fastech_previous_state = None
         self.fastech_pending_outputs = set()
         self.fastech_io_labels = {}
         self.fastech_output_buttons = []
@@ -6789,13 +6898,16 @@ class WeldActionGui:
         fastech_io = self._create_toggle_section(
             outer,
             "fastech_ethernet",
-            "Fastech Ethernet I/O · 0 Touch · 5/6/7 Torch cleaner",
+            "Fastech ROS I/O · 0 Touch · 3/4 Test · 5/6/7 Torch cleaner",
         )
         ttk.Label(fastech_io, text="IP").grid(
             row=0, column=0, padx=(6, 2), pady=4, sticky=tk.E
         )
         ttk.Entry(
-            fastech_io, textvariable=self.fastech_ip, width=15
+            fastech_io,
+            textvariable=self.fastech_ip,
+            width=15,
+            state="readonly",
         ).grid(row=0, column=1, padx=(2, 8), pady=4)
         ttk.Label(fastech_io, text="Board ID").grid(
             row=0, column=2, padx=(2, 2), pady=4, sticky=tk.E
@@ -6806,6 +6918,7 @@ class WeldActionGui:
             to=255,
             textvariable=self.fastech_board_id,
             width=5,
+            state="readonly",
         ).grid(row=0, column=3, padx=(2, 8), pady=4)
         self.fastech_connect_button = ttk.Button(
             fastech_io,
@@ -6822,7 +6935,7 @@ class WeldActionGui:
         self.fastech_disconnect_button.grid(row=0, column=5, padx=3, pady=4)
         self.fastech_all_off_button = ttk.Button(
             fastech_io,
-            text="DO0/5/6/7 all OFF",
+            text="Exposed DO all OFF",
             command=self.fastech_outputs_all_off,
             state=tk.DISABLED,
         )
@@ -7084,7 +7197,6 @@ class WeldActionGui:
             daemon=True,
         )
         self.executor_thread.start()
-        self.root.after(100, self.connect_fastech_ethernet)
         self._auto_load_teaching_states()
         loaded_settings = self._last_execution_settings.get("settings", {})
         loaded_motion = self._last_execution_settings.get("motion", {})
@@ -11898,7 +12010,7 @@ class WeldActionGui:
             "touch_input_port": FASTECH_TOUCH_INPUT_PORT,
             "touch_sensing_output_port": FASTECH_TOUCH_OUTPUT_PORT,
             "fastech_ip": self.fastech_ip.get().strip(),
-            "fastech_poll_target_hz": 1.0 / FASTECH_POLL_PERIOD_S,
+            "fastech_poll_target_hz": self.fastech_poll_rate_hz,
             "hicomm_source_ip": self.hicomm_source_ip.get().strip(),
             "hicomm_welder_ip": self.hicomm_welder_ip.get().strip(),
             "hicomm_port": int(self.hicomm_port.get()),
@@ -12002,11 +12114,11 @@ class WeldActionGui:
             ),
             "initial_fastech_do0": (
                 None
-                if self.fastech_previous_snapshot is None
-                or len(self.fastech_previous_snapshot.outputs)
+                if self.fastech_previous_state is None
+                or len(self.fastech_previous_state.digital_out)
                 <= FASTECH_TOUCH_OUTPUT_PORT
                 else bool(
-                    self.fastech_previous_snapshot.outputs[
+                    self.fastech_previous_state.digital_out[
                         FASTECH_TOUCH_OUTPUT_PORT
                     ]
                 )
@@ -12720,6 +12832,19 @@ class WeldActionGui:
             f"Connecting LEFT {left_ip} + RIGHT {right_ip} · "
             f"HEAD {head_kind} · waiting for measured feedback and "
             "controller readiness · Hi-COMM waits for Connect"
+        )
+
+    def set_fastech_configuration(self, ip_address, board_id, poll_period_s):
+        """Display the owner-node launch configuration as read-only GUI state."""
+        self.fastech_ip.set(str(ip_address))
+        self.fastech_board_id.set(int(board_id))
+        period = max(0.001, float(poll_period_s))
+        self.fastech_poll_rate_hz = 1.0 / period
+        self.fastech_io_status.configure(
+            text=(
+                f"Waiting for /fastech/io_state · {ip_address} · board "
+                f"{int(board_id)} · {self.fastech_poll_rate_hz:.0f} Hz"
+            )
         )
 
     def robot_feedback_connected(self, arm):
@@ -13718,149 +13843,88 @@ class WeldActionGui:
     def connect_fastech_ethernet(self):
         if self.fastech_connected or self.fastech_connecting:
             return
-        try:
-            ip = self.fastech_ip.get().strip()
-            board_id = int(self.fastech_board_id.get())
-        except (ValueError, tk.TclError):
-            self.error("Fastech IP or Board ID is invalid")
-            return
         self.fastech_connecting = True
         self.fastech_connect_button.configure(state=tk.DISABLED)
         self.fastech_io_status.configure(
-            text=f"Connecting TCP {ip} · board {board_id}..."
+            text="Requesting /fastech/connect..."
         )
         threading.Thread(
-            target=self._fastech_connect_worker,
-            args=(ip, board_id),
+            target=self._fastech_connection_service_worker,
+            args=(True,),
             daemon=True,
         ).start()
 
-    def _fastech_connect_worker(self, ip, board_id):
-        client = None
-        try:
-            client = FastechEthernetClient(ip, board_id)
-            device_type, version = client.connect()
-            snapshot = client.read_io()
-        except Exception as error:
-            if client is not None:
-                client.close()
-            self.post(self._fastech_connect_result, None, None, str(error))
-            return
+    def _fastech_connection_service_worker(self, connect):
+        success, message = self.node.set_fastech_connection_sync(connect)
         self.post(
-            self._fastech_connect_result,
-            client,
-            snapshot,
-            f"type {device_type} · {version}",
+            self._fastech_connection_service_result,
+            success,
+            message,
         )
 
-    def _fastech_connect_result(self, client, snapshot, detail):
+    def _fastech_connection_service_result(self, success, message):
         self.fastech_connecting = False
-        if client is None:
+        if not success:
             self.fastech_connect_button.configure(state=tk.NORMAL)
-            self.fastech_io_status.configure(text=f"Connection failed · {detail}")
-            self.error(f"Fastech connection failed: {detail}")
+            self.fastech_io_status.configure(text=message)
+            self.error(message)
             return
-        if self._closing:
-            client.close()
+        self.log(message)
+
+    def disconnect_fastech_ethernet(self):
+        if self.fastech_connecting:
             return
-        old_client = self.fastech_client
-        self.fastech_client = client
-        if old_client is not None and old_client is not client:
-            threading.Thread(target=old_client.close, daemon=True).start()
-        self.fastech_connected = True
-        self.fastech_poll_stop.clear()
-        self.fastech_previous_snapshot = None
+        self.fastech_connecting = True
+        self.fastech_disconnect_button.configure(state=tk.DISABLED)
+        self.fastech_io_status.configure(
+            text="Requesting /fastech/disconnect..."
+        )
+        threading.Thread(
+            target=self._fastech_connection_service_worker,
+            args=(False,),
+            daemon=True,
+        ).start()
+
+    def update_fastech_io(self, state_message):
+        was_connected = self.fastech_connected
+        self.fastech_connected = bool(state_message.connected)
+        if not self.fastech_connected:
+            self.fastech_previous_state = None
+            self.fastech_pending_outputs.clear()
+            self.fastech_connect_button.configure(state=tk.NORMAL)
+            self.fastech_disconnect_button.configure(state=tk.DISABLED)
+            self.fastech_all_off_button.configure(state=tk.DISABLED)
+            self._set_fastech_output_buttons(False)
+            self.touch_input_states["right"] = None
+            for (kind, channel), label in self.fastech_io_labels.items():
+                label.configure(text=f"{kind}{channel} –", bg="#eeeeee")
+            self.fastech_io_status.configure(
+                text=f"Disconnected · {state_message.detail}"
+            )
+            if was_connected:
+                self.log(
+                    f"Fastech ROS node reports disconnected · {state_message.detail}"
+                )
+            return
+
+        self.fastech_connecting = False
         self.fastech_connect_button.configure(state=tk.DISABLED)
         self.fastech_disconnect_button.configure(state=tk.NORMAL)
         self.fastech_all_off_button.configure(state=tk.NORMAL)
         self._set_fastech_output_buttons(True)
-        self.node.update_fastech_touch_input(
-            snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
-        )
-        self.update_fastech_io(snapshot)
-        self.fastech_io_status.configure(
-            text=(
-                f"Connected {client.ip} · board {client.board_id} · {detail} · "
-                f"I{client.input_count}O{client.output_count} · "
-                f"DO mask offset={client.output_offset}"
-            )
-        )
-        self.log(
-            f"Fastech connected · {client.ip} · board {client.board_id} · "
-            f"{detail} · physical DO0/5/6/7 mapped with bit offset "
-            f"{client.output_offset} · input poll target="
-            f"{1.0 / FASTECH_POLL_PERIOD_S:.0f} Hz"
-        )
-        threading.Thread(
-            target=self._fastech_poll_worker,
-            args=(client,),
-            daemon=True,
-        ).start()
-
-    def _fastech_poll_worker(self, client):
-        while not self.fastech_poll_stop.wait(FASTECH_POLL_PERIOD_S):
-            try:
-                snapshot = client.read_io()
-            except Exception as error:
-                if not self.fastech_poll_stop.is_set():
-                    self.post(self._fastech_poll_failed, client, str(error))
-                return
-            self.node.update_fastech_touch_input(
-                snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
-            )
-            self.post_latest(
-                "fastech_io", self.update_fastech_io, snapshot
-            )
-
-    def _fastech_poll_failed(self, client, message):
-        if client is not self.fastech_client:
-            return
-        self.fastech_poll_stop.set()
-        self.fastech_client = None
-        self.fastech_connected = False
-        self.fastech_pending_outputs.clear()
-        self.fastech_connect_button.configure(state=tk.NORMAL)
-        self.fastech_disconnect_button.configure(state=tk.DISABLED)
-        self.fastech_all_off_button.configure(state=tk.DISABLED)
-        self._set_fastech_output_buttons(False)
-        self.node.clear_fastech_touch_input()
-        self.touch_input_states["right"] = None
-        self.fastech_io_status.configure(text=f"Connection lost · {message}")
-        threading.Thread(target=client.close, daemon=True).start()
-        self.log(f"Fastech connection lost · {message}")
-
-    def disconnect_fastech_ethernet(self):
-        self.fastech_poll_stop.set()
-        client = self.fastech_client
-        self.fastech_client = None
-        self.fastech_connected = False
-        self.fastech_connecting = False
-        self.fastech_pending_outputs.clear()
-        self.fastech_connect_button.configure(state=tk.NORMAL)
-        self.fastech_disconnect_button.configure(state=tk.DISABLED)
-        self.fastech_all_off_button.configure(state=tk.DISABLED)
-        self._set_fastech_output_buttons(False)
-        self.node.clear_fastech_touch_input()
-        self.touch_input_states["right"] = None
-        self.fastech_io_status.configure(text="Disconnected")
-        if client is not None:
-            threading.Thread(target=client.close, daemon=True).start()
-        self.log("Fastech disconnected · output states were not changed")
-
-    def update_fastech_io(self, snapshot):
-        previous = self.fastech_previous_snapshot
+        previous = self.fastech_previous_state
         changes = []
         for channel in FASTECH_GUI_CHANNELS:
             for kind, values, old_values in (
                 (
                     "DI",
-                    snapshot.inputs,
-                    previous.inputs if previous is not None else None,
+                    state_message.digital_in,
+                    previous.digital_in if previous is not None else None,
                 ),
                 (
                     "DO",
-                    snapshot.outputs,
-                    previous.outputs if previous is not None else None,
+                    state_message.digital_out,
+                    previous.digital_out if previous is not None else None,
                 ),
             ):
                 if channel >= len(values):
@@ -13880,41 +13944,35 @@ class WeldActionGui:
                     changes.append(
                         f"{kind}{channel}={'ON' if value else 'OFF'}"
                     )
-        self.fastech_previous_snapshot = snapshot
-        if self.fastech_client is not None:
-            client = self.fastech_client
-            self.fastech_io_status.configure(
-                text=(
-                    f"Connected {client.ip} · board {client.board_id} · "
-                    f"raw DI=0x{snapshot.raw_input:08X} · "
-                    f"raw DO=0x{snapshot.raw_output:08X}"
-                )
+        self.fastech_previous_state = state_message
+        self.fastech_io_status.configure(
+            text=(
+                f"Connected {state_message.ip_address} · board "
+                f"{state_message.board_id} · {state_message.poll_rate_hz:.0f} Hz · "
+                f"raw DI=0x{state_message.raw_input:08X} · "
+                f"raw DO=0x{state_message.raw_output:08X}"
             )
-        if changes:
+        )
+        if not was_connected:
+            self.log(
+                f"Fastech ROS I/O connected · {state_message.ip_address} · "
+                f"board {state_message.board_id} · {state_message.detail}"
+            )
+        elif changes:
             self.log("Fastech I/O changed · " + ", ".join(changes))
 
     def _set_fastech_output_sync(self, channel, enabled):
-        """Set and verify a Fastech output from a sequence worker."""
-        client = self.fastech_client
-        if not self.fastech_connected or client is None:
+        """Command the Fastech owner node from a sequence worker."""
+        if not self.fastech_connected:
             return False, "Fastech Ethernet is disconnected"
-        try:
-            snapshot = client.set_output(int(channel), bool(enabled))
-        except Exception as error:
-            return False, str(error)
-        self.node.update_fastech_touch_input(
-            snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
-        )
-        self.post_latest("fastech_io", self.update_fastech_io, snapshot)
-        return True, "Fastech readback verified"
+        return self.node.set_fastech_output_sync(channel, enabled)
 
     def request_fastech_output(self, channel, enabled):
         channel = int(channel)
         if channel not in FASTECH_GUI_CHANNELS:
             self.error(f"Fastech DO{channel} is not exposed in this GUI")
             return
-        client = self.fastech_client
-        if not self.fastech_connected or client is None:
+        if not self.fastech_connected:
             self.error("Connect Fastech before commanding an output")
             return
         if channel in self.fastech_pending_outputs:
@@ -13933,18 +13991,17 @@ class WeldActionGui:
         )
         threading.Thread(
             target=self._fastech_output_worker,
-            args=(client, {channel: bool(enabled)}),
+            args=({channel: bool(enabled)},),
             daemon=True,
         ).start()
 
     def fastech_outputs_all_off(self):
-        client = self.fastech_client
-        if not self.fastech_connected or client is None:
+        if not self.fastech_connected:
             self.error("Connect Fastech before commanding outputs")
             return
         if not messagebox.askyesno(
-            "Fastech DO0/5/6/7 all OFF",
-            "Command physical Fastech DO0, DO5, DO6, and DO7 to OFF?",
+            "Fastech exposed outputs all OFF",
+            "Command physical Fastech DO0, DO3, DO4, DO5, DO6, and DO7 to OFF?",
         ):
             return
         values = {channel: False for channel in FASTECH_GUI_CHANNELS}
@@ -13955,53 +14012,49 @@ class WeldActionGui:
             )
         threading.Thread(
             target=self._fastech_output_worker,
-            args=(client, values),
+            args=(values,),
             daemon=True,
         ).start()
 
-    def _fastech_output_worker(self, client, values):
-        try:
-            snapshot = client.set_outputs(values)
-        except Exception as error:
-            self.post(
-                self._fastech_output_result,
-                client,
-                tuple(values),
-                None,
-                str(error),
+    def _fastech_output_worker(self, values):
+        failures = []
+        messages = []
+        for channel, enabled in values.items():
+            success, message = self.node.set_fastech_output_sync(
+                channel, enabled
             )
-            return
+            messages.append(message)
+            if not success:
+                failures.append(channel)
         self.post(
             self._fastech_output_result,
-            client,
             tuple(values),
-            snapshot,
-            "readback verified",
+            tuple(failures),
+            "; ".join(messages),
         )
 
-    def _fastech_output_result(
-        self, client, channels, snapshot, message
-    ):
+    def _fastech_output_result(self, channels, failures, message):
         self.fastech_pending_outputs.difference_update(channels)
-        if client is not self.fastech_client:
-            return
-        if snapshot is None:
+        if failures:
             self.log(
                 "Fastech output command rejected · "
-                + ", ".join(f"DO{channel}" for channel in channels)
+                + ", ".join(f"DO{channel}" for channel in failures)
                 + f" · {message}"
             )
-            if self.fastech_previous_snapshot is not None:
-                for channel in channels:
+            if self.fastech_previous_state is not None:
+                for channel in failures:
+                    if channel >= len(
+                        self.fastech_previous_state.digital_out
+                    ):
+                        continue
                     value = bool(
-                        self.fastech_previous_snapshot.outputs[channel]
+                        self.fastech_previous_state.digital_out[channel]
                     )
                     self.fastech_io_labels[("DO", channel)].configure(
                         text=f"DO{channel} {'ON' if value else 'OFF'}",
                         bg="#81c995" if value else "#dbeafe",
                     )
             return
-        self.update_fastech_io(snapshot)
         self.log(
             "Fastech output command OK · "
             + ", ".join(f"DO{channel}" for channel in channels)
@@ -14428,11 +14481,6 @@ class WeldActionGui:
         if self._closing:
             return
         self._closing = True
-        self.fastech_poll_stop.set()
-        fastech_client = self.fastech_client
-        self.fastech_client = None
-        if fastech_client is not None:
-            fastech_client.close()
         if self.hicomm_client is not None:
             self.hicomm_client.stop()
         self.root.quit()

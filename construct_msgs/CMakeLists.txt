@@ -23,6 +23,8 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/CartesianPath.action"
+  "msg/DigitalIoState.msg"
+  "srv/SetDigitalOutput.srv"
   DEPENDENCIES geometry_msgs
 )
 

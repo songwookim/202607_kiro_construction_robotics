@@ -31,6 +31,7 @@ setup(
             'weld_action_gui = construct_robot.weld_action_gui:main',
             'weld_feedback_plot = construct_robot.weld_feedback_plot:main',
             'controller_spawner = construct_robot.controller_spawner:main',
+            'fastech_io_node = construct_robot.fastech_io_node:main',
         ],
     },
 )

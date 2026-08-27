@@ -1,0 +1,9 @@
+bool connected
+string ip_address
+uint16 board_id
+float32 poll_rate_hz
+uint32 raw_input
+uint32 raw_output
+bool[] digital_in
+bool[] digital_out
+string detail
