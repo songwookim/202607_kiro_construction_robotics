@@ -76,11 +76,27 @@ from construct_robot.hicomm_welder import (
     TxState,
     build_request,
 )
+from construct_robot.fastech_ethernet import FastechEthernetClient
 
 
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
-TOUCH_INPUT_PORT = 8
-TOUCH_SENSING_OUTPUT_PORT = 4
+FASTECH_GUI_CHANNELS = {
+    0: "Touch sensing",
+    3: "test 1",
+    4: "test 2",
+    5: "Torch cleaner 1",
+    6: "Torch cleaner 2",
+    7: "Torch cleaner 3",
+}
+FASTECH_TOUCH_INPUT_PORT = 0
+FASTECH_TOUCH_OUTPUT_PORT = 0
+FASTECH_TOUCH_BACKEND = "fastech_ethernet"
+FASTECH_POLL_PERIOD_S = 0.01
+
+# Kept for the Controller Digital I/O test panel and later legacy inspection.
+# Production touch sensing no longer consumes these Rainbow ports.
+LEGACY_RAINBOW_TOUCH_INPUT_PORT = 8
+LEGACY_RAINBOW_TOUCH_OUTPUT_PORT = 4
 
 # Slow supervisory line-energy governor.  It intentionally acts much slower
 # than the welder's internal arc control.
@@ -135,7 +151,7 @@ TEACHING_POSES = {
 
 # Every Named TCP Teaching execution is contact guarded.  Planning remains
 # unguarded because it does not command physical motion.
-DI8_GUARDED_TEACHING_POSES = frozenset(TEACHING_POSES)
+TOUCH_GUARDED_TEACHING_POSES = frozenset(TEACHING_POSES)
 
 # Corrected seam teaching poses combine sensed/corrected XYZ with the
 # orientation originally captured for that individual named pose.
@@ -350,35 +366,41 @@ def validate_managed_weld_sequence(steps, require_complete=False):
                             "Triggered ARC OFF must share the continuous weld-motion slot"
                         )
             elif stage == "start_safe" and step.get("touch_guard", False):
-                raise ValueError("Safe approach motion must not use the DI8 guard")
+                raise ValueError(
+                    "Safe approach motion must not use the Fastech DI0 guard"
+                )
             elif stage == "start_contact":
                 if step.get("touch_guard", False) and (
                     not step.get("continue_after_touch", False)
                     or step.get("accept_initial_touch", False)
                 ):
                     raise ValueError(
-                        "Guarded START contact must require a new DI8 edge, "
+                        "Guarded START contact must require a new Fastech DI0 edge, "
                         "stop, then continue"
                     )
             elif stage == "touch_output_off" and (
                 step.get("type") != "digital_output"
-                or int(step.get("port", -1)) != TOUCH_SENSING_OUTPUT_PORT
+                or step.get("io_backend") != FASTECH_TOUCH_BACKEND
+                or int(step.get("port", -1)) != FASTECH_TOUCH_OUTPUT_PORT
                 or bool(step.get("value", True))
             ):
                 raise ValueError(
-                    "Generated scenario must turn DO4 OFF before ARC ON"
+                    "Generated scenario must turn Fastech DO0 OFF before ARC ON"
                 )
             elif stage == "touch_output_on" and (
                 step.get("type") != "digital_output"
-                or int(step.get("port", -1)) != TOUCH_SENSING_OUTPUT_PORT
+                or step.get("io_backend") != FASTECH_TOUCH_BACKEND
+                or int(step.get("port", -1)) != FASTECH_TOUCH_OUTPUT_PORT
                 or not bool(step.get("value", False))
             ):
                 raise ValueError(
-                    "Generated scenario must restore DO4 ON after finish"
+                    "Generated scenario must restore Fastech DO0 ON after finish"
                 )
             elif stage == "weld_motion":
                 if step.get("touch_guard", False):
-                    raise ValueError("DI8 must be ignored during weld motion")
+                    raise ValueError(
+                        "Fastech DI0 must be ignored during weld motion"
+                    )
                 stabilize_s = float(step.get("arc_stabilize_s", 0.0))
                 if not 0.0 <= stabilize_s <= 5.0:
                     raise ValueError("ARC stabilize time must be in 0..5 seconds")
@@ -1891,7 +1913,7 @@ def save_seam_touch_yaml(
     stopped_poses=None,
     probe_configuration=None,
 ):
-    """Atomically save raw DI8 contact and probe-start poses for diagnostics."""
+    """Atomically save raw Fastech DI0 contact and probe-start poses for diagnostics."""
     path = Path(path)
 
     def pose_document(pose):
@@ -2200,7 +2222,7 @@ class WeldGuiNode(Node):
             )
             for device in ("left", "right", "head")
         }
-        self.digital_output_client = self.create_client(
+        self.legacy_digital_output_client = self.create_client(
             SetDigitalOutput,
             "/right_rbpodo_hardware/set_digital_output",
         )
@@ -2232,8 +2254,10 @@ class WeldGuiNode(Node):
         self.touch_guard_triggered = threading.Event()
         self.touch_guard_stop_complete = threading.Event()
         self.touch_guard_stop_success = False
+        self.fastech_touch_input_state = None
         self.node_touch_input_states = {"left": None, "right": None}
-        self.node_digital_outputs = {"left": None, "right": None}
+        self.legacy_node_touch_input_states = {"left": None, "right": None}
+        self.legacy_node_digital_outputs = {"left": None, "right": None}
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
@@ -2330,11 +2354,39 @@ class WeldGuiNode(Node):
         )
 
     def _system_state(self, message, arm):
-        touch_active = bool(message.digital_in[TOUCH_INPUT_PORT])
-        self.node_digital_outputs[arm] = tuple(message.digital_out)
-        previous_touch = self.node_touch_input_states[arm]
-        self.node_touch_input_states[arm] = touch_active
+        """Retain Rainbow controller I/O as a legacy monitor/test path."""
+        self.legacy_node_touch_input_states[arm] = bool(
+            message.digital_in[LEGACY_RAINBOW_TOUCH_INPUT_PORT]
+        )
+        self.legacy_node_digital_outputs[arm] = tuple(message.digital_out)
+        if arm == "right":
+            self.ui.post_latest(
+                "right_control_box_io",
+                self.ui.update_control_box_io,
+                tuple(message.digital_in),
+                tuple(message.digital_out),
+            )
+        if not self.expect_robot_feedback[arm]:
+            return
+        self.last_robot_feedback_at[arm] = time.monotonic()
+        self.robot_feedback_seen[arm] = True
+
+    def update_fastech_touch_input(self, touch_active):
+        """Consume the production Fastech DI0 edge from its polling thread."""
+        touch_active = bool(touch_active)
         probe = self.active_touch_probe
+        guard = self.active_touch_guard
+        arm = (
+            probe[0]
+            if probe is not None
+            else guard[0]
+            if guard is not None
+            else "right"
+        )
+        previous_touch = self.fastech_touch_input_state
+        self.fastech_touch_input_state = touch_active
+        self.node_touch_input_states["left"] = touch_active
+        self.node_touch_input_states["right"] = touch_active
         if (
             probe is not None
             and probe[0] == arm
@@ -2347,7 +2399,7 @@ class WeldGuiNode(Node):
             # this probe.
             self.touch_probe_stop_requested.set()
             try:
-                # Latch the TCP at the DI8 edge.  Waiting for measured
+                # Latch the TCP at the Fastech DI0 edge. Waiting for measured
                 # standstill before reading TF records braking overshoot as if
                 # it were the physical contact point, especially along Y.
                 self.touch_probe_edge_pose = self._current_tcp_pose(probe[2])
@@ -2362,17 +2414,17 @@ class WeldGuiNode(Node):
                 self.touch_probe_edge_pose = None
                 self.ui.post(
                     self.ui.log,
-                    f"DI8 edge TCP latch failed; stopped TCP will be used: {error}",
+                    "Fastech DI0 edge TCP latch failed; stopped TCP will be "
+                    f"used: {error}",
                 )
             self.get_logger().warning(
-                f"DI{TOUCH_INPUT_PORT} rising edge · {arm} · "
+                f"Fastech DI{FASTECH_TOUCH_INPUT_PORT} rising edge · {arm} · "
                 f"stopping active probe {probe[1]}"
             )
             threading.Thread(
                 target=self.stop_touch_probe_and_capture,
                 daemon=True,
             ).start()
-        guard = self.active_touch_guard
         if (
             guard is not None
             and guard[0] == arm
@@ -2389,17 +2441,12 @@ class WeldGuiNode(Node):
                 arm,
                 touch_active,
             )
-        if arm == "right":
-            self.ui.post_latest(
-                "right_control_box_io",
-                self.ui.update_control_box_io,
-                tuple(message.digital_in),
-                tuple(message.digital_out),
-            )
-        if not self.expect_robot_feedback[arm]:
-            return
-        self.last_robot_feedback_at[arm] = time.monotonic()
-        self.robot_feedback_seen[arm] = True
+
+    def clear_fastech_touch_input(self):
+        """Invalidate production touch state after Ethernet disconnect."""
+        self.fastech_touch_input_state = None
+        self.node_touch_input_states["left"] = None
+        self.node_touch_input_states["right"] = None
 
     def _joint_state(self, message):
         """Use complete finite measured arm states as connection feedback."""
@@ -2454,7 +2501,8 @@ class WeldGuiNode(Node):
         )
 
     def set_digital_output(self, port, value):
-        if not self.digital_output_client.wait_for_service(timeout_sec=2.0):
+        """Legacy Rainbow controller output command used by its test panel."""
+        if not self.legacy_digital_output_client.wait_for_service(timeout_sec=2.0):
             self.ui.post(
                 self.ui.digital_output_result,
                 port,
@@ -2465,7 +2513,7 @@ class WeldGuiNode(Node):
         request = SetDigitalOutput.Request()
         request.port = port
         request.value = value
-        future = self.digital_output_client.call_async(request)
+        future = self.legacy_digital_output_client.call_async(request)
         future.add_done_callback(
             lambda result: self._digital_output_result(result, port)
         )
@@ -2487,8 +2535,9 @@ class WeldGuiNode(Node):
                 str(error),
             )
 
-    def _set_digital_output_sync(self, port, value):
-        if not self.digital_output_client.wait_for_service(timeout_sec=2.0):
+    def _set_legacy_digital_output_sync(self, port, value):
+        """Blocking Rainbow output command retained only for legacy use."""
+        if not self.legacy_digital_output_client.wait_for_service(timeout_sec=2.0):
             return False, "RBPodo set_digital_output service unavailable"
         request = SetDigitalOutput.Request()
         request.port = int(port)
@@ -2504,7 +2553,9 @@ class WeldGuiNode(Node):
                 outcome["value"] = (False, str(error))
             event.set()
 
-        self.digital_output_client.call_async(request).add_done_callback(completed)
+        self.legacy_digital_output_client.call_async(request).add_done_callback(
+            completed
+        )
         if not event.wait(timeout=3.0):
             return False, "RBPodo digital output command timed out"
         success, message = outcome["value"]
@@ -2512,7 +2563,7 @@ class WeldGuiNode(Node):
             return False, message
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
-            outputs = self.node_digital_outputs.get("right")
+            outputs = self.legacy_node_digital_outputs.get("right")
             if outputs is not None and 0 <= int(port) < len(outputs):
                 if bool(outputs[int(port)]) == bool(value):
                     return True, f"{message} · system_state confirmed"
@@ -2929,7 +2980,7 @@ class WeldGuiNode(Node):
         self.pose_publisher.publish(pose_array)
 
     def publish_touch_geometry(self, endpoint, wall, floor, seam_point):
-        """Show two DI8 contacts, their midpoint, and reconstructed seam point."""
+        """Show two Fastech DI0 contacts, their midpoint, and reconstructed seam point."""
         endpoint = str(endpoint).strip().lower()
         if endpoint not in ("start", "goal"):
             raise ValueError(f"unknown touch endpoint: {endpoint}")
@@ -3142,7 +3193,7 @@ class WeldGuiNode(Node):
         velocity_scale,
         interpolation_step,
     ):
-        """Execute a straight World-vector probe path; the GUI cancels on DI8."""
+        """Execute a straight World-vector probe path; the GUI cancels on Fastech DI0."""
         arm = planning_group.removesuffix("_manipulator")
         try:
             start = self._current_tcp_pose(planning_group)
@@ -3197,12 +3248,12 @@ class WeldGuiNode(Node):
             self.touch_stop_lock.release()
 
     def _stop_touch_probe_and_capture_locked(self):
-        """Serialized implementation for a DI8 rising edge."""
+        """Serialized implementation for a Fastech DI0 rising edge."""
         probe = self.active_touch_probe
         if probe is None:
             return
         arm, kind, planning_group, start, speed, interpolation = probe
-        stationary, controller_deactivated = self._stop_motion_on_di8(
+        stationary, controller_deactivated = self._stop_motion_on_touch(
             arm, f"probe {kind}"
         )
         self.touch_probe_controller_deactivated = controller_deactivated
@@ -3213,7 +3264,7 @@ class WeldGuiNode(Node):
                 self.touch_probe_controller_deactivated = False
             self.ui.post(
                 self.ui.touch_probe_failed,
-                "DI8 received, but measured joints did not reach standstill",
+                "Fastech DI0 received, but measured joints did not reach standstill",
             )
             return
         try:
@@ -3244,7 +3295,7 @@ class WeldGuiNode(Node):
         )
         self.ui.post(
             self.ui.log,
-            f"DI8 CONTACT LATCH · {kind} · edge XYZ="
+            f"Fastech DI0 CONTACT LATCH · {kind} · edge XYZ="
             f"({edge_values[0]:.6f}, {edge_values[1]:.6f}, "
             f"{edge_values[2]:.6f}) m · braking delta="
             f"({braking_mm[0]:+.3f}, {braking_mm[1]:+.3f}, "
@@ -3260,7 +3311,7 @@ class WeldGuiNode(Node):
             stopped_pose,
         )
 
-    def _stop_motion_on_di8(self, arm, label):
+    def _stop_motion_on_touch(self, arm, label):
         """Apply the seam-probe controlled-stop ladder to any guarded move."""
         handle = self.active_motion_goal
         action_finished = threading.Event()
@@ -3274,7 +3325,7 @@ class WeldGuiNode(Node):
             except Exception as error:
                 self.ui.post(
                     self.ui.log,
-                    f"DI8 {label} action cancel warning: {error}",
+                    f"Fastech DI0 {label} action cancel warning: {error}",
                 )
 
         # Prefer action cancellation while keeping the trajectory controller
@@ -3284,7 +3335,7 @@ class WeldGuiNode(Node):
         cancel_success, cancel_message = self.cancel_controller_goals(arm)
         self.ui.post(
             self.ui.log,
-            f"DI8 direct trajectory cancel: "
+            f"Fastech DI0 direct trajectory cancel: "
             f"{'OK' if cancel_success else 'FAILED'} · {cancel_message}",
         )
         action_finished.wait(timeout=0.25)
@@ -3295,7 +3346,7 @@ class WeldGuiNode(Node):
         if cancel_success and stationary:
             self.ui.post(
                 self.ui.log,
-                "DI8 smooth stop: action canceled · controller kept active",
+                "Fastech DI0 smooth stop: action canceled · controller kept active",
             )
         else:
             controller_success, controller_message = self.switch_arm_controller(
@@ -3307,13 +3358,13 @@ class WeldGuiNode(Node):
             )
             self.ui.post(
                 self.ui.log,
-                f"DI8 fallback controller stop: "
+                f"Fastech DI0 fallback controller stop: "
                 f"{'OK' if controller_success else 'FAILED'} · "
                 f"{controller_message}",
             )
             self.ui.post(
                 self.ui.log,
-                f"DI8 fallback RBPodo move_stop: "
+                f"Fastech DI0 fallback RBPodo move_stop: "
                 f"{'OK' if direct_stop_success else 'FAILED'} · "
                 f"{direct_stop_message}",
             )
@@ -3321,7 +3372,7 @@ class WeldGuiNode(Node):
         if handle is not None and not action_finished.wait(timeout=2.0):
             self.ui.post(
                 self.ui.log,
-                "DI8 motion is physically stopped; outer action cleanup "
+                "Fastech DI0 motion is physically stopped; outer action cleanup "
                 "is still pending",
             )
         return bool(stationary), controller_deactivated
@@ -3358,11 +3409,11 @@ class WeldGuiNode(Node):
 
     def stop_sequence_equipment(self, devices):
         """Cancel every robot goal and escalate until measured motion stops."""
-        do_success, do_message = self._set_digital_output_sync(
-            TOUCH_SENSING_OUTPUT_PORT, False
+        do_success, do_message = self.ui._set_fastech_output_sync(
+            FASTECH_TOUCH_OUTPUT_PORT, False
         )
         results = [
-            f"DO{TOUCH_SENSING_OUTPUT_PORT} OFF="
+            f"Fastech DO{FASTECH_TOUCH_OUTPUT_PORT} OFF="
             f"{'OK' if do_success else 'FAILED'} ({do_message})"
         ]
         for device in tuple(dict.fromkeys(devices)):
@@ -3401,7 +3452,7 @@ class WeldGuiNode(Node):
             arm, pose_name = guard
             self.touch_guard_triggered.set()
             self.touch_guard_stop_success = False
-            stationary, controller_deactivated = self._stop_motion_on_di8(
+            stationary, controller_deactivated = self._stop_motion_on_touch(
                 arm, f"guarded named pose {pose_name}"
             )
             restored = True
@@ -3410,26 +3461,26 @@ class WeldGuiNode(Node):
                 restored, restore_message = self.switch_arm_controller(arm, True)
                 self.ui.post(
                     self.ui.log,
-                    f"DI8 guarded motion controller restore: "
+                    f"Fastech DI0 guarded motion controller restore: "
                     f"{'OK' if restored else 'FAILED'} · {restore_message}",
                 )
             self.touch_guard_stop_success = bool(stationary and restored)
             if not stationary:
                 self.ui.post(
                     self.ui.error,
-                    f"DI8 detected during {pose_name}, but standstill was not confirmed",
+                    f"Fastech DI0 detected during {pose_name}, but standstill was not confirmed",
                 )
             elif not restored:
                 self.ui.post(
                     self.ui.error,
-                    f"DI8 stopped {pose_name}, but controller restore failed: "
+                    f"Fastech DI0 stopped {pose_name}, but controller restore failed: "
                     f"{restore_message}",
                 )
         finally:
-            # The DI8 edge terminates only this guarded execution.  Drop the
+            # The Fastech DI0 edge terminates only this guarded execution.  Drop the
             # guard as soon as stop/recovery finishes so a later command can
-            # move again (including a deliberate retraction while DI8 is
-            # still high).  A new stop requires DI8 to release and rise again.
+            # move again (including a deliberate retraction while Fastech DI0 is
+            # still high).  A new stop requires Fastech DI0 to release and rise again.
             if self.active_touch_guard == guard:
                 self.active_touch_guard = None
             self.touch_guard_stop_complete.set()
@@ -3572,7 +3623,7 @@ class WeldGuiNode(Node):
             arm = planning_group.removesuffix("_manipulator")
             self.ui.post(
                 self.ui.log,
-                f"DI8 {probe_kind} standstill dwell · "
+                f"Fastech DI0 {probe_kind} standstill dwell · "
                 f"{settle_seconds:.1f} seconds",
             )
             time.sleep(settle_seconds)
@@ -3912,15 +3963,21 @@ class WeldGuiNode(Node):
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
         touch_guarded = bool(
-            pose_name in DI8_GUARDED_TEACHING_POSES and planning_group
+            pose_name in TOUCH_GUARDED_TEACHING_POSES and planning_group
         )
         if touch_guarded:
             arm = planning_group.removesuffix("_manipulator")
+            if self.node_touch_input_states.get(arm) is None:
+                self.ui.post(
+                    self.ui.error,
+                    "Fastech DI0 is unavailable; guarded execution was not started",
+                )
+                return
             if self.node_touch_input_states.get(arm):
                 self.ui.post(
                     self.ui.log,
-                    "DI8 is already ON; new taught-pose execution is allowed. "
-                    "Guard will stop only after DI8 releases and rises again",
+                    "Fastech DI0 is already ON; new taught-pose execution is allowed. "
+                    "Guard will stop only after Fastech DI0 releases and rises again",
                 )
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
@@ -3928,7 +3985,7 @@ class WeldGuiNode(Node):
             self.active_touch_guard = (arm, pose_name)
             self.ui.post(
                 self.ui.log,
-                f"DI8 stop guard armed for approved taught pose: {pose_name}",
+                f"Fastech DI0 stop guard armed for approved taught pose: {pose_name}",
             )
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = trajectory
@@ -3985,7 +4042,7 @@ class WeldGuiNode(Node):
             if not stop_complete:
                 self.ui.post(
                     self.ui.error,
-                    "Guarded taught-pose action ended, but DI8 stop cleanup timed out",
+                    "Guarded taught-pose action ended, but Fastech DI0 stop cleanup timed out",
                 )
             elif not stop_success:
                 self.ui.post(
@@ -3995,7 +4052,7 @@ class WeldGuiNode(Node):
             else:
                 self.ui.post(
                     self.ui.pipeline_result,
-                    "Guarded taught-pose execution stopped by DI8 · "
+                    "Guarded taught-pose execution stopped by Fastech DI0 · "
                     "execution closed · ready for the next command",
                 )
             return
@@ -4791,19 +4848,23 @@ class WeldGuiNode(Node):
         arm = step["planning_group"].removesuffix("_manipulator")
         guard_name = step.get("path_kind", "Cartesian approach")
         if touch_guarded:
+            if self.node_touch_input_states.get(arm) is None:
+                return False, (
+                    f"Fastech DI0 is unavailable; {guard_name} was not started"
+                )
             if self.node_touch_input_states.get(arm):
                 if step.get("accept_initial_touch", False):
                     return True, (
-                        f"{guard_name} already at START contact (DI8 ON) · "
+                        f"{guard_name} already at START contact (Fastech DI0 ON) · "
                         "approach skipped and weld stages will continue"
                     )
                 if not step.get("allow_initial_touch_motion", False):
                     return False, (
-                        f"DI8 is already ON; {guard_name} was not started"
+                        f"Fastech DI0 is already ON; {guard_name} was not started"
                     )
                 self.ui.post(
                     self.ui.log,
-                    f"{guard_name} starts while DI8 is ON · Cartesian "
+                    f"{guard_name} starts while Fastech DI0 is ON · Cartesian "
                     "retraction allowed; guard waits for a new rising edge",
                 )
             self.touch_guard_triggered.clear()
@@ -4813,7 +4874,7 @@ class WeldGuiNode(Node):
             self.active_touch_guard = (arm, guard_name)
             self.ui.post(
                 self.ui.log,
-                f"DI8 stop guard armed only for {guard_name}",
+                f"Fastech DI0 stop guard armed only for {guard_name}",
             )
         def trajectory_feedback(message):
             feedback = message.feedback
@@ -4848,14 +4909,14 @@ class WeldGuiNode(Node):
             )
             if touch_guarded and self.touch_guard_triggered.is_set():
                 if not self.touch_guard_stop_complete.wait(timeout=5.0):
-                    return False, f"{guard_name} DI8 stop confirmation timed out"
+                    return False, f"{guard_name} Fastech DI0 stop confirmation timed out"
                 if not self.touch_guard_stop_success:
-                    return False, f"{guard_name} DI8 standstill was not confirmed"
+                    return False, f"{guard_name} Fastech DI0 standstill was not confirmed"
                 continue_after_touch = bool(
                     step.get("continue_after_touch", False)
                 )
                 return continue_after_touch, (
-                    f"{guard_name} stopped by DI8 · "
+                    f"{guard_name} stopped by Fastech DI0 · "
                     + (
                         "continuing with unguarded weld stages"
                         if continue_after_touch
@@ -4929,15 +4990,19 @@ class WeldGuiNode(Node):
             execute_requested
             and (
                 step.get("touch_guard", False)
-                or step.get("pose_name") in DI8_GUARDED_TEACHING_POSES
+                or step.get("pose_name") in TOUCH_GUARDED_TEACHING_POSES
             )
         )
         arm = step["planning_group"].removesuffix("_manipulator")
         if touch_guarded:
+            if self.node_touch_input_states.get(arm) is None:
+                return False, (
+                    "Fastech DI0 is unavailable; guarded named motion was not started"
+                )
             if self.node_touch_input_states.get(arm):
                 self.ui.post(
                     self.ui.log,
-                    f"{step['pose_label']} starts while DI8 is ON · "
+                    f"{step['pose_label']} starts while Fastech DI0 is ON · "
                     "allowed for contact retraction; guard waits for a new rising edge",
                 )
             self.touch_guard_triggered.clear()
@@ -4946,7 +5011,7 @@ class WeldGuiNode(Node):
             self.active_touch_guard = (arm, step["pose_name"])
             self.ui.post(
                 self.ui.log,
-                f"DI8 stop guard armed for {step['pose_label']} approach",
+                f"Fastech DI0 stop guard armed for {step['pose_label']} approach",
             )
         try:
             result = self._send_action_goal_and_wait(
@@ -4961,14 +5026,14 @@ class WeldGuiNode(Node):
             )
             if touch_guarded and self.touch_guard_triggered.is_set():
                 if not self.touch_guard_stop_complete.wait(timeout=5.0):
-                    return False, "DI8 stop confirmation timed out"
+                    return False, "Fastech DI0 stop confirmation timed out"
                 if not self.touch_guard_stop_success:
-                    return False, "DI8 standstill was not confirmed"
+                    return False, "Fastech DI0 standstill was not confirmed"
                 continue_after_touch = bool(
                     step.get("continue_after_touch", False)
                 )
                 return continue_after_touch, (
-                    f"{step['pose_label']} stopped by DI8 · "
+                    f"{step['pose_label']} stopped by Fastech DI0 · "
                     + (
                         "continuing sequence"
                         if continue_after_touch
@@ -5326,7 +5391,7 @@ class WeldActionGui:
         self.corner_touch_count = tk.IntVar(value=10)
         self.corner_touches = {name: None for name in CORNER_TOUCH_NAMES}
         # seam_axis is retained only for backward-compatible touch YAML / legacy
-        # helpers.  New DI8 probing uses explicit probe directions below.
+        # helpers.  New Fastech DI0 probing uses explicit probe directions below.
         self.seam_axis = tk.StringVar(value="X")
         self.wall_probe_axis = tk.StringVar(value="AUTO ⟂ taught seam (XY)")
         self.floor_probe_axis = tk.StringVar(value="World Z")
@@ -5447,6 +5512,16 @@ class WeldActionGui:
         self.control_box_io_labels = {}
         self.pending_do_ports = set()
         self.unlock_all_do_ports = tk.BooleanVar(value=False)
+        self.fastech_ip = tk.StringVar(value="192.168.0.3")
+        self.fastech_board_id = tk.IntVar(value=0)
+        self.fastech_client = None
+        self.fastech_connected = False
+        self.fastech_connecting = False
+        self.fastech_poll_stop = threading.Event()
+        self.fastech_previous_snapshot = None
+        self.fastech_pending_outputs = set()
+        self.fastech_io_labels = {}
+        self.fastech_output_buttons = []
         # Reproduce the successful v5.2 Rainbow capture byte-for-byte by
         # default, unless the last saved weld feedback log recorded a
         # different recipe -- then start from exactly what last ran.
@@ -5791,7 +5866,7 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=5, pady=3)
         ttk.Label(
             feedback_tools,
-            text="saves latest_weld_feedback.png beside the log",
+            text="saves feedback PNG + complete trajectory_3d PNG beside the log",
         ).pack(side=tk.LEFT, padx=8)
 
         welder_test = self._create_toggle_section(
@@ -6166,7 +6241,7 @@ class WeldActionGui:
         touch_corner = self._create_toggle_section(
             outer,
             "touch_corner",
-            "Seam Correction · DI8 wall/base probing + seam-yaw orientation",
+            "Seam Correction · Fastech DI0 wall/base probing + seam-yaw orientation",
         )
 
         geometry_controls = ttk.Frame(touch_corner)
@@ -6634,12 +6709,12 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=4)
         ttk.Checkbutton(
             sleep_editor,
-            text="DI8 guard",
+            text="Fastech DI0 guard",
             variable=self.sequence_edit_touch_guard,
         ).pack(side=tk.LEFT, padx=6)
         ttk.Checkbutton(
             sleep_editor,
-            text="continue after DI8 stop",
+            text="continue after Fastech DI0 stop",
             variable=self.sequence_edit_continue_after_touch,
         ).pack(side=tk.LEFT, padx=6)
         head_editor = ttk.Frame(sequence)
@@ -6711,10 +6786,107 @@ class WeldActionGui:
             command=self.clear_path,
         ).pack(anchor=tk.E, pady=(5, 0))
 
+        fastech_io = self._create_toggle_section(
+            outer,
+            "fastech_ethernet",
+            "Fastech Ethernet I/O · 0 Touch · 5/6/7 Torch cleaner",
+        )
+        ttk.Label(fastech_io, text="IP").grid(
+            row=0, column=0, padx=(6, 2), pady=4, sticky=tk.E
+        )
+        ttk.Entry(
+            fastech_io, textvariable=self.fastech_ip, width=15
+        ).grid(row=0, column=1, padx=(2, 8), pady=4)
+        ttk.Label(fastech_io, text="Board ID").grid(
+            row=0, column=2, padx=(2, 2), pady=4, sticky=tk.E
+        )
+        ttk.Spinbox(
+            fastech_io,
+            from_=0,
+            to=255,
+            textvariable=self.fastech_board_id,
+            width=5,
+        ).grid(row=0, column=3, padx=(2, 8), pady=4)
+        self.fastech_connect_button = ttk.Button(
+            fastech_io,
+            text="Connect Fastech",
+            command=self.connect_fastech_ethernet,
+        )
+        self.fastech_connect_button.grid(row=0, column=4, padx=3, pady=4)
+        self.fastech_disconnect_button = ttk.Button(
+            fastech_io,
+            text="Disconnect",
+            command=self.disconnect_fastech_ethernet,
+            state=tk.DISABLED,
+        )
+        self.fastech_disconnect_button.grid(row=0, column=5, padx=3, pady=4)
+        self.fastech_all_off_button = ttk.Button(
+            fastech_io,
+            text="DO0/5/6/7 all OFF",
+            command=self.fastech_outputs_all_off,
+            state=tk.DISABLED,
+        )
+        self.fastech_all_off_button.grid(
+            row=0, column=6, padx=(12, 3), pady=4
+        )
+        self.fastech_io_status = ttk.Label(
+            fastech_io,
+            text="Starting · auto-connect to 192.168.0.3",
+        )
+        self.fastech_io_status.grid(
+            row=0, column=7, columnspan=2, padx=(10, 6), pady=4, sticky=tk.W
+        )
+
+        for column, heading in enumerate(
+            ("Channel", "Function", "DI state", "DO state", "DO ON", "DO OFF")
+        ):
+            ttk.Label(
+                fastech_io, text=heading, font=("Sans", 9, "bold")
+            ).grid(row=1, column=column, padx=6, pady=(4, 2), sticky=tk.W)
+        for row, (channel, description) in enumerate(
+            FASTECH_GUI_CHANNELS.items(), start=2
+        ):
+            ttk.Label(fastech_io, text=str(channel)).grid(
+                row=row, column=0, padx=6, pady=3, sticky=tk.W
+            )
+            ttk.Label(fastech_io, text=description).grid(
+                row=row, column=1, padx=6, pady=3, sticky=tk.W
+            )
+            for column, kind in ((2, "DI"), (3, "DO")):
+                label = tk.Label(
+                    fastech_io,
+                    text=f"{kind}{channel} –",
+                    width=10,
+                    relief=tk.SOLID,
+                    bg="#eeeeee",
+                    font=("Monospace", 9, "bold"),
+                )
+                label.grid(row=row, column=column, padx=6, pady=3)
+                self.fastech_io_labels[(kind, channel)] = label
+            on_button = ttk.Button(
+                fastech_io,
+                text="ON",
+                state=tk.DISABLED,
+                command=lambda selected=channel: self.request_fastech_output(
+                    selected, True
+                ),
+            )
+            off_button = ttk.Button(
+                fastech_io,
+                text="OFF",
+                state=tk.DISABLED,
+                command=lambda selected=channel: self.request_fastech_output(
+                    selected, False
+                ),
+            )
+            on_button.grid(row=row, column=4, padx=3, pady=3)
+            off_button.grid(row=row, column=5, padx=3, pady=3)
+            self.fastech_output_buttons.extend((on_button, off_button))
+
         io_monitor = self._create_toggle_section(
             outer,
             "digital_io",
-            "Digital I/O · DI8 = TOUCH · ports 0..15",
+            "Legacy Rainbow Controller Digital I/O test · ports 0..15",
         )
         for io_row, kind in enumerate(("DI", "DO")):
             ttk.Label(
@@ -6912,6 +7084,7 @@ class WeldActionGui:
             daemon=True,
         )
         self.executor_thread.start()
+        self.root.after(100, self.connect_fastech_ethernet)
         self._auto_load_teaching_states()
         loaded_settings = self._last_execution_settings.get("settings", {})
         loaded_motion = self._last_execution_settings.get("motion", {})
@@ -8001,7 +8174,7 @@ class WeldActionGui:
         self.post(
             self.log,
             f"WELD FEEDBACK SAVED · {history_path} · "
-            f"PNG generation requested · result={result}",
+            f"feedback + trajectory_3d PNG generation requested · result={result}",
         )
         return history_path
 
@@ -8623,7 +8796,7 @@ class WeldActionGui:
         self.computed_seam_wait_points = {"start": None, "goal": None}
         self.seam_auto_returned_kinds.clear()
 
-        # A displayed DI8 seam is also stale once its teaching changes.
+        # A displayed Fastech DI0 seam is also stale once its teaching changes.
         if str(self.path_kind).startswith("di8_four_touch"):
             self.path_kind = "empty"
             self.weave_source = []
@@ -8675,10 +8848,10 @@ class WeldActionGui:
             )
             return
         if self.touch_input_states["right"] is None:
-            self.error("DI8 state has not been received yet")
+            self.error("Fastech DI0 state has not been received yet")
             return
         if self.touch_input_states["right"]:
-            self.error("DI8 is already ON; release it before auto correction")
+            self.error("Fastech DI0 is already ON; release it before auto correction")
             return
         orientation_note = (
             "START/GOAL orientation = each WAIT orientation + fixed Tool XYZ "
@@ -8696,7 +8869,7 @@ class WeldActionGui:
             "→ compute seam/yaw → save START/GOAL YAML\n"
             "→ move to 7 · Weld end pose\n\n"
             f"{orientation_note}\n\n"
-            "Each DI8 edge stops the probe and returns to its probe start.\n"
+            "Each Fastech DI0 edge stops the probe and returns to its probe start.\n"
             "The taught START/GOAL wait poses remain unchanged.",
         ):
             return
@@ -8727,7 +8900,7 @@ class WeldActionGui:
                 orientation_source = TEACHING_POSES[endpoint_name]
 
             # IMPORTANT for tilted welding:
-            # The DI8 wall/floor contact is recorded as the robot TCP pose. If
+            # The Fastech DI0 wall/floor contact is recorded as the robot TCP pose. If
             # probing is done with the WAIT attitude while the welded endpoint
             # uses a different (tilted) attitude, any TCP-to-wire/contact lever
             # arm rotates and appears as a false Y/Z seam correction. Probe with
@@ -8886,7 +9059,7 @@ class WeldActionGui:
             return
         self.show_path.set(True)
         self.log(
-            "Published DI8 touch geometry to RViz /weld_path_markers · "
+            "Published Fastech DI0 touch geometry to RViz /weld_path_markers · "
             f"{', '.join(name.upper() for name in published)} · "
             "red=wall, blue=floor, green=seam, yellow=midpoint"
         )
@@ -8894,7 +9067,7 @@ class WeldActionGui:
     def show_touch_geometry_pyplot(self, endpoint=None):
         touch_yaml = self._seam_touch_yaml_path("right_manipulator")
         if not touch_yaml.is_file():
-            self.error("No saved DI8 touch YAML exists yet")
+            self.error("No saved Fastech DI0 touch YAML exists yet")
             return False
         plot_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
         if not plot_python.is_file():
@@ -8918,7 +9091,7 @@ class WeldActionGui:
             self.error(f"Cannot open touch-result PyPlot: {error}")
             return False
         self.log(
-            "Opened DI8 touch-result PyPlot · "
+            "Opened Fastech DI0 touch-result PyPlot · "
             + (endpoint.upper() if endpoint else "START + GOAL")
         )
         return True
@@ -9006,13 +9179,13 @@ class WeldActionGui:
                 )
                 self.post(
                     self._set_auto_seam_status,
-                    f"AUTO {kind} returned · waiting for DI8 OFF",
+                    f"AUTO {kind} returned · waiting for Fastech DI0 OFF",
                 )
-                if not self._wait_for_di8_release(timeout=180.0):
+                if not self._wait_for_touch_release(timeout=180.0):
                     self.post(
                         self._finish_automatic_seam_correction,
                         False,
-                        f"{kind} completed, but DI8 remained ON",
+                        f"{kind} completed, but Fastech DI0 remained ON",
                     )
                     return
             if group_index == 1:
@@ -9023,7 +9196,7 @@ class WeldActionGui:
                 )
         self.post(self._complete_automatic_seam_correction)
 
-    def _wait_for_di8_release(self, timeout):
+    def _wait_for_touch_release(self, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if not self.touch_input_states.get("right", True):
@@ -9291,19 +9464,19 @@ class WeldActionGui:
             self.error(f"Unknown touch probe kind: {kind}")
             return
         if self.automatic_probe_kind is not None:
-            self.error("Another DI8 touch probe is already active")
+            self.error("Another Fastech DI0 touch probe is already active")
             return
         if self.planning_group.get() != "right_manipulator":
-            self.error("Automatic DI8 seam probing currently supports the right arm")
+            self.error("Automatic Fastech DI0 seam probing currently supports the right arm")
             return
         if not self.execution_allowed or not self.robot_connected["right"]:
             self.error("Connect the right robot and enable physical execution")
             return
         if self.touch_input_states["right"] is None:
-            self.error("DI8 state has not been received yet")
+            self.error("Fastech DI0 state has not been received yet")
             return
         if self.touch_input_states["right"]:
-            self.error("DI8 is already ON; release the touch signal before probing")
+            self.error("Fastech DI0 is already ON; release the touch signal before probing")
             return
         try:
             distance = float(self.touch_probe_distance_mm.get()) * 0.001
@@ -9343,16 +9516,32 @@ class WeldActionGui:
         signed_direction = tuple(sign_scale * value for value in direction)
         if not skip_confirmation:
             if not messagebox.askyesno(
-                "Execute DI8 touch probe",
+                "Execute Fastech DI0 touch probe",
                 f"{kind.replace('_', ' ').upper()}\n"
                 f"Direction: {direction_label} · sign {sign}\n"
                 f"World vector=({signed_direction[0]:+.3f}, "
                 f"{signed_direction[1]:+.3f}, {signed_direction[2]:+.3f})\n"
                 f"Travel up to {distance * 1000.0:.1f} mm at {speed:.1%}?\n\n"
-                "DI8 will stop the motion and return to the current "
+                "Fastech DI0 will stop the motion and return to the current "
                 "start pose.",
             ):
                 return
+        touch_enabled, touch_message = self._set_fastech_output_sync(
+            FASTECH_TOUCH_OUTPUT_PORT, True
+        )
+        if not touch_enabled:
+            self.error(
+                "Cannot enable touch sensing on Fastech DO0: "
+                f"{touch_message}"
+            )
+            return
+        if self.node.node_touch_input_states.get("right"):
+            self.error(
+                "Fastech DI0 became ON while enabling touch sensing; "
+                "probe motion was not started"
+            )
+            return
+        self.log("Fastech DO0 touch sensing enabled · readback confirmed")
         if self.hicomm_client is not None:
             self.hicomm_client.set_arc(False)
         self.automatic_probe_kind = kind
@@ -9360,7 +9549,7 @@ class WeldActionGui:
             text=(
                 f"PROBING {kind.upper()} · {direction_label} {sign} · "
                 f"v=({signed_direction[0]:+.2f}, {signed_direction[1]:+.2f}, "
-                f"{signed_direction[2]:+.2f}) · waiting for DI8"
+                f"{signed_direction[2]:+.2f}) · waiting for Fastech DI0"
             )
         )
         threading.Thread(
@@ -9470,7 +9659,7 @@ class WeldActionGui:
         return self.seam_teaching_reference
 
     def compute_seam_endpoint(self, endpoint, update_wait_joints=True):
-        """Compute START or GOAL independently from its two DI8 poses."""
+        """Compute START or GOAL independently from its two Fastech DI0 poses."""
         teaching_reference = self._ensure_seam_teaching_reference(
             require_complete=True
         )
@@ -10105,14 +10294,14 @@ class WeldActionGui:
             )
             approach_start = self._sensed_motion_step(
                 near_approach_points,
-                f"safe_to_pre_start_to_{start_path_name}_DI8"
+                f"safe_to_pre_start_to_{start_path_name}_fastech_di0"
                 if safe_approach is not None
-                else f"start_wait_to_{start_path_name}_DI8",
+                else f"start_wait_to_{start_path_name}_fastech_di0",
                 contact_slot,
                 touch_guard=False,
             )
             approach_start["continue_after_touch"] = True
-            # A stale/high DI8 at START WAIT must never skip directly to ARC.
+            # A stale/high Fastech DI0 at START WAIT must never skip directly to ARC.
             # Require a fresh rising edge, confirm standstill, then continue.
             approach_start["accept_initial_touch"] = False
             approach_start.update({
@@ -10148,7 +10337,8 @@ class WeldActionGui:
                 managed(approach_start, "start_contact"),
                 managed({
                     "type": "digital_output",
-                    "port": TOUCH_SENSING_OUTPUT_PORT,
+                    "io_backend": FASTECH_TOUCH_BACKEND,
+                    "port": FASTECH_TOUCH_OUTPUT_PORT,
                     "value": False,
                     "parallel_slot": touch_output_off_slot,
                     "duration": 0.0,
@@ -10241,11 +10431,11 @@ class WeldActionGui:
             weld_motion = self._sensed_motion_step(
                 weld_points,
                 (
-                    f"continuous_{weave_pattern}_weave_over_{goal_path_name}_DI8_ignored"
+                    f"continuous_{weave_pattern}_weave_over_{goal_path_name}_fastech_di0_ignored"
                     if weave_enabled
-                    else f"continuous_lead_to_lead_over_{goal_path_name}_DI8_ignored"
+                    else f"continuous_lead_to_lead_over_{goal_path_name}_fastech_di0_ignored"
                     if has_lead_in or has_lead_out
-                    else f"continuous_{start_path_name}_to_{goal_path_name}_weld_DI8_ignored"
+                    else f"continuous_{start_path_name}_to_{goal_path_name}_weld_fastech_di0_ignored"
                 ),
                 weld_slot,
             )
@@ -10329,7 +10519,8 @@ class WeldActionGui:
                 ),
                 managed({
                     "type": "digital_output",
-                    "port": TOUCH_SENSING_OUTPUT_PORT,
+                    "io_backend": FASTECH_TOUCH_BACKEND,
+                    "port": FASTECH_TOUCH_OUTPUT_PORT,
                     "value": True,
                     "parallel_slot": final_slot,
                     "duration": 0.0,
@@ -10370,9 +10561,9 @@ class WeldActionGui:
             f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°) · "
             + (
-                "START WAIT → SAFE(weld attitude) → PRE-START → START/DI8 → DO4 OFF → "
+                "START WAIT → SAFE(weld attitude) → PRE-START → START/Fastech DI0 → Fastech DO0 OFF → "
                 if safe_approach is not None
-                else "START WAIT → START/DI8(teaching attitude) → DO4 OFF → "
+                else "START WAIT → START/Fastech DI0(teaching attitude) → Fastech DO0 OFF → "
             )
             + (
                 (
@@ -10385,7 +10576,7 @@ class WeldActionGui:
             )
             + "[pre-gas → D-WELD ON/ARC established → stabilize → endpoint-only LEAD→LEAD motion "
             "(START/GOAL are logical ARC landmarks) + pre-GOAL ARC-OFF watcher] "
-            "→ GOAL WAIT → END → DO4 ON"
+            "→ GOAL WAIT → END → Fastech DO0 ON"
         )
 
     def build_initial_scenario(self):
@@ -10426,7 +10617,7 @@ class WeldActionGui:
                 "tcp_speed_m_s": tcp_speed_m_s,
                 "parallel_slot": slot,
                 "duration": 0.0,
-                "touch_guard": pose_name in DI8_GUARDED_TEACHING_POSES,
+                "touch_guard": pose_name in TOUCH_GUARDED_TEACHING_POSES,
                 "continue_after_touch": False,
             }
 
@@ -10464,7 +10655,7 @@ class WeldActionGui:
         ]
         if missing:
             self.error(
-                "Complete all four DI8 probes first: " + ", ".join(missing)
+                "Complete all four Fastech DI0 probes first: " + ", ".join(missing)
             )
             return
         teaching_reference = self._ensure_seam_teaching_reference(
@@ -10582,7 +10773,7 @@ class WeldActionGui:
             )
         )
         self.log(
-            "Computed START→GOAL seam from four DI8 touches · "
+            "Computed START→GOAL seam from four Fastech DI0 touches · "
             f"wall={wall_label} · base={floor_label} · "
             f"orientation={orientation_label} · "
             f"World Δyaw={math.degrees(delta_yaw):+.3f}° · "
@@ -10828,7 +11019,7 @@ class WeldActionGui:
             "tcp_speed_m_s": tcp_speed_m_s,
             "parallel_slot": slot,
             "duration": duration,
-            "touch_guard": pose_name in DI8_GUARDED_TEACHING_POSES,
+            "touch_guard": pose_name in TOUCH_GUARDED_TEACHING_POSES,
             "continue_after_touch": False,
         })
         self.refresh_sequence_table(select_last=True)
@@ -10964,9 +11155,9 @@ class WeldActionGui:
             )
             if step["type"] == "motion":
                 guard_detail = (
-                    " · DI8 GUARDED"
+                    " · Fastech DI0 GUARDED"
                     if step.get("touch_guard", False)
-                    else " · DI8 IGNORED"
+                    else " · Fastech DI0 IGNORED"
                 )
                 tcp_speed = float(step.get("tcp_speed_m_s", 0.0))
                 speed_detail = (
@@ -11045,8 +11236,17 @@ class WeldActionGui:
                 kind = f"GAS {'ON' if step['enabled'] else 'OFF'}"
                 detail = f"Hi-COMM shielding gas · {timing}"
             elif step["type"] == "digital_output":
-                kind = f"DO{int(step['port'])} {'ON' if step['value'] else 'OFF'}"
-                detail = f"Rainbow control-box output · {timing}"
+                backend = step.get("io_backend", "rainbow_legacy")
+                source = (
+                    "Fastech Ethernet"
+                    if backend == FASTECH_TOUCH_BACKEND
+                    else "Legacy Rainbow control-box"
+                )
+                kind = (
+                    f"{source} DO{int(step['port'])} "
+                    f"{'ON' if step['value'] else 'OFF'}"
+                )
+                detail = f"{source} output · {timing}"
             else:
                 kind = f"INCH {step['direction'].upper()}"
                 detail = f"Hi-COMM timed wire feed · {timing}"
@@ -11280,10 +11480,10 @@ class WeldActionGui:
                         "Weld lead-out (mm)",
                         float(step.get("lead_out_mm", 0.0)),
                     )
-            check("touch_guard", "Stop this step on DI8", step.get("touch_guard"))
+            check("touch_guard", "Stop this step on Fastech DI0", step.get("touch_guard"))
             check(
                 "continue_after_touch",
-                "Continue scenario after confirmed DI8 stop",
+                "Continue scenario after confirmed Fastech DI0 stop",
                 step.get("continue_after_touch"),
             )
         elif step["type"] == "head_motion":
@@ -11333,7 +11533,16 @@ class WeldActionGui:
                 "on" if step["enabled"] else "off", ("on", "off")
             )
         elif step["type"] == "digital_output":
-            entry("port", "Rainbow DO port", step["port"])
+            backend = step.get("io_backend", "rainbow_legacy")
+            entry(
+                "port",
+                (
+                    "Fastech physical DO channel"
+                    if backend == FASTECH_TOUCH_BACKEND
+                    else "Legacy Rainbow DO port"
+                ),
+                step["port"],
+            )
             choice(
                 "value",
                 "Output command",
@@ -11483,8 +11692,13 @@ class WeldActionGui:
                     updated["enabled"] = variables["enabled"].get() == "on"
                 elif updated["type"] == "digital_output":
                     port = int(variables["port"].get())
-                    if not 0 <= port <= 15:
-                        raise ValueError("Rainbow DO port must be in 0..15")
+                    backend = updated.get("io_backend", "rainbow_legacy")
+                    maximum = 7 if backend == FASTECH_TOUCH_BACKEND else 15
+                    if not 0 <= port <= maximum:
+                        raise ValueError(
+                            f"{'Fastech' if backend == FASTECH_TOUCH_BACKEND else 'Rainbow'} "
+                            f"DO port must be in 0..{maximum}"
+                        )
                     updated["port"] = port
                     updated["value"] = variables["value"].get() == "on"
                 candidate_steps = copy.deepcopy(self.sequence_steps)
@@ -11680,8 +11894,11 @@ class WeldActionGui:
         return {
             "mode": "sequence_execute" if execute_requested else "sequence_plan",
             "run_all": bool(run_all),
-            "touch_input_port": TOUCH_INPUT_PORT,
-            "touch_sensing_output_port": TOUCH_SENSING_OUTPUT_PORT,
+            "touch_io_backend": FASTECH_TOUCH_BACKEND,
+            "touch_input_port": FASTECH_TOUCH_INPUT_PORT,
+            "touch_sensing_output_port": FASTECH_TOUCH_OUTPUT_PORT,
+            "fastech_ip": self.fastech_ip.get().strip(),
+            "fastech_poll_target_hz": 1.0 / FASTECH_POLL_PERIOD_S,
             "hicomm_source_ip": self.hicomm_source_ip.get().strip(),
             "hicomm_welder_ip": self.hicomm_welder_ip.get().strip(),
             "hicomm_port": int(self.hicomm_port.get()),
@@ -11780,17 +11997,17 @@ class WeldActionGui:
                 else "right_manipulator"
             ),
             "tcp_tracking.timestamp_source": "TF_header_stamp",
-            "initial_di8": bool(
+            "initial_fastech_di0": bool(
                 self.node.node_touch_input_states.get("right", False)
             ),
-            "initial_do4": (
+            "initial_fastech_do0": (
                 None
-                if self.node.node_digital_outputs.get("right") is None
-                or len(self.node.node_digital_outputs["right"])
-                <= TOUCH_SENSING_OUTPUT_PORT
+                if self.fastech_previous_snapshot is None
+                or len(self.fastech_previous_snapshot.outputs)
+                <= FASTECH_TOUCH_OUTPUT_PORT
                 else bool(
-                    self.node.node_digital_outputs["right"][
-                        TOUCH_SENSING_OUTPUT_PORT
+                    self.fastech_previous_snapshot.outputs[
+                        FASTECH_TOUCH_OUTPUT_PORT
                     ]
                 )
             ),
@@ -11850,6 +12067,17 @@ class WeldActionGui:
             self.error(f"Unsafe generated weld scenario: {error}")
             return
         if execute_requested:
+            requires_fastech = any(
+                step.get("touch_guard", False)
+                or step.get("io_backend") == FASTECH_TOUCH_BACKEND
+                for step in steps
+            )
+            if requires_fastech and not self.fastech_connected:
+                self.error(
+                    "Connect Fastech Ethernet before executing touch-sensing "
+                    "or Fastech output steps"
+                )
+                return
             required_arms = set()
             for step in steps:
                 if step["type"] == "planned_trajectory":
@@ -11858,7 +12086,10 @@ class WeldActionGui:
                     required_arms.add(
                         step["planning_group"].removesuffix("_manipulator")
                     )
-                elif step["type"] == "digital_output":
+                elif (
+                    step["type"] == "digital_output"
+                    and step.get("io_backend") != FASTECH_TOUCH_BACKEND
+                ):
                     required_arms.add("right")
             disconnected = [
                 arm for arm in sorted(required_arms)
@@ -12050,8 +12281,8 @@ class WeldActionGui:
             client = self.hicomm_client
             if client is not None:
                 client.clear_outputs()
-            self.node._set_digital_output_sync(
-                TOUCH_SENSING_OUTPUT_PORT, False
+            self._set_fastech_output_sync(
+                FASTECH_TOUCH_OUTPUT_PORT, False
             )
             self._finish_weld_feedback_record(
                 "stopped" if self.sequence_stop_requested else f"failed: {message}",
@@ -12170,21 +12401,31 @@ class WeldActionGui:
         if step["type"] == "digital_output":
             port = int(step["port"])
             enabled = bool(step["value"])
-            success, message = self.node._set_digital_output_sync(port, enabled)
+            backend = step.get("io_backend", "rainbow_legacy")
+            if backend == FASTECH_TOUCH_BACKEND:
+                set_output = self._set_fastech_output_sync
+                output_name = "Fastech DO"
+            else:
+                set_output = self.node._set_legacy_digital_output_sync
+                output_name = "Legacy Rainbow DO"
+            success, message = set_output(port, enabled)
             if not success:
-                return False, f"DO{port} command failed: {message}"
+                return False, f"{output_name}{port} command failed: {message}"
             if not enabled or duration <= 0.0:
-                return True, f"DO{port} {'ON' if enabled else 'OFF'} confirmed"
+                return True, (
+                    f"{output_name}{port} "
+                    f"{'ON' if enabled else 'OFF'} confirmed"
+                )
             waited = self._interruptible_wait(duration)
-            off_success, off_message = self.node._set_digital_output_sync(
-                port, False
-            )
+            off_success, off_message = set_output(port, False)
             if not off_success:
-                return False, f"DO{port} timed OFF failed: {off_message}"
+                return False, (
+                    f"{output_name}{port} timed OFF failed: {off_message}"
+                )
             return waited, (
-                f"DO{port} ON for {duration:.3f} seconds, then OFF"
+                f"{output_name}{port} ON for {duration:.3f} seconds, then OFF"
                 if waited
-                else f"DO{port} duration interrupted; OFF confirmed"
+                else f"{output_name}{port} duration interrupted; OFF confirmed"
             )
         return False, "unsupported sequence step"
 
@@ -13469,6 +13710,304 @@ class WeldActionGui:
             daemon=True,
         ).start()
 
+    def _set_fastech_output_buttons(self, enabled):
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for button in self.fastech_output_buttons:
+            button.configure(state=state)
+
+    def connect_fastech_ethernet(self):
+        if self.fastech_connected or self.fastech_connecting:
+            return
+        try:
+            ip = self.fastech_ip.get().strip()
+            board_id = int(self.fastech_board_id.get())
+        except (ValueError, tk.TclError):
+            self.error("Fastech IP or Board ID is invalid")
+            return
+        self.fastech_connecting = True
+        self.fastech_connect_button.configure(state=tk.DISABLED)
+        self.fastech_io_status.configure(
+            text=f"Connecting TCP {ip} · board {board_id}..."
+        )
+        threading.Thread(
+            target=self._fastech_connect_worker,
+            args=(ip, board_id),
+            daemon=True,
+        ).start()
+
+    def _fastech_connect_worker(self, ip, board_id):
+        client = None
+        try:
+            client = FastechEthernetClient(ip, board_id)
+            device_type, version = client.connect()
+            snapshot = client.read_io()
+        except Exception as error:
+            if client is not None:
+                client.close()
+            self.post(self._fastech_connect_result, None, None, str(error))
+            return
+        self.post(
+            self._fastech_connect_result,
+            client,
+            snapshot,
+            f"type {device_type} · {version}",
+        )
+
+    def _fastech_connect_result(self, client, snapshot, detail):
+        self.fastech_connecting = False
+        if client is None:
+            self.fastech_connect_button.configure(state=tk.NORMAL)
+            self.fastech_io_status.configure(text=f"Connection failed · {detail}")
+            self.error(f"Fastech connection failed: {detail}")
+            return
+        if self._closing:
+            client.close()
+            return
+        old_client = self.fastech_client
+        self.fastech_client = client
+        if old_client is not None and old_client is not client:
+            threading.Thread(target=old_client.close, daemon=True).start()
+        self.fastech_connected = True
+        self.fastech_poll_stop.clear()
+        self.fastech_previous_snapshot = None
+        self.fastech_connect_button.configure(state=tk.DISABLED)
+        self.fastech_disconnect_button.configure(state=tk.NORMAL)
+        self.fastech_all_off_button.configure(state=tk.NORMAL)
+        self._set_fastech_output_buttons(True)
+        self.node.update_fastech_touch_input(
+            snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
+        )
+        self.update_fastech_io(snapshot)
+        self.fastech_io_status.configure(
+            text=(
+                f"Connected {client.ip} · board {client.board_id} · {detail} · "
+                f"I{client.input_count}O{client.output_count} · "
+                f"DO mask offset={client.output_offset}"
+            )
+        )
+        self.log(
+            f"Fastech connected · {client.ip} · board {client.board_id} · "
+            f"{detail} · physical DO0/5/6/7 mapped with bit offset "
+            f"{client.output_offset} · input poll target="
+            f"{1.0 / FASTECH_POLL_PERIOD_S:.0f} Hz"
+        )
+        threading.Thread(
+            target=self._fastech_poll_worker,
+            args=(client,),
+            daemon=True,
+        ).start()
+
+    def _fastech_poll_worker(self, client):
+        while not self.fastech_poll_stop.wait(FASTECH_POLL_PERIOD_S):
+            try:
+                snapshot = client.read_io()
+            except Exception as error:
+                if not self.fastech_poll_stop.is_set():
+                    self.post(self._fastech_poll_failed, client, str(error))
+                return
+            self.node.update_fastech_touch_input(
+                snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
+            )
+            self.post_latest(
+                "fastech_io", self.update_fastech_io, snapshot
+            )
+
+    def _fastech_poll_failed(self, client, message):
+        if client is not self.fastech_client:
+            return
+        self.fastech_poll_stop.set()
+        self.fastech_client = None
+        self.fastech_connected = False
+        self.fastech_pending_outputs.clear()
+        self.fastech_connect_button.configure(state=tk.NORMAL)
+        self.fastech_disconnect_button.configure(state=tk.DISABLED)
+        self.fastech_all_off_button.configure(state=tk.DISABLED)
+        self._set_fastech_output_buttons(False)
+        self.node.clear_fastech_touch_input()
+        self.touch_input_states["right"] = None
+        self.fastech_io_status.configure(text=f"Connection lost · {message}")
+        threading.Thread(target=client.close, daemon=True).start()
+        self.log(f"Fastech connection lost · {message}")
+
+    def disconnect_fastech_ethernet(self):
+        self.fastech_poll_stop.set()
+        client = self.fastech_client
+        self.fastech_client = None
+        self.fastech_connected = False
+        self.fastech_connecting = False
+        self.fastech_pending_outputs.clear()
+        self.fastech_connect_button.configure(state=tk.NORMAL)
+        self.fastech_disconnect_button.configure(state=tk.DISABLED)
+        self.fastech_all_off_button.configure(state=tk.DISABLED)
+        self._set_fastech_output_buttons(False)
+        self.node.clear_fastech_touch_input()
+        self.touch_input_states["right"] = None
+        self.fastech_io_status.configure(text="Disconnected")
+        if client is not None:
+            threading.Thread(target=client.close, daemon=True).start()
+        self.log("Fastech disconnected · output states were not changed")
+
+    def update_fastech_io(self, snapshot):
+        previous = self.fastech_previous_snapshot
+        changes = []
+        for channel in FASTECH_GUI_CHANNELS:
+            for kind, values, old_values in (
+                (
+                    "DI",
+                    snapshot.inputs,
+                    previous.inputs if previous is not None else None,
+                ),
+                (
+                    "DO",
+                    snapshot.outputs,
+                    previous.outputs if previous is not None else None,
+                ),
+            ):
+                if channel >= len(values):
+                    continue
+                value = bool(values[channel])
+                old_value = (
+                    bool(old_values[channel]) if old_values is not None else None
+                )
+                if old_value is not None and value == old_value:
+                    continue
+                label = self.fastech_io_labels[(kind, channel)]
+                label.configure(
+                    text=f"{kind}{channel} {'ON' if value else 'OFF'}",
+                    bg="#81c995" if value else "#dbeafe",
+                )
+                if old_value is not None:
+                    changes.append(
+                        f"{kind}{channel}={'ON' if value else 'OFF'}"
+                    )
+        self.fastech_previous_snapshot = snapshot
+        if self.fastech_client is not None:
+            client = self.fastech_client
+            self.fastech_io_status.configure(
+                text=(
+                    f"Connected {client.ip} · board {client.board_id} · "
+                    f"raw DI=0x{snapshot.raw_input:08X} · "
+                    f"raw DO=0x{snapshot.raw_output:08X}"
+                )
+            )
+        if changes:
+            self.log("Fastech I/O changed · " + ", ".join(changes))
+
+    def _set_fastech_output_sync(self, channel, enabled):
+        """Set and verify a Fastech output from a sequence worker."""
+        client = self.fastech_client
+        if not self.fastech_connected or client is None:
+            return False, "Fastech Ethernet is disconnected"
+        try:
+            snapshot = client.set_output(int(channel), bool(enabled))
+        except Exception as error:
+            return False, str(error)
+        self.node.update_fastech_touch_input(
+            snapshot.inputs[FASTECH_TOUCH_INPUT_PORT]
+        )
+        self.post_latest("fastech_io", self.update_fastech_io, snapshot)
+        return True, "Fastech readback verified"
+
+    def request_fastech_output(self, channel, enabled):
+        channel = int(channel)
+        if channel not in FASTECH_GUI_CHANNELS:
+            self.error(f"Fastech DO{channel} is not exposed in this GUI")
+            return
+        client = self.fastech_client
+        if not self.fastech_connected or client is None:
+            self.error("Connect Fastech before commanding an output")
+            return
+        if channel in self.fastech_pending_outputs:
+            return
+        action = "ON" if enabled else "OFF"
+        if not messagebox.askyesno(
+            f"Fastech DO{channel} {action}",
+            f"Command Fastech physical DO{channel} ({FASTECH_GUI_CHANNELS[channel]}) "
+            f"to {action}?\n\n"
+            "This output may operate connected physical equipment.",
+        ):
+            return
+        self.fastech_pending_outputs.add(channel)
+        self.fastech_io_labels[("DO", channel)].configure(
+            text=f"DO{channel} WAIT", bg="#fdd663"
+        )
+        threading.Thread(
+            target=self._fastech_output_worker,
+            args=(client, {channel: bool(enabled)}),
+            daemon=True,
+        ).start()
+
+    def fastech_outputs_all_off(self):
+        client = self.fastech_client
+        if not self.fastech_connected or client is None:
+            self.error("Connect Fastech before commanding outputs")
+            return
+        if not messagebox.askyesno(
+            "Fastech DO0/5/6/7 all OFF",
+            "Command physical Fastech DO0, DO5, DO6, and DO7 to OFF?",
+        ):
+            return
+        values = {channel: False for channel in FASTECH_GUI_CHANNELS}
+        self.fastech_pending_outputs.update(values)
+        for channel in values:
+            self.fastech_io_labels[("DO", channel)].configure(
+                text=f"DO{channel} WAIT", bg="#fdd663"
+            )
+        threading.Thread(
+            target=self._fastech_output_worker,
+            args=(client, values),
+            daemon=True,
+        ).start()
+
+    def _fastech_output_worker(self, client, values):
+        try:
+            snapshot = client.set_outputs(values)
+        except Exception as error:
+            self.post(
+                self._fastech_output_result,
+                client,
+                tuple(values),
+                None,
+                str(error),
+            )
+            return
+        self.post(
+            self._fastech_output_result,
+            client,
+            tuple(values),
+            snapshot,
+            "readback verified",
+        )
+
+    def _fastech_output_result(
+        self, client, channels, snapshot, message
+    ):
+        self.fastech_pending_outputs.difference_update(channels)
+        if client is not self.fastech_client:
+            return
+        if snapshot is None:
+            self.log(
+                "Fastech output command rejected · "
+                + ", ".join(f"DO{channel}" for channel in channels)
+                + f" · {message}"
+            )
+            if self.fastech_previous_snapshot is not None:
+                for channel in channels:
+                    value = bool(
+                        self.fastech_previous_snapshot.outputs[channel]
+                    )
+                    self.fastech_io_labels[("DO", channel)].configure(
+                        text=f"DO{channel} {'ON' if value else 'OFF'}",
+                        bg="#81c995" if value else "#dbeafe",
+                    )
+            return
+        self.update_fastech_io(snapshot)
+        self.log(
+            "Fastech output command OK · "
+            + ", ".join(f"DO{channel}" for channel in channels)
+            + f" · {message}"
+        )
+
     def update_control_box_io(self, digital_in, digital_out):
         current = (tuple(digital_in), tuple(digital_out))
         previous = self.previous_control_box_io
@@ -13522,7 +14061,7 @@ class WeldActionGui:
         self.touch_input_states[arm] = active
         if previous is not None and active and not previous:
             self.touch_input_rising_edges[arm] += 1
-            self._handle_touch_event(arm, f"{arm.upper()} DI8")
+            self._handle_touch_event(arm, f"{arm.upper()} Fastech DI0")
 
     def _handle_touch_event(self, arm, source):
         if arm != self._selected_arm():
@@ -13532,17 +14071,17 @@ class WeldActionGui:
             kind = self.automatic_probe_kind
             self.root.bell()
             self.pipeline_waiting(
-                f"DI8 TOUCH DETECTED · stopping {kind} probe before capture"
+                f"Fastech DI0 TOUCH DETECTED · stopping {kind} probe before capture"
             )
             # WeldGuiNode._system_state owns the stop trigger. Starting a
-            # second worker here allowed a bounced DI8 edge to capture and
+            # second worker here allowed a bounced Fastech DI0 edge to capture and
             # launch the return path twice.
             return
         guard = self.node.active_touch_guard
         if guard is not None and guard[0] == arm:
             self.root.bell()
             self.pipeline_waiting(
-                f"DI8 TOUCH DETECTED · stopping guarded {guard[1]} motion"
+                f"Fastech DI0 TOUCH DETECTED · stopping guarded {guard[1]} motion"
             )
             return
         if not self.touch_sensing_enabled.get():
@@ -13597,9 +14136,9 @@ class WeldActionGui:
                 },
             )
         except (OSError, ValueError, yaml.YAMLError, tk.TclError) as error:
-            self.error(f"DI8 touch YAML save failed: {error}")
+            self.error(f"Fastech DI0 touch YAML save failed: {error}")
             return None
-        self.log(f"DI8 {event_label} YAML SAVED · {touch_yaml}")
+        self.log(f"Fastech DI0 {event_label} YAML SAVED · {touch_yaml}")
         return touch_yaml
 
     def apply_touch_edge_capture(
@@ -13609,9 +14148,9 @@ class WeldActionGui:
         kind,
         probe_start,
     ):
-        """Persist the DI8-edge pose before controlled-stop completion."""
+        """Persist the Fastech DI0-edge pose before controlled-stop completion."""
         if kind not in CORNER_TOUCH_NAMES:
-            self.error(f"Unknown DI8 edge capture kind: {kind}")
+            self.error(f"Unknown Fastech DI0 edge capture kind: {kind}")
             return
         self.seam_probe_touches[kind] = copy.deepcopy(pose)
         self.seam_probe_starts[kind] = copy.deepcopy(probe_start)
@@ -13674,11 +14213,11 @@ class WeldActionGui:
             ]
             self.corner_touch_status.configure(
                 text=(
-                    f"DI8 {kind} touch saved · {len(completed)}/4 · "
+                    f"Fastech DI0 {kind} touch saved · {len(completed)}/4 · "
                     "returning to probe start"
                 )
             )
-            self.log(f"Automatic DI8 {kind} touch stored")
+            self.log(f"Automatic Fastech DI0 {kind} touch stored")
             if probe_start is not None:
                 try:
                     settle_seconds = max(
@@ -13727,7 +14266,7 @@ class WeldActionGui:
                     f"{', '.join(completed) or 'none'}"
                 )
             )
-            self.pipeline_result("DI8 touch captured and probe start restored")
+            self.pipeline_result("Fastech DI0 touch captured and probe start restored")
             self._signal_auto_seam_stage(True, probe_kind)
         else:
             self._signal_auto_seam_stage(False, probe_kind)
@@ -13852,7 +14391,7 @@ class WeldActionGui:
             self.node.clear_touch_probe()
             self._signal_auto_seam_stage(False, kind)
             self.error(
-                f"{kind} probe reached maximum travel without a DI8 edge"
+                f"{kind} probe reached maximum travel without a Fastech DI0 edge"
             )
             return
         self.bar["value"] = 100
@@ -13889,6 +14428,11 @@ class WeldActionGui:
         if self._closing:
             return
         self._closing = True
+        self.fastech_poll_stop.set()
+        fastech_client = self.fastech_client
+        self.fastech_client = None
+        if fastech_client is not None:
+            fastech_client.close()
         if self.hicomm_client is not None:
             self.hicomm_client.stop()
         self.root.quit()

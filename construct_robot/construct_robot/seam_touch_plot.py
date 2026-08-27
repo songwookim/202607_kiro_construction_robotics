@@ -1,4 +1,4 @@
-"""Interactive 3D diagnostic plot for saved DI8 seam touch geometry."""
+"""Interactive 3D diagnostic plot for saved Fastech DI0 touch geometry."""
 
 import argparse
 from pathlib import Path
@@ -152,7 +152,7 @@ def plot_touch_yaml(path, wall_offset_mm=0.0, floor_offset_mm=0.0, endpoint=None
     axis.set_ylabel("World Y [m]")
     axis.set_zlabel("World Z [m]")
     axis.set_title(
-        "DI8 seam touch geometry: wait, two contacts, midpoint, computed point\n"
+        "Fastech DI0 seam touch geometry: wait, two contacts, midpoint, computed point\n"
         "SEAM = (mean touch X, WALL Y, FLOOR Z)"
     )
     ranges = [

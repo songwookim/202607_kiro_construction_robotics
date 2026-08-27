@@ -49,7 +49,8 @@ from construct_robot.hicomm_welder import (
 )
 from construct_robot.weld_action_gui import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
-    DI8_GUARDED_TEACHING_POSES,
+    FASTECH_TOUCH_BACKEND,
+    TOUCH_GUARDED_TEACHING_POSES,
     WeldGuiNode,
     aligned_wait_pose,
     corner_seam_from_touches,
@@ -81,7 +82,10 @@ from construct_robot.weld_action_gui import (
     validate_managed_weld_sequence,
     yaw_corrected_seam_poses,
 )
-from construct_robot.weld_feedback_plot import parse_weld_feedback_log
+from construct_robot.weld_feedback_plot import (
+    parse_weld_feedback_log,
+    parse_weld_trajectory_log,
+)
 
 
 def managed_weld_steps(base_slot=1):
@@ -124,10 +128,12 @@ def managed_weld_steps(base_slot=1):
         if stage == "start_contact":
             step["accept_initial_touch"] = False
         elif stage == "touch_output_off":
-            step["port"] = 4
+            step["io_backend"] = FASTECH_TOUCH_BACKEND
+            step["port"] = 0
             step["value"] = False
         elif stage == "touch_output_on":
-            step["port"] = 4
+            step["io_backend"] = FASTECH_TOUCH_BACKEND
+            step["port"] = 0
             step["value"] = True
         result.append(step)
     return result
@@ -153,6 +159,20 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
         "elapsed_seconds": 1.0,
         "commanded": {"current_a": 200, "voltage": 25.0},
         "rx_setting_echo": {"current_a": 200, "voltage_v": 25.0},
+        "execution_conditions": {
+            "steps": [{
+                "type": "motion",
+                "weld_scenario_stage": "weld_motion",
+                "waypoints": [{
+                    "position_m": {"x": 0.1, "y": 0.2, "z": 0.3},
+                }, {
+                    "position_m": {"x": 0.15, "y": 0.2, "z": 0.3},
+                }],
+                "usable_seam_start": {
+                    "position_m": {"x": 0.11, "y": 0.2, "z": 0.3},
+                },
+            }],
+        },
         "feedback": {
             "rx_samples": 1,
             "welding_samples": 1,
@@ -196,6 +216,14 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
             "waypoint_index": -1,
             "phase": "ACTUAL_TF",
         }],
+        "teaching_snapshot": {
+            "weld_start": {
+                "tcp_pose_world": {
+                    "position_m": {"x": 0.1, "y": 0.2, "z": 0.3},
+                },
+            },
+        },
+        "touch_snapshot": {},
     }
     save_weld_feedback_log(path, document)
     content = path.read_text(encoding="utf-8")
@@ -210,6 +238,17 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
     assert samples[0]["voltage_v"] == 25.2
     assert "tf_stamp_s along_mm remaining_mm cross_track_mm" in content
     assert "1234.500000000 25.000 125.000 0.040" in content
+    trajectory = parse_weld_trajectory_log(path)
+    assert len(trajectory["actual"]) == 1
+    assert trajectory["steps"][0]["positions"]["waypoints[1]"] == (
+        0.15, 0.2, 0.3
+    )
+    assert trajectory["steps"][0]["positions"]["usable_seam_start"] == (
+        0.11, 0.2, 0.3
+    )
+    assert trajectory["teaching"][
+        "weld_start.tcp_pose_world"
+    ] == (0.1, 0.2, 0.3)
 
 
 def test_last_log_restores_tilt_leads_tcp_and_circle_weave_defaults(tmp_path):
@@ -289,9 +328,9 @@ def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
     try:
         validate_managed_weld_sequence(stale_touch, require_complete=True)
     except ValueError as error:
-        assert "new DI8 edge" in str(error)
+        assert "new Fastech DI0 edge" in str(error)
     else:
-        raise AssertionError("stale DI8 was accepted for generated START")
+        raise AssertionError("stale Fastech DI0 was accepted for generated START")
 
     timed_arc = managed_weld_steps()
     timed_arc[3]["duration"] = 3.0
@@ -309,9 +348,9 @@ def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
             touch_output_on, require_complete=True
         )
     except ValueError as error:
-        assert "DO4 OFF before ARC ON" in str(error)
+        assert "Fastech DO0 OFF before ARC ON" in str(error)
     else:
-        raise AssertionError("Generated ARC accepted with DO4 ON")
+        raise AssertionError("Generated ARC accepted with Fastech DO0 ON")
 
     final_touch_output_off = managed_weld_steps()
     final_touch_output_off[-1]["value"] = False
@@ -320,13 +359,13 @@ def test_managed_weld_scenario_requires_fresh_start_touch_and_explicit_off():
             final_touch_output_off, require_complete=True
         )
     except ValueError as error:
-        assert "restore DO4 ON" in str(error)
+        assert "restore Fastech DO0 ON" in str(error)
     else:
-        raise AssertionError("Generated scenario accepted final DO4 OFF")
+        raise AssertionError("Generated scenario accepted final Fastech DO0 OFF")
 
 
-def test_di8_guarded_named_teaching_poses():
-    assert DI8_GUARDED_TEACHING_POSES == {
+def test_fastech_di0_guarded_named_teaching_poses():
+    assert TOUCH_GUARDED_TEACHING_POSES == {
         "robot_start",
         "weld_wait",
         "weld_start_wait",
@@ -335,6 +374,35 @@ def test_di8_guarded_named_teaching_poses():
         "weld_end",
         "weld_finish",
     }
+
+
+def test_fastech_di0_updates_production_touch_state_for_both_arms():
+    class Ui:
+        def __init__(self):
+            self.events = []
+
+        def update_touch_input(self, arm, active):
+            self.events.append((arm, active))
+
+        def post(self, callback, *args):
+            callback(*args)
+
+    class Harness:
+        pass
+
+    harness = Harness()
+    harness.ui = Ui()
+    harness.active_touch_probe = None
+    harness.active_touch_guard = None
+    harness.fastech_touch_input_state = None
+    harness.node_touch_input_states = {"left": None, "right": None}
+
+    WeldGuiNode.update_fastech_touch_input(harness, False)
+    WeldGuiNode.update_fastech_touch_input(harness, True)
+
+    assert harness.fastech_touch_input_state is True
+    assert harness.node_touch_input_states == {"left": True, "right": True}
+    assert harness.ui.events == [("right", False), ("right", True)]
 
 
 def test_position_only_goal_ignores_yaml_orientation():
