@@ -89,8 +89,8 @@ def test_connection_manager_routes_physical_output_and_returns_readback():
     assert snapshot.inputs[0] is True
 
 
-def test_touch_semantic_interface_maps_to_physical_channel_zero():
-    assert TOUCH_INPUT_CHANNEL == 0
+def test_touch_semantic_interface_maps_to_configured_physical_channel():
+    assert TOUCH_INPUT_CHANNEL == 4
     assert TOUCH_OUTPUT_CHANNEL == 0
 
 

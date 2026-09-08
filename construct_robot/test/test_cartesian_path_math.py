@@ -3,7 +3,7 @@ import threading
 import time
 from types import SimpleNamespace
 
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, TransformStamped
 from moveit_msgs.msg import RobotTrajectory
 import numpy as np
 import yaml
@@ -52,6 +52,7 @@ from construct_robot.weld_action_gui import (
     FASTECH_TOUCH_BACKEND,
     TOUCH_GUARDED_TEACHING_POSES,
     WeldGuiNode,
+    taught_wait_approach_steps,
     aligned_wait_pose,
     corner_seam_from_touches,
     corner_endpoint_from_two_touches,
@@ -64,6 +65,8 @@ from construct_robot.weld_action_gui import (
     compute_surface_plane,
     digital_weld_recipe,
     fixed_tilt_wait_reference_poses,
+    keyboard_jog_velocity,
+    keyboard_velocity_vector,
     next_sequential_slot,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
@@ -76,10 +79,12 @@ from construct_robot.weld_action_gui import (
     save_weld_feedback_log,
     seam_yaw,
     translated_wait_pose,
+    transform_xyz,
     two_touch_corner_seam,
     update_weld_scenario_motion_values,
     validate_digital_weld_settings,
     validate_managed_weld_sequence,
+    wide_sensing_path_poses,
     yaw_corrected_seam_poses,
 )
 from construct_robot.weld_feedback_plot import (
@@ -147,6 +152,28 @@ def test_weld_scenario_uses_slots_after_existing_sequence():
     ]
     assert next_sequential_slot(existing, requested=3) == 8
     assert next_sequential_slot([], requested=4) == 4
+
+
+def test_taught_wait_approach_uses_actual_weld_endpoints_and_keeps_attitude():
+    steps = managed_weld_steps()
+    start, goal = Pose(), Pose()
+    start.orientation.w = goal.orientation.w = 1.0
+    start.position.x, goal.position.x = -0.01, 0.21
+    steps[4]["points"] = (start, goal)
+    steps[1]["interpolation_step"] = 0.005
+    steps[5]["trigger_before_goal"] = True
+    wait_start, wait_goal = Pose(), Pose()
+    wait_start.position.z = wait_goal.position.z = 0.1
+    result = taught_wait_approach_steps(steps, wait_start, wait_goal)
+    by_stage = {s["weld_scenario_stage"]: s for s in result}
+    assert by_stage["start_wait"]["use_joint_planning"]
+    assert by_stage["start_safe"]["points"][0].position.z == 0.1
+    assert by_stage["start_safe"]["points"][0].orientation == start.orientation
+    assert by_stage["start_contact"]["points"] == (start,)
+    assert by_stage["goal_wait"]["type"] == "motion"
+    assert by_stage["goal_wait"]["points"][0].orientation == goal.orientation
+    assert validate_managed_weld_sequence(result, require_complete=True)
+    assert "use_joint_planning" not in steps[0]
 
 
 def test_weld_feedback_log_is_persisted_atomically(tmp_path):
@@ -1674,6 +1701,95 @@ def test_cartesian_action_is_motion_only():
     assert not hasattr(goal, "enable_arc")
     assert not hasattr(goal, "weld_current_a")
     assert not hasattr(goal, "require_welding_feedback")
+
+
+def test_wide_sensing_point_is_transformed_from_helios_to_world():
+    transform = TransformStamped()
+    transform.transform.translation.x = 1.0
+    transform.transform.translation.y = 2.0
+    transform.transform.translation.z = 3.0
+    transform.transform.rotation.z = math.sin(math.pi / 4.0)
+    transform.transform.rotation.w = math.cos(math.pi / 4.0)
+
+    transformed = transform_xyz(transform, (0.1, 0.0, 0.0))
+
+    assert np.allclose(transformed, (1.0, 2.1, 3.0))
+
+
+def test_wide_sensing_path_can_reverse_and_preserves_orientation():
+    transform = TransformStamped()
+    transform.transform.rotation.w = 1.0
+    orientation = make_pose().orientation
+    orientation.y = 0.5
+    orientation.w = math.sqrt(0.75)
+
+    start, end = wide_sensing_path_poses(
+        (0.1, 0.2, 0.3),
+        (0.4, 0.5, 0.6),
+        transform,
+        orientation,
+        offset_m=(0.01, -0.02, 0.03),
+        reverse=True,
+    )
+
+    assert np.allclose(
+        (start.position.x, start.position.y, start.position.z),
+        (0.41, 0.48, 0.63),
+    )
+    assert np.allclose(
+        (end.position.x, end.position.y, end.position.z),
+        (0.11, 0.18, 0.33),
+    )
+    assert math.isclose(start.orientation.y, 0.5)
+    assert math.isclose(end.orientation.w, math.sqrt(0.75))
+
+
+def test_keyboard_jog_velocity_maps_plane_arrows_to_translation_axes():
+    assert keyboard_jog_velocity("XY", "Left", 5.0, 3.0) == (
+        -5.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    )
+    assert keyboard_jog_velocity("XY", "Up", 5.0, 3.0) == (
+        0.0, 5.0, 0.0, 0.0, 0.0, 0.0
+    )
+
+
+def test_keyboard_jog_velocity_uses_angular_speed_for_rotation():
+    assert keyboard_jog_velocity("RX/RZ", "Up", 5.0, 3.0) == (
+        0.0, 0.0, 0.0, 0.0, 0.0, 3.0
+    )
+
+
+def test_keyboard_velocity_vector_rotates_tool_translation_but_keeps_world_rotation():
+    orientation = make_pose(0.0, 0.0, 0.0).orientation
+    orientation.z = math.sin(math.pi / 4.0)
+    orientation.w = math.cos(math.pi / 4.0)
+
+    tool_linear = keyboard_velocity_vector(
+        orientation, "X", "Right", 0.005, 0.1, "Tool"
+    )
+    tool_angular = keyboard_velocity_vector(
+        orientation, "RX", "Right", 0.005, 0.1, "Tool"
+    )
+    world_linear = keyboard_velocity_vector(
+        orientation, "X", "Right", 0.005, 0.1, "World"
+    )
+
+    assert np.allclose(tool_linear, (0.0, 0.005, 0.0, 0.0, 0.0, 0.0))
+    assert np.allclose(tool_angular, (0.0, 0.0, 0.0, 0.1, 0.0, 0.0))
+    assert world_linear == (0.005, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_keyboard_global_rotation_all_axes_and_signs_ignore_tcp_attitude():
+    orientation = make_pose(0.0, 0.0, 0.0).orientation
+    orientation.x = orientation.y = orientation.z = orientation.w = 0.5
+    for frame in ("World", "Tool"):
+        for selection in ("RX", "RY", "RZ", "RX/RY", "RX/RZ", "RY/RZ"):
+            for direction in ("Left", "Right", "Up", "Down"):
+                expected = keyboard_jog_velocity(selection, direction, 0.005, 0.1)
+                actual = keyboard_velocity_vector(
+                    orientation, selection, direction, 0.005, 0.1, frame
+                )
+                assert actual == expected
 
 
 class _TestLogger:

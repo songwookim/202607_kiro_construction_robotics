@@ -228,12 +228,18 @@ def launch_setup(_context):
             "90",
         ],
     )
-
-    start_move_group_after_controllers = RegisterEventHandler(
-        OnProcessExit(
-            target_action=controllers_spawner,
-            on_exit=[run_move_group_node],
-        )
+    velocity_controllers_spawner = Node(
+        package="construct_robot",
+        executable="controller_spawner",
+        arguments=[
+            "left_cartesian_velocity_controller",
+            "right_cartesian_velocity_controller",
+            "--inactive",
+            "--controller-manager",
+            "/controller_manager",
+            "--response-timeout",
+            "90",
+        ],
     )
 
     nodes_to_start = [
@@ -242,8 +248,34 @@ def launch_setup(_context):
         link0_alias_tf,
         robot_state_publisher,
         ros2_control_node,
-        start_move_group_after_controllers,
         controllers_spawner,
     ]
+
+    if execution_enabled:
+        nodes_to_start.append(
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=controllers_spawner,
+                    on_exit=[velocity_controllers_spawner],
+                )
+            )
+        )
+        nodes_to_start.append(
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=velocity_controllers_spawner,
+                    on_exit=[run_move_group_node],
+                )
+            )
+        )
+    else:
+        nodes_to_start.append(
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=controllers_spawner,
+                    on_exit=[run_move_group_node],
+                )
+            )
+        )
 
     return nodes_to_start

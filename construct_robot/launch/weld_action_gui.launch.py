@@ -47,8 +47,14 @@ LAUNCH_ARGUMENTS = (
     ("fastech_ip", "192.168.0.3", "Fastech Ezi-IO IP address"),
     ("fastech_board_id", "0", "Fastech Ezi-IO board ID"),
     ("fastech_poll_period_s", "0.01", "Fastech I/O polling period"),
+    ("fastech_touch_input_channel", "4", "Fastech physical touch DI channel"),
     ("fastech_reconnect_period_s", "1.0", "Fastech reconnect period"),
     ("fastech_auto_connect", "true", "Connect Fastech at startup"),
+    (
+        "wide_sensing_result_topic",
+        "/wide_sensing/output/result",
+        "Wide Sensing weld-segment result topic",
+    ),
 )
 MOVEIT_ARGUMENTS = (
     "left_robot_ip",
@@ -134,6 +140,10 @@ def generate_launch_description():
                 LaunchConfiguration("fastech_poll_period_s"),
                 value_type=float,
             ),
+            "touch_input_channel": ParameterValue(
+                LaunchConfiguration("fastech_touch_input_channel"),
+                value_type=int,
+            ),
             "reconnect_period_s": ParameterValue(
                 LaunchConfiguration("fastech_reconnect_period_s"),
                 value_type=float,
@@ -190,6 +200,10 @@ def generate_launch_description():
                 LaunchConfiguration("fastech_poll_period_s"),
                 value_type=float,
             ),
+            "wide_sensing_result_topic": ParameterValue(
+                LaunchConfiguration("wide_sensing_result_topic"),
+                value_type=str,
+            ),
         }],
     )
     # Avoid stale Fast DDS shared-memory locks by keeping the complete launch
@@ -205,5 +219,10 @@ def generate_launch_description():
     return LaunchDescription(
         [force_udp_transport, local_ros_graph]
         + declarations
-        + [moveit, cartesian_server, fastech_io, gui]
+        + [
+            moveit,
+            cartesian_server,
+            fastech_io,
+            gui,
+        ]
     )

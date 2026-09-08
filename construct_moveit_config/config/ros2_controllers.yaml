@@ -9,6 +9,12 @@ controller_manager:
     right_manipulator_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
+    left_cartesian_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    right_cartesian_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
+
     robot_head_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
@@ -66,6 +72,28 @@ right_manipulator_controller:
       right_manipulator_joint4: {trajectory: 0.15, goal: 0.02}
       right_manipulator_joint5: {trajectory: 0.15, goal: 0.02}
       right_manipulator_joint6: {trajectory: 0.15, goal: 0.02}
+
+left_cartesian_velocity_controller:
+  ros__parameters:
+    joints:
+      - left/x
+      - left/y
+      - left/z
+      - left/rx
+      - left/ry
+      - left/rz
+    interface_name: cartesian_velocity
+
+right_cartesian_velocity_controller:
+  ros__parameters:
+    joints:
+      - right/x
+      - right/y
+      - right/z
+      - right/rx
+      - right/ry
+      - right/rz
+    interface_name: cartesian_velocity
 
 robot_head_controller:
   ros__parameters:

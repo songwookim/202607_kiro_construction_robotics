@@ -43,7 +43,7 @@ class ControllerSpawner:
             raise RuntimeError(f"{operation} failed: {error}")
         return future.result()
 
-    def activate(self, controller_name):
+    def activate(self, controller_name, activate=True):
         load_request = LoadController.Request()
         load_request.name = controller_name
         loaded = self._call(
@@ -65,6 +65,12 @@ class ControllerSpawner:
             raise RuntimeError(
                 f"controller configure rejected: {controller_name}"
             )
+
+        if not activate:
+            self.node.get_logger().info(
+                f"Configured inactive {controller_name}"
+            )
+            return
 
         switch_request = SwitchController.Request()
         switch_request.activate_controllers = [controller_name]
@@ -91,6 +97,11 @@ def main(args=None):
     parser.add_argument("controllers", nargs="+")
     parser.add_argument("--controller-manager", default="/controller_manager")
     parser.add_argument("--response-timeout", type=float, default=90.0)
+    parser.add_argument(
+        "--inactive",
+        action="store_true",
+        help="Load and configure controllers without activating them",
+    )
     parsed = parser.parse_args(remove_ros_args(args=raw_args)[1:])
 
     rclpy.init(args=raw_args)
@@ -103,7 +114,7 @@ def main(args=None):
     exit_code = 0
     try:
         for controller_name in parsed.controllers:
-            spawner.activate(controller_name)
+            spawner.activate(controller_name, activate=not parsed.inactive)
     except (RuntimeError, TimeoutError) as error:
         node.get_logger().error(str(error))
         exit_code = 1

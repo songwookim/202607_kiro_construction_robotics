@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 import rclpy
 import yaml
 from action_msgs.srv import CancelGoal
-from geometry_msgs.msg import Point, Pose, PoseArray
+from geometry_msgs.msg import Point, Pose, PoseArray, TransformStamped
 from control_msgs.action import FollowJointTrajectory
 try:
     # Newer joint_trajectory_controller versions expose an on-controller
@@ -40,19 +40,21 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rbpodo_msgs.msg import SystemState
-from rbpodo_msgs.srv import MoveStop, SetDigitalOutput
+from rbpodo_msgs.srv import MoveStop, SetDigitalOutput, SetRobotPower
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
-from std_msgs.msg import Bool, Empty
+from std_msgs.msg import Bool, Empty, Float64MultiArray
 from std_srvs.srv import SetBool, Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import Marker, MarkerArray
+from wide_sensing_msgs.msg import WideSensingResult
 
 from construct_msgs.action import CartesianPath
 from construct_msgs.msg import DigitalIoState
 from construct_msgs.srv import SetDigitalOutput as FastechSetDigitalOutput
 from construct_robot.cartesian_path_common import (
+    PLANNING_GROUP_TIPS,
     circle_waypoints,
     circular_weaving_from_path,
     linear_pose_waypoints,
@@ -88,9 +90,24 @@ FASTECH_GUI_CHANNELS = {
     6: "Torch cleaner 2",
     7: "Torch cleaner 3",
 }
-FASTECH_TOUCH_INPUT_PORT = 0
+FASTECH_TOUCH_INPUT_PORT = 4
 FASTECH_TOUCH_OUTPUT_PORT = 0
 FASTECH_TOUCH_BACKEND = "fastech_ethernet"
+
+KEYBOARD_JOG_SELECTIONS = {
+    "X": (0,),
+    "Y": (1,),
+    "Z": (2,),
+    "RX": (3,),
+    "RY": (4,),
+    "RZ": (5,),
+    "XY": (0, 1),
+    "XZ": (0, 2),
+    "YZ": (1, 2),
+    "RX/RY": (3, 4),
+    "RX/RZ": (3, 5),
+    "RY/RZ": (4, 5),
+}
 
 # Kept for the Controller Digital I/O test panel and later legacy inspection.
 # Production touch sensing no longer consumes these Rainbow ports.
@@ -127,6 +144,10 @@ CONTROLLER_NAMES = {
     "left": "left_manipulator_controller",
     "right": "right_manipulator_controller",
     "head": "robot_head_controller",
+}
+KEYBOARD_VELOCITY_CONTROLLER_NAMES = {
+    "left": "left_cartesian_velocity_controller",
+    "right": "right_cartesian_velocity_controller",
 }
 
 CORNER_TOUCH_NAMES = (
@@ -407,12 +428,12 @@ def validate_managed_weld_sequence(steps, require_complete=False):
                     candidate for candidate in scenario_steps
                     if candidate.get("weld_scenario_stage") == "arc_on"
                 ]
-                if not arc_steps or int(
-                    arc_steps[0].get("parallel_slot", -1)
-                ) != slot:
-                    raise ValueError(
-                        "Generated weld motion must share the ARC ON slot"
-                    )
+                # if not arc_steps or int(
+                #     arc_steps[0].get("parallel_slot", -1)
+                # ) != slot:
+                #     raise ValueError(
+                #         "Generated weld motion must share the ARC ON slot"
+                #     )
         # if require_complete and seen != set(WELD_SCENARIO_STAGE_ORDER):
         #     missing = [
         #         stage for stage in WELD_SCENARIO_STAGE_ORDER if stage not in seen
@@ -780,6 +801,117 @@ def _quaternion_rotate_vector(orientation, vector):
         vy + qw * ty + qz * tx - qx * tz,
         vz + qw * tz + qx * ty - qy * tx,
     )
+
+
+def transform_xyz(transform, xyz):
+    """Transform one finite XYZ point using geometry_msgs/TransformStamped."""
+    values = tuple(float(value) for value in xyz)
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        raise ValueError("Wide Sensing point must contain three finite values")
+    rotated = _quaternion_rotate_vector(
+        transform.transform.rotation,
+        values,
+    )
+    translation = transform.transform.translation
+    return (
+        rotated[0] + float(translation.x),
+        rotated[1] + float(translation.y),
+        rotated[2] + float(translation.z),
+    )
+
+
+def keyboard_jog_velocity(selection, direction, linear_speed, angular_speed):
+    """Build a signed 6D keyboard-axis vector using linear/angular magnitudes."""
+    axes = KEYBOARD_JOG_SELECTIONS.get(str(selection))
+    if axes is None:
+        raise ValueError(f"unsupported keyboard jog selection: {selection}")
+    direction = str(direction)
+    if len(axes) == 1:
+        if direction not in ("Left", "Right", "Up", "Down"):
+            raise ValueError(f"unsupported keyboard jog direction: {direction}")
+        axis = axes[0]
+        sign = 1.0 if direction in ("Right", "Up") else -1.0
+    else:
+        mapping = {
+            "Left": (axes[0], -1.0),
+            "Right": (axes[0], 1.0),
+            "Down": (axes[1], -1.0),
+            "Up": (axes[1], 1.0),
+        }
+        if direction not in mapping:
+            raise ValueError(f"unsupported keyboard jog direction: {direction}")
+        axis, sign = mapping[direction]
+    speed = float(angular_speed if axis >= 3 else linear_speed)
+    if not math.isfinite(speed) or speed <= 0.0:
+        raise ValueError("keyboard jog speed must be positive and finite")
+    velocity = [0.0] * 6
+    velocity[axis] = sign * speed
+    return tuple(velocity)
+
+
+def keyboard_velocity_vector(
+    orientation,
+    selection,
+    direction,
+    linear_speed_m_s,
+    angular_speed_rad_s,
+    reference,
+):
+    """Use the selected frame for XYZ; rotations always follow World axes."""
+    values = keyboard_jog_velocity(
+        selection,
+        direction,
+        linear_speed_m_s,
+        angular_speed_rad_s,
+    )
+    reference = str(reference).strip().lower()
+    if reference == "world":
+        world_linear = values[:3]
+    elif reference == "tool":
+        world_linear = _quaternion_rotate_vector(orientation, values[:3])
+    else:
+        raise ValueError("keyboard velocity frame must be World or Tool")
+    # Previous angular mapping (retained for comparison):
+    # if reference == "world":
+    #     world_angular = values[3:]
+    # elif reference == "tool":
+    #     world_angular = _quaternion_rotate_vector(orientation, values[3:])
+    # RX/RY/RZ now refer to fixed World axes, independent of TCP attitude
+    # and the XYZ frame selector. resolve_keyboard_velocity still converts
+    # this World vector into the robot base required by jog_robot_l(mode=1).
+    world_angular = values[3:]
+    return tuple(world_linear) + tuple(world_angular)
+
+
+def wide_sensing_path_poses(
+    start_xyz,
+    end_xyz,
+    world_from_sensor,
+    orientation,
+    offset_m=(0.0, 0.0, 0.0),
+    reverse=False,
+):
+    """Convert a sensed metric segment into two World-frame weld poses."""
+    start = transform_xyz(world_from_sensor, start_xyz)
+    end = transform_xyz(world_from_sensor, end_xyz)
+    if reverse:
+        start, end = end, start
+    offset = tuple(float(value) for value in offset_m)
+    if len(offset) != 3 or not all(math.isfinite(value) for value in offset):
+        raise ValueError("Wide Sensing World offset must be finite XYZ")
+    poses = []
+    for xyz in (start, end):
+        pose = Pose()
+        pose.position.x = xyz[0] + offset[0]
+        pose.position.y = xyz[1] + offset[1]
+        pose.position.z = xyz[2] + offset[2]
+        pose.orientation = copy.deepcopy(orientation)
+        if not pose_is_valid(pose):
+            raise ValueError("Wide Sensing produced an invalid World pose")
+        poses.append(pose)
+    if math.dist(start, end) < 1e-5:
+        raise ValueError("Wide Sensing weld segment is shorter than 0.01 mm")
+    return tuple(poses)
 
 
 @dataclass
@@ -1205,6 +1337,11 @@ def update_weld_scenario_motion_values(
     linked_arc_off = False
     linked_lead_approach = lead_in_mm <= 1e-6
     for linked in candidate:
+        if (linked.get("weld_scenario_id") == scenario_id
+                and linked.get("taught_wait_direct", False)):
+            linked["points"] = (copy.deepcopy(motion["points"][0]),)
+            linked["lead_in_mm"] = lead_in_mm
+            linked_lead_approach = True
         if (
             linked.get("weld_scenario_id") == scenario_id
             and linked.get("weld_scenario_stage") == "arc_off"
@@ -1257,6 +1394,43 @@ def update_weld_scenario_motion_values(
             "rebuild this legacy scenario first"
         )
     return candidate
+
+
+def taught_wait_approach_steps(steps, start_wait, goal_wait):
+    """Use taught clearance positions and weld attitudes near the workpiece."""
+    steps = copy.deepcopy(steps)
+    motion = next(s for s in steps if s.get("weld_scenario_stage") == "weld_motion")
+    first, last = motion["points"][0], motion["points"][-1]
+    approach = next(s for s in steps if s.get("weld_scenario_stage") == "start_contact")
+    aligned_start = copy.deepcopy(start_wait)
+    aligned_start.orientation = copy.deepcopy(first.orientation)
+    aligned_goal = copy.deepcopy(goal_wait)
+    aligned_goal.orientation = copy.deepcopy(last.orientation)
+    steps = [s for s in steps if s.get("weld_scenario_stage") != "start_safe"
+             and s.get("role") != "lead_in"]
+    alignment = copy.deepcopy(approach)
+    alignment.update(points=(aligned_start,), path_kind="taught_wait_align_weld_attitude",
+                     weld_scenario_stage="start_safe", role="safe_approach",
+                     touch_guard=False, continue_after_touch=False)
+    approach.update(points=(copy.deepcopy(first),), path_kind="taught_wait_to_weld_start",
+                    taught_wait_direct=True, touch_guard=False,
+                    safe_approach=None, approach_lead=None)
+    steps.insert(steps.index(approach), alignment)
+    for step in steps:
+        step["weld_approach_mode"] = "taught_wait"
+        if step.get("weld_scenario_stage") in ("start_wait", "finish"):
+            step["use_joint_planning"] = True
+        if step.get("weld_scenario_stage") == "goal_wait":
+            step.update(type="motion", points=(aligned_goal,),
+                        path_kind="weld_end_to_taught_wait_fixed_attitude",
+                        interpolation_step=approach["interpolation_step"],
+                        collision_checking=True, touch_guard=False)
+    slot = int(steps[0]["parallel_slot"])
+    for index, step in enumerate(steps):
+        if index and step.get("weld_scenario_stage") not in ("weld_motion", "arc_off"):
+            slot += 1
+        step["parallel_slot"] = slot
+    return steps
 
 
 def seam_xy_normal(start, goal):
@@ -1837,6 +2011,7 @@ def read_last_execution_settings(path):
         ("weld_lead_in_mm", float),
         ("weld_lead_out_mm", float),
         ("weld_safe_approach_mm", float),
+        ("weld_approach_mode", str),
         ("weld_pre_start_lead_mm", float),
         ("weld_arc_off_delay_ms", float),
         ("weld_arc_stabilize_s", float),
@@ -2170,6 +2345,10 @@ class WeldGuiNode(Node):
         self.declare_parameter("fastech_ip", "192.168.0.3")
         self.declare_parameter("fastech_board_id", 0)
         self.declare_parameter("fastech_poll_period_s", 0.01)
+        self.declare_parameter(
+            "wide_sensing_result_topic",
+            "/wide_sensing/output/result",
+        )
         self.cartesian_motion_client = ActionClient(
             self, CartesianPath, "cartesian_path"
         )
@@ -2216,6 +2395,20 @@ class WeldGuiNode(Node):
                     f"/{CONTROLLER_NAMES[arm]}/speed_scaling_input",
                     scaling_qos,
                 )
+        self.keyboard_velocity_publishers = {
+            arm: self.create_publisher(
+                Float64MultiArray,
+                f"/{KEYBOARD_VELOCITY_CONTROLLER_NAMES[arm]}/commands",
+                10,
+            )
+            for arm in ("left", "right")
+        }
+        self.keyboard_velocity_lock = threading.Lock()
+        self.keyboard_velocity_command = {
+            "arm": None,
+            "values": (0.0,) * 6,
+        }
+        self.create_timer(0.02, self._publish_keyboard_velocity)
         self.joint_trajectory_cancel_clients = {
             device: self.create_client(
                 CancelGoal,
@@ -2251,6 +2444,13 @@ class WeldGuiNode(Node):
             )
             for arm in ("left", "right")
         }
+        self.robot_power_clients = {
+            arm: self.create_client(
+                SetRobotPower,
+                f"/{arm}_rbpodo_hardware/set_robot_power",
+            )
+            for arm in ("left", "right")
+        }
         self.controller_list_client = self.create_client(
             ListControllers,
             "/controller_manager/list_controllers",
@@ -2265,6 +2465,7 @@ class WeldGuiNode(Node):
         self.active_touch_probe = None
         self.touch_probe_edge_pose = None
         self.touch_probe_stop_requested = threading.Event()
+        self.touch_probe_cancel_event = threading.Event()
         self.touch_probe_controller_deactivated = False
         self.touch_stop_lock = threading.Lock()
         self.active_touch_guard = None
@@ -2299,8 +2500,16 @@ class WeldGuiNode(Node):
         self.controller_states = {
             device: None for device in controlled_devices
         }
+        self.keyboard_controller_states = {
+            arm: None for arm in ("left", "right")
+        }
+        self.latest_robot_motion_state = {
+            arm: None for arm in ("left", "right")
+        }
         self.controller_state_future = None
         self.latest_joint_positions = {}
+        self.last_measured_joints_at = {}
+        self.last_motion_state_at = {}
         self.last_robot_feedback_at = {
             device: None for device in controlled_devices
         }
@@ -2361,6 +2570,12 @@ class WeldGuiNode(Node):
             self._joint_state,
             10,
         )
+        self.create_subscription(
+            WideSensingResult,
+            str(self.get_parameter("wide_sensing_result_topic").value),
+            self._wide_sensing_result,
+            10,
+        )
         fastech_qos = QoSProfile(depth=1)
         fastech_qos.reliability = ReliabilityPolicy.RELIABLE
         fastech_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -2392,6 +2607,124 @@ class WeldGuiNode(Node):
             self.get_parameter("fastech_board_id").value,
             self.get_parameter("fastech_poll_period_s").value,
         )
+
+    def _wide_sensing_result(self, message):
+        self.ui.post(
+            self.ui.update_wide_sensing_result,
+            copy.deepcopy(message),
+        )
+
+    def resolve_wide_sensing_segment(
+        self,
+        segment,
+        source_frame,
+        planning_group,
+        offset_m,
+        reverse,
+    ):
+        source_frame = str(source_frame).strip()
+        if not source_frame:
+            raise ValueError("Wide Sensing source frame is empty")
+        if source_frame == "World":
+            world_from_sensor = TransformStamped()
+            world_from_sensor.header.frame_id = "World"
+            world_from_sensor.child_frame_id = "World"
+            world_from_sensor.transform.rotation.w = 1.0
+        else:
+            world_from_sensor = self.tf_buffer.lookup_transform(
+                "World",
+                source_frame,
+                rclpy.time.Time(),
+                timeout=Duration(seconds=1.0),
+            )
+        current_tcp = self._current_tcp_pose(planning_group)
+        return wide_sensing_path_poses(
+            segment.start,
+            segment.end,
+            world_from_sensor,
+            current_tcp.orientation,
+            offset_m=offset_m,
+            reverse=reverse,
+        )
+
+    def resolve_keyboard_velocity(
+        self,
+        planning_group,
+        selection,
+        direction,
+        linear_speed_m_s,
+        angular_speed_rad_s,
+        reference,
+    ):
+        current = self._current_tcp_pose(planning_group)
+        world_velocity = keyboard_velocity_vector(
+            current.orientation,
+            selection,
+            direction,
+            linear_speed_m_s,
+            angular_speed_rad_s,
+            reference,
+        )
+        arm = planning_group.removesuffix("_manipulator")
+        base_frame = f"{arm}_manipulator_base_link"
+        base_from_world = self.tf_buffer.lookup_transform(
+            base_frame,
+            "World",
+            rclpy.time.Time(),
+            timeout=Duration(seconds=1.0),
+        )
+        rotation = base_from_world.transform.rotation
+        return (
+            *_quaternion_rotate_vector(rotation, world_velocity[:3]),
+            *_quaternion_rotate_vector(rotation, world_velocity[3:]),
+        )
+
+    def set_keyboard_velocity(self, arm, values):
+        values = tuple(float(value) for value in values)
+        if len(values) != 6 or not all(math.isfinite(value) for value in values):
+            raise ValueError("keyboard velocity must contain six finite values")
+        with self.keyboard_velocity_lock:
+            self.keyboard_velocity_command = {
+                "arm": arm,
+                "values": values,
+            }
+
+    def clear_keyboard_velocity(self):
+        with self.keyboard_velocity_lock:
+            arm = self.keyboard_velocity_command["arm"]
+            self.keyboard_velocity_command = {
+                "arm": arm,
+                "values": (0.0,) * 6,
+            }
+        if arm in self.keyboard_velocity_publishers:
+            self._publish_keyboard_velocity()
+
+    def keyboard_velocity_controller_ready(self, arm):
+        return arm in self.keyboard_velocity_publishers
+
+    def keyboard_velocity_feedback_ready(self, arm, maximum_age_s=0.25):
+        received_at = self.last_robot_feedback_at.get(arm)
+        if received_at is None or time.monotonic() - received_at > maximum_age_s:
+            return False
+        return CONTROLLED_JOINT_NAMES[arm].issubset(self.latest_joint_positions)
+
+    def wait_for_keyboard_velocity_feedback(self, arm, timeout=1.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.keyboard_velocity_feedback_ready(arm):
+                return True
+            time.sleep(0.02)
+        return False
+
+    def _publish_keyboard_velocity(self):
+        with self.keyboard_velocity_lock:
+            arm = self.keyboard_velocity_command["arm"]
+            values = tuple(self.keyboard_velocity_command["values"])
+        if arm not in self.keyboard_velocity_publishers:
+            return
+        message = Float64MultiArray()
+        message.data = list(values)
+        self.keyboard_velocity_publishers[arm].publish(message)
 
     def _fastech_touch_contact(self, message):
         if not self.fastech_io_connected:
@@ -2449,6 +2782,44 @@ class WeldGuiNode(Node):
             "/fastech/set_output",
         )
 
+    def set_both_robot_power_sync(self, enable):
+        """Send left and right arm-power requests before waiting for either."""
+        pending = {}
+        results = {}
+        completed = threading.Event()
+        result_lock = threading.Lock()
+        for arm, client in self.robot_power_clients.items():
+            service = f"/{arm}_rbpodo_hardware/set_robot_power"
+            if not client.wait_for_service(timeout_sec=1.0):
+                results[arm] = (False, f"ROS service unavailable: {service}")
+                continue
+            request = SetRobotPower.Request()
+            request.enable = bool(enable)
+            pending[arm] = client.call_async(request)
+        if not pending:
+            return results
+
+        def response_ready(arm, future):
+            try:
+                response = future.result()
+                value = (bool(response.success), str(response.message))
+            except Exception as error:
+                value = (False, str(error))
+            with result_lock:
+                results[arm] = value
+                if all(name in results for name in pending):
+                    completed.set()
+
+        for arm, future in pending.items():
+            future.add_done_callback(
+                lambda done, selected=arm: response_ready(selected, done)
+            )
+        timeout = 35.0 if enable else 8.0
+        if not completed.wait(timeout):
+            for arm in pending:
+                results.setdefault(arm, (False, "robot power service timeout"))
+        return results
+
     def set_fastech_connection_sync(self, connect):
         client = (
             self.fastech_connect_client
@@ -2465,6 +2836,8 @@ class WeldGuiNode(Node):
 
     def _system_state(self, message, arm):
         """Retain Rainbow controller I/O as a legacy monitor/test path."""
+        self.latest_robot_motion_state[arm] = int(message.robot_state)
+        self.last_motion_state_at[arm] = time.monotonic()
         self.legacy_node_touch_input_states[arm] = bool(
             message.digital_in[LEGACY_RAINBOW_TOUCH_INPUT_PORT]
         )
@@ -2482,7 +2855,7 @@ class WeldGuiNode(Node):
         self.robot_feedback_seen[arm] = True
 
     def update_fastech_touch_input(self, touch_active):
-        """Consume the production Fastech DI0 edge from /touch/contact."""
+        """Consume the production Fastech touch edge from /touch/contact."""
         touch_active = bool(touch_active)
         probe = self.active_touch_probe
         guard = self.active_touch_guard
@@ -2574,6 +2947,7 @@ class WeldGuiNode(Node):
                 math.isfinite(positions[name]) for name in expected_names
             ):
                 self.last_robot_feedback_at[arm] = received_at
+                self.last_measured_joints_at[arm] = received_at
                 self.robot_feedback_seen[arm] = True
 
     def _display_trajectory_received(self, message):
@@ -2780,8 +3154,13 @@ class WeldGuiNode(Node):
                 last_feedback is not None
                 and time.monotonic() - last_feedback <= feedback_timeout
             )
+            velocity_mode_ready = (
+                arm in self.keyboard_controller_states
+                and self.keyboard_controller_states[arm] == "active"
+            )
             controller_ready = (
                 not self.execute_motion_enabled
+                or velocity_mode_ready
                 or (
                     self.controller_states[arm] == "active"
                     and self.joint_trajectory_clients[arm].server_is_ready()
@@ -2898,6 +3277,8 @@ class WeldGuiNode(Node):
         }
         for arm, name in CONTROLLER_NAMES.items():
             self.controller_states[arm] = states.get(name)
+        for arm, name in KEYBOARD_VELOCITY_CONTROLLER_NAMES.items():
+            self.keyboard_controller_states[arm] = states.get(name)
 
     def _not_ready_detail(
         self,
@@ -2910,6 +3291,11 @@ class WeldGuiNode(Node):
             return "measured joint feedback timeout"
         if arm != "head" and not move_group_ready:
             return "MoveGroup action unavailable"
+        if (
+            arm in self.keyboard_controller_states
+            and self.keyboard_controller_states[arm] == "active"
+        ):
+            return "stack not ready while Cartesian velocity controller is active"
         if self.controller_states[arm] != "active":
             return (
                 f"{CONTROLLER_NAMES[arm]} state="
@@ -3307,6 +3693,8 @@ class WeldGuiNode(Node):
         arm = planning_group.removesuffix("_manipulator")
         try:
             start = self._current_tcp_pose(planning_group)
+            self.touch_probe_cancel_event.set()
+            self.touch_probe_cancel_event = threading.Event()
             self.active_touch_probe = (
                 arm,
                 probe_kind,
@@ -3363,27 +3751,22 @@ class WeldGuiNode(Node):
         if probe is None:
             return
         arm, kind, planning_group, start, speed, interpolation = probe
+        cancel_event = self.touch_probe_cancel_event
         stationary, controller_deactivated = self._stop_motion_on_touch(
             arm, f"probe {kind}"
         )
         self.touch_probe_controller_deactivated = controller_deactivated
         if not stationary:
             self.active_touch_probe = None
-            if self.touch_probe_controller_deactivated:
-                self.switch_arm_controller(arm, True)
-                self.touch_probe_controller_deactivated = False
             self.ui.post(
                 self.ui.touch_probe_failed,
-                "Fastech DI0 received, but measured joints did not reach standstill",
+                "Touch stop not confirmed; automatic controller restore/retract inhibited",
             )
             return
         try:
             stopped_pose = self._current_tcp_pose(planning_group)
         except TransformException as error:
             self.active_touch_probe = None
-            if self.touch_probe_controller_deactivated:
-                self.switch_arm_controller(arm, True)
-                self.touch_probe_controller_deactivated = False
             self.ui.post(self.ui.touch_probe_failed, str(error))
             return
         touched = (
@@ -3419,6 +3802,7 @@ class WeldGuiNode(Node):
             f"automatic probe:{kind}",
             start,
             stopped_pose,
+            cancel_event,
         )
 
     def _stop_motion_on_touch(self, arm, label):
@@ -3463,9 +3847,18 @@ class WeldGuiNode(Node):
                 arm, False
             )
             controller_deactivated = bool(controller_success)
-            direct_stop_success, direct_stop_message = (
-                self.request_direct_motion_stop(arm)
+            # Deactivation already requests RB task_stop in the hardware
+            # interface. Do not immediately issue a second task_stop.
+            stationary = (
+                controller_success
+                and self.wait_until_arm_stopped(arm, timeout=1.0)
             )
+            direct_stop_success, direct_stop_message = True, "not needed after controller stop"
+            if not stationary:
+                direct_stop_success, direct_stop_message = (
+                    self.request_direct_motion_stop(arm)
+                )
+                stationary = self.wait_until_arm_stopped(arm)
             self.ui.post(
                 self.ui.log,
                 f"Fastech DI0 fallback controller stop: "
@@ -3478,14 +3871,21 @@ class WeldGuiNode(Node):
                 f"{'OK' if direct_stop_success else 'FAILED'} · "
                 f"{direct_stop_message}",
             )
-            stationary = self.wait_until_arm_stopped(arm)
         if handle is not None and not action_finished.wait(timeout=2.0):
             self.ui.post(
                 self.ui.log,
-                "Fastech DI0 motion is physically stopped; outer action cleanup "
-                "is still pending",
+                "Touch action cleanup still pending; automatic restore/retract inhibited",
             )
+            return False, controller_deactivated
         return bool(stationary), controller_deactivated
+
+    def restore_touch_controller(self, arm):
+        """Never resume position control until fresh standstill and RB Idle."""
+        if not self.wait_until_arm_stopped(arm):
+            return False, "measured standstill unavailable; controller left inactive"
+        if not self.wait_for_robot_idle(arm):
+            return False, "fresh RB Idle unavailable; controller left inactive"
+        return self.switch_arm_controller(arm, True)
 
     def cancel_controller_goals(self, arm):
         """Cancel every active FollowJointTrajectory goal for one arm."""
@@ -3567,8 +3967,8 @@ class WeldGuiNode(Node):
             )
             restored = True
             restore_message = "controller remained active"
-            if controller_deactivated:
-                restored, restore_message = self.switch_arm_controller(arm, True)
+            if controller_deactivated and stationary:
+                restored, restore_message = self.restore_touch_controller(arm)
                 self.ui.post(
                     self.ui.log,
                     f"Fastech DI0 guarded motion controller restore: "
@@ -3660,6 +4060,46 @@ class WeldGuiNode(Node):
             )
         return True, f"{controller} {action}"
 
+    def set_keyboard_velocity_controller_enabled(self, arm, enable):
+        """Atomically exchange JTC and the native Cartesian-speed owner."""
+        trajectory_controller = CONTROLLER_NAMES[arm]
+        velocity_controller = KEYBOARD_VELOCITY_CONTROLLER_NAMES[arm]
+        activate = velocity_controller if enable else trajectory_controller
+        deactivate = trajectory_controller if enable else velocity_controller
+        client = self.controller_switch_client
+        if not client.wait_for_service(timeout_sec=1.0):
+            return False, "/controller_manager/switch_controller unavailable"
+        request = SwitchController.Request()
+        request.activate_controllers = [activate]
+        request.deactivate_controllers = [deactivate]
+        request.strictness = SwitchController.Request.STRICT
+        request.activate_asap = True
+        request.timeout.sec = 3
+        finished = threading.Event()
+        outcome = {}
+
+        def response_ready(future):
+            try:
+                outcome["success"] = bool(future.result().ok)
+            except Exception as error:
+                outcome["error"] = str(error)
+            finished.set()
+
+        client.call_async(request).add_done_callback(response_ready)
+        if not finished.wait(timeout=4.0):
+            return False, "keyboard controller exchange timed out"
+        if "error" in outcome:
+            return False, outcome["error"]
+        if not outcome.get("success", False):
+            return False, (
+                f"controller_manager rejected {deactivate} -> {activate}"
+            )
+        if not self.wait_for_controller_state(activate, "active"):
+            return False, f"{activate} did not become active"
+        if not self.wait_for_controller_state(deactivate, "inactive"):
+            return False, f"{deactivate} did not become inactive"
+        return True, f"{deactivate} -> {activate}"
+
     def wait_for_controller_state(self, controller, expected, timeout=3.0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -3690,6 +4130,23 @@ class WeldGuiNode(Node):
         """Confirm measured joints remain still before capturing the touch."""
         return self.wait_until_device_stopped(arm, timeout)
 
+    def wait_for_robot_idle(self, arm, timeout=2.5):
+        """Wait until the RB motion task has fully left its moving state."""
+        deadline = time.monotonic() + timeout
+        stable_since = None
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            received_at = self.last_motion_state_at.get(arm)
+            fresh = received_at is not None and now - received_at <= 0.25
+            if fresh and self.latest_robot_motion_state.get(arm) == 1:
+                stable_since = stable_since or now
+                if now - stable_since >= 0.15:
+                    return True
+            else:
+                stable_since = None
+            time.sleep(0.02)
+        return False
+
     def wait_until_device_stopped(self, device, timeout=3.0):
         """Confirm a controlled arm or head remains measurably stationary."""
         names = tuple(sorted(CONTROLLED_JOINT_NAMES[device]))
@@ -3697,6 +4154,13 @@ class WeldGuiNode(Node):
         previous = None
         stable_since = None
         while time.monotonic() < deadline:
+            if device in ("left", "right"):
+                received_at = self.last_measured_joints_at.get(device)
+                if received_at is None or time.monotonic() - received_at > 0.25:
+                    previous = None
+                    stable_since = None
+                    time.sleep(0.02)
+                    continue
             try:
                 current = tuple(self.latest_joint_positions[name] for name in names)
             except KeyError:
@@ -3727,8 +4191,11 @@ class WeldGuiNode(Node):
         step,
         probe_kind,
         settle_seconds,
+        cancel_event=None,
     ):
         """Execute the reverse probe path back to its captured start pose."""
+        if cancel_event is None:
+            cancel_event = self.touch_probe_cancel_event
         try:
             arm = planning_group.removesuffix("_manipulator")
             self.ui.post(
@@ -3737,14 +4204,21 @@ class WeldGuiNode(Node):
                 f"{settle_seconds:.1f} seconds",
             )
             time.sleep(settle_seconds)
+            if cancel_event.is_set() or cancel_event is not self.touch_probe_cancel_event:
+                raise RuntimeError("Touch probe canceled; automatic retract inhibited")
             if self.touch_probe_controller_deactivated:
-                activated, activation_message = self.switch_arm_controller(
-                    arm, True
-                )
+                activated, activation_message = self.restore_touch_controller(arm)
                 if not activated:
                     raise RuntimeError(activation_message)
                 self.touch_probe_controller_deactivated = False
-            points = linear_pose_waypoints(touched, start, 2)
+            if not self.wait_until_arm_stopped(arm):
+                raise RuntimeError("Standstill lost before retract")
+            if cancel_event.is_set() or cancel_event is not self.touch_probe_cancel_event:
+                raise RuntimeError("Touch probe canceled; automatic retract inhibited")
+            # The captured contact/stopped pose can precede settling or a
+            # controller exchange. Plan from the actual pose at retract time.
+            current_pose = self._current_tcp_pose(planning_group)
+            points = linear_pose_waypoints(current_pose, start, 2)
             success, message = self.run_sequence_cartesian_motion(
                 {
                     "planning_group": planning_group,
@@ -3756,7 +4230,8 @@ class WeldGuiNode(Node):
             )
         except (RuntimeError, ValueError, TransformException) as error:
             success, message = False, str(error)
-        self.active_touch_probe = None
+        if cancel_event is self.touch_probe_cancel_event:
+            self.active_touch_probe = None
         self.ui.post(
             self.ui.touch_probe_return_finished,
             success,
@@ -3764,13 +4239,17 @@ class WeldGuiNode(Node):
             probe_kind,
         )
 
-    def clear_touch_probe(self):
+    def clear_touch_probe(self, cancel_return=True):
+        """Disarm contact detection; explicit stop/failure also cancels retract."""
+        if cancel_return:
+            self.touch_probe_cancel_event.set()
         self.active_touch_probe = None
         self.touch_probe_edge_pose = None
         self.touch_probe_stop_requested.set()
 
     def stop_auto_motion(self, arm):
         """Stop any auto-seam motion and restore an idle active controller."""
+        self.clear_touch_probe()
         handle = self.active_motion_goal
         if handle is not None:
             try:
@@ -3782,7 +4261,9 @@ class WeldGuiNode(Node):
             fallback, fallback_message = self.request_direct_motion_stop(arm)
             message = f"{message}; fallback={fallback}: {fallback_message}"
         stationary = self.wait_until_arm_stopped(arm)
-        activated, activation_message = self.switch_arm_controller(arm, True)
+        activated, activation_message = False, "stop unconfirmed; automatic restore inhibited"
+        if stationary and stopped:
+            activated, activation_message = self.restore_touch_controller(arm)
         self.active_touch_probe = None
         success = stationary and activated
         self.ui.post(
@@ -5043,7 +5524,8 @@ class WeldGuiNode(Node):
     def run_sequence_named_pose(self, step, execute_requested):
         """Plan or plan-and-execute one taught joint pose."""
         tcp_target = bool(
-            step.get("pose_name") in TCP_POSE_TEACHING_POSES
+            not step.get("use_joint_planning", False)
+            and step.get("pose_name") in TCP_POSE_TEACHING_POSES
             and pose_is_valid(step.get("tcp_pose"))
         )
         if tcp_target:
@@ -5399,6 +5881,22 @@ class WeldActionGui:
             "right": False,
             "head": False,
         }
+        self.robot_power_busy = False
+        self.robot_power_status = tk.StringVar(
+            value="Arm power: use ACTIVATE BOTH before physical motion"
+        )
+        self.keyboard_jog_enabled = tk.BooleanVar(value=False)
+        self.keyboard_jog_selection = tk.StringVar(value="XY")
+        self.keyboard_jog_frame = tk.StringVar(value="World")
+        self.keyboard_jog_linear_speed = tk.DoubleVar(value=5.0)
+        self.keyboard_jog_angular_speed = tk.DoubleVar(value=3.0)
+        self.keyboard_jog_status = tk.StringVar(
+            value="Keyboard teaching locked"
+        )
+        self.keyboard_velocity_arm = None
+        self.keyboard_velocity_switching = False
+        self.keyboard_velocity_active_key = None
+        self.keyboard_release_after_id = None
         self.fake_head_hardware = False
         self.plan_approved = False
         self.linear_tcp_endpoints = [None, None]
@@ -5531,6 +6029,9 @@ class WeldActionGui:
         self.touch_settle_seconds = tk.DoubleVar(value=0.7)
         self.seam_wall_offset_mm = tk.DoubleVar(value=0.0)
         self.seam_floor_offset_mm = tk.DoubleVar(value=0.0)
+        self.weld_approach_mode = tk.StringVar(
+            value=last_execution_motion.get("weld_approach_mode", "corner_geometry")
+        )
         self.weld_safe_approach_mm = tk.DoubleVar(
             value=last_execution_motion.get("weld_safe_approach_mm", 30.0)
         )
@@ -5631,6 +6132,17 @@ class WeldActionGui:
         self.fastech_pending_outputs = set()
         self.fastech_io_labels = {}
         self.fastech_output_buttons = []
+        self.latest_wide_sensing_result = None
+        self.wide_sensing_segments = {}
+        self.wide_sensing_segment_id = tk.StringVar(value="")
+        self.wide_sensing_source_frame = tk.StringVar(value="helios_link")
+        self.wide_sensing_reverse = tk.BooleanVar(value=False)
+        self.wide_sensing_offset_x_mm = tk.DoubleVar(value=0.0)
+        self.wide_sensing_offset_y_mm = tk.DoubleVar(value=0.0)
+        self.wide_sensing_offset_z_mm = tk.DoubleVar(value=0.0)
+        self.wide_sensing_status = tk.StringVar(
+            value="Waiting for /wide_sensing/output/result"
+        )
         # Reproduce the successful v5.2 Rainbow capture byte-for-byte by
         # default, unless the last saved weld feedback log recorded a
         # different recipe -- then start from exactly what last ran.
@@ -5772,6 +6284,25 @@ class WeldActionGui:
             pady=3,
         ).pack(side=tk.RIGHT, padx=8, pady=4)
 
+        robot_power = ttk.Frame(outer)
+        robot_power.pack(fill=tk.X, pady=(0, 7))
+        self.robot_activate_both_button = ttk.Button(
+            robot_power,
+            text="ACTIVATE BOTH · Real mode",
+            command=lambda: self.request_both_robot_power(True),
+        )
+        self.robot_activate_both_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.robot_shutdown_both_button = ttk.Button(
+            robot_power,
+            text="SHUTDOWN BOTH",
+            command=lambda: self.request_both_robot_power(False),
+        )
+        self.robot_shutdown_both_button.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(
+            robot_power,
+            textvariable=self.robot_power_status,
+        ).pack(side=tk.LEFT)
+
         arm_selection = ttk.Frame(outer)
         arm_selection.pack(fill=tk.X, pady=(0, 7))
         ttk.Label(
@@ -5787,6 +6318,96 @@ class WeldActionGui:
             width=22,
         ).pack(side=tk.LEFT)
         self.planning_group.trace_add("write", self.arm_changed)
+
+        keyboard_jog = self._create_toggle_section(
+            outer,
+            "keyboard_jog",
+            "Keyboard Teaching · SpaceMouse-style hold-to-run velocity",
+            expanded=False,
+        )
+        jog_row = ttk.Frame(keyboard_jog)
+        jog_row.pack(fill=tk.X, pady=2)
+        self.keyboard_jog_enable_button = ttk.Checkbutton(
+            jog_row,
+            text="Enable keyboard teaching",
+            variable=self.keyboard_jog_enabled,
+            command=self.keyboard_jog_enable_changed,
+        )
+        self.keyboard_jog_enable_button.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(jog_row, text="axis/plane").pack(side=tk.LEFT)
+        ttk.Combobox(
+            jog_row,
+            textvariable=self.keyboard_jog_selection,
+            values=tuple(KEYBOARD_JOG_SELECTIONS),
+            state="readonly",
+            width=8,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(jog_row, text="XYZ frame").pack(side=tk.LEFT)
+        ttk.Combobox(
+            jog_row,
+            textvariable=self.keyboard_jog_frame,
+            values=("World", "Tool"),
+            state="readonly",
+            width=6,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(jog_row, text="XYZ mm/s").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            jog_row,
+            from_=0.1,
+            to=20.0,
+            increment=0.5,
+            textvariable=self.keyboard_jog_linear_speed,
+            width=6,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(jog_row, text="RPY deg/s").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            jog_row,
+            from_=0.1,
+            to=10.0,
+            increment=0.5,
+            textvariable=self.keyboard_jog_angular_speed,
+            width=6,
+        ).pack(side=tk.LEFT, padx=(3, 8))
+        ttk.Label(
+            jog_row,
+            textvariable=self.keyboard_jog_status,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(
+            keyboard_jog,
+            text=(
+                "Keys: 1=X  2=Y  3=Z  4=RX  5=RY  6=RZ  ·  "
+                "7=XY  8=XZ  9=YZ  A=RX/RY  S=RX/RZ  D=RY/RZ"
+            ),
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            keyboard_jog,
+            text=(
+                "Arrows: single axis Left/Down=-, Right/Up=+; plane "
+                "Left/Right=first axis, Down/Up=second axis. "
+                "Hold=move, release=zero velocity. "
+                "Rotation RX/RY/RZ: always Global (World) axes."
+            ),
+            foreground="#137333",
+        ).pack(anchor=tk.W)
+        for key_name in (
+            "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "s", "d"
+        ):
+            self.root.bind(
+                f"<KeyPress-{key_name}>",
+                self.keyboard_jog_selection_key,
+                add="+",
+            )
+        for key_name in ("Left", "Right", "Up", "Down"):
+            self.root.bind(
+                f"<KeyPress-{key_name}>",
+                self.keyboard_jog_key_press,
+                add="+",
+            )
+            self.root.bind(
+                f"<KeyRelease-{key_name}>",
+                self.keyboard_jog_key_release,
+                add="+",
+            )
 
         motion_tests = self._create_toggle_section(
             outer, "motion_test", "Motion Test", expanded=False
@@ -6350,7 +6971,7 @@ class WeldActionGui:
         touch_corner = self._create_toggle_section(
             outer,
             "touch_corner",
-            "Seam Correction · Fastech DI0 wall/base probing + seam-yaw orientation",
+            "Seam Correction · Fastech DI4 wall/base probing + seam-yaw orientation",
         )
 
         geometry_controls = ttk.Frame(touch_corner)
@@ -6461,6 +7082,11 @@ class WeldActionGui:
 
         safe_approach_controls = ttk.Frame(touch_corner)
         safe_approach_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(safe_approach_controls, text="Approach mode").pack(side=tk.LEFT)
+        ttk.Combobox(
+            safe_approach_controls, textvariable=self.weld_approach_mode,
+            values=("taught_wait", "corner_geometry"), state="readonly", width=18,
+        ).pack(side=tk.LEFT, padx=5)
         ttk.Label(
             safe_approach_controls, text="Safe approach distance mm"
         ).pack(side=tk.LEFT)
@@ -6485,7 +7111,7 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=(4, 10))
         ttk.Label(
             safe_approach_controls,
-            text="touch-corrected path: safe → -e_a → lead → +d_real → START",
+            text="taught_wait: taught clearance + weld attitude; corner_geometry: e_a clearance",
         ).pack(side=tk.LEFT, padx=(8, 0))
 
         weld_lead_controls = ttk.Frame(touch_corner)
@@ -6894,6 +7520,81 @@ class WeldActionGui:
             text="Delete All",
             command=self.clear_path,
         ).pack(anchor=tk.E, pady=(5, 0))
+
+        wide_sensing = self._create_toggle_section(
+            outer,
+            "wide_sensing",
+            "Wide Sensing · detected weld segment → World planned path",
+            expanded=False,
+        )
+        wide_row = ttk.Frame(wide_sensing)
+        wide_row.pack(fill=tk.X, pady=2)
+        ttk.Label(wide_row, text="segment").pack(side=tk.LEFT)
+        self.wide_sensing_segment_box = ttk.Combobox(
+            wide_row,
+            textvariable=self.wide_sensing_segment_id,
+            values=(),
+            state="readonly",
+            width=24,
+        )
+        self.wide_sensing_segment_box.pack(side=tk.LEFT, padx=(3, 10))
+        ttk.Label(wide_row, text="source frame").pack(side=tk.LEFT)
+        ttk.Entry(
+            wide_row,
+            textvariable=self.wide_sensing_source_frame,
+            width=14,
+        ).pack(side=tk.LEFT, padx=(3, 10))
+        ttk.Checkbutton(
+            wide_row,
+            text="reverse START/END",
+            variable=self.wide_sensing_reverse,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        for axis, variable in (
+            ("World offset X mm", self.wide_sensing_offset_x_mm),
+            ("Y", self.wide_sensing_offset_y_mm),
+            ("Z", self.wide_sensing_offset_z_mm),
+        ):
+            ttk.Label(wide_row, text=axis).pack(side=tk.LEFT)
+            ttk.Entry(
+                wide_row,
+                textvariable=variable,
+                width=6,
+            ).pack(side=tk.LEFT, padx=(3, 7))
+        self.wide_sensing_load_button = ttk.Button(
+            wide_row,
+            text="Load segment as planned path",
+            command=self.load_wide_sensing_segment,
+            state=tk.DISABLED,
+        )
+        self.wide_sensing_load_button.pack(side=tk.LEFT, padx=(8, 3))
+        wide_actions = ttk.Frame(wide_sensing)
+        wide_actions.pack(fill=tk.X, pady=(2, 0))
+        self.wide_sensing_plan_button = ttk.Button(
+            wide_actions,
+            text="Load + Plan Preview",
+            command=lambda: self.load_wide_sensing_segment(True),
+            state=tk.DISABLED,
+        )
+        self.wide_sensing_plan_button.pack(side=tk.LEFT, padx=3)
+        self.wide_sensing_execute_button = ttk.Button(
+            wide_actions,
+            text="Execute Approved",
+            command=self.execute_approved,
+            state=tk.DISABLED,
+        )
+        self.wide_sensing_execute_button.pack(side=tk.LEFT, padx=3)
+        ttk.Label(
+            wide_sensing,
+            textvariable=self.wide_sensing_status,
+        ).pack(anchor=tk.W, pady=(2, 0))
+        ttk.Label(
+            wide_sensing,
+            text=(
+                "Input XYZ is metre in helios_link. TF converts it to World; "
+                "START/END preserve the selected robot's current TCP orientation. "
+                "Use Plan Preview before Execute."
+            ),
+        ).pack(anchor=tk.W, pady=(1, 2))
 
         fastech_io = self._create_toggle_section(
             outer,
@@ -8110,6 +8811,8 @@ class WeldActionGui:
             self.seam_orientation_mode.set(WAIT_FIXED_TILT_ORIENTATION_MODE)
             self._update_seam_yaw_status()
         for key, variable, allowed in (
+            ("weld_approach_mode", self.weld_approach_mode,
+             {"taught_wait", "corner_geometry"}),
             ("weld_weave_pattern", self.weave_pattern, {"sine", "circle"}),
             (
                 "weld_weave_axis",
@@ -8683,6 +9386,23 @@ class WeldActionGui:
 
     def _execute_triggered_arc_off(self, step):
         """Turn ARC off before GOAL without breaking the continuous TCP motion."""
+        if self.fake_arc_enabled.get():
+            # Dry runs finish at motion completion; no geometric pre-OFF or
+            # welder-feedback timing is needed. Call the fake handler directly
+            # so changing the checkbox cannot send a real OFF from this branch.
+            while not self.weld_motion_done_event.wait(timeout=0.05):
+                if self.sequence_stop_requested:
+                    self._execute_fake_arc("off")
+                    return False, "FAKE ARC OFF · sequence interrupted"
+                if (self.weld_arc_on_done_event.is_set()
+                        and not self.weld_arc_on_success):
+                    self._execute_fake_arc("off")
+                    return False, "FAKE ARC OFF · ARC ON failed"
+            success, message = self._execute_fake_arc("off")
+            if self.sequence_stop_requested or not self.weld_motion_success:
+                return False, message + " · weld motion failed or interrupted"
+            return success, message + " · weld motion completed"
+
         start = step.get("usable_seam_start")
         goal = step.get("usable_seam_goal")
         if not pose_is_valid(start) or not pose_is_valid(goal):
@@ -8960,10 +9680,10 @@ class WeldActionGui:
             )
             return
         if self.touch_input_states["right"] is None:
-            self.error("Fastech DI0 state has not been received yet")
+            self.error("Fastech DI4 state has not been received yet")
             return
         if self.touch_input_states["right"]:
-            self.error("Fastech DI0 is already ON; release it before auto correction")
+            self.error("Fastech DI4 is already ON; release it before auto correction")
             return
         orientation_note = (
             "START/GOAL orientation = each WAIT orientation + fixed Tool XYZ "
@@ -8981,7 +9701,7 @@ class WeldActionGui:
             "→ compute seam/yaw → save START/GOAL YAML\n"
             "→ move to 7 · Weld end pose\n\n"
             f"{orientation_note}\n\n"
-            "Each Fastech DI0 edge stops the probe and returns to its probe start.\n"
+            "Each Fastech DI4 edge stops the probe and returns to its probe start.\n"
             "The taught START/GOAL wait poses remain unchanged.",
         ):
             return
@@ -9576,19 +10296,19 @@ class WeldActionGui:
             self.error(f"Unknown touch probe kind: {kind}")
             return
         if self.automatic_probe_kind is not None:
-            self.error("Another Fastech DI0 touch probe is already active")
+            self.error("Another Fastech DI4 touch probe is already active")
             return
         if self.planning_group.get() != "right_manipulator":
-            self.error("Automatic Fastech DI0 seam probing currently supports the right arm")
+            self.error("Automatic Fastech DI4 seam probing currently supports the right arm")
             return
         if not self.execution_allowed or not self.robot_connected["right"]:
             self.error("Connect the right robot and enable physical execution")
             return
         if self.touch_input_states["right"] is None:
-            self.error("Fastech DI0 state has not been received yet")
+            self.error("Fastech DI4 state has not been received yet")
             return
         if self.touch_input_states["right"]:
-            self.error("Fastech DI0 is already ON; release the touch signal before probing")
+            self.error("Fastech DI4 is already ON; release the touch signal before probing")
             return
         try:
             distance = float(self.touch_probe_distance_mm.get()) * 0.001
@@ -10244,7 +10964,10 @@ class WeldActionGui:
             has_lead_out = lead_out_mm > 1e-6
             safe_approach = None
             approach_lead = None
-            if start_is_sensed:
+            approach_mode = self.weld_approach_mode.get()
+            if approach_mode not in ("taught_wait", "corner_geometry"):
+                raise ValueError("Unsupported weld approach mode")
+            if start_is_sensed and approach_mode == "corner_geometry":
                 if self.corrected_seam_geometry is None:
                     raise ValueError(
                         "touch-corrected START has no computed seam local frame"
@@ -10638,6 +11361,10 @@ class WeldActionGui:
                     "duration": 0.0,
                 }, "touch_output_on"),
             ])
+            if approach_mode == "taught_wait":
+                steps = taught_wait_approach_steps(steps, start_wait_data[3], goal_wait_data[3])
+            for step in steps:
+                step["weld_approach_mode"] = approach_mode
             validate_managed_weld_sequence(steps, require_complete=True)
         except (ValueError, TypeError, tk.TclError) as error:
             self.error(f"Cannot build sensed weld sequence: {error}")
@@ -10646,6 +11373,7 @@ class WeldActionGui:
         self.refresh_sequence_table(select_last=True)
         self.log(
             f"Built weld workflow from {start_source} to {goal_source} · "
+            f"approach={approach_mode} · "
             f"{len(steps)} steps · slots {base_slot}..{final_slot} · "
             f"lead-in={lead_in_mm:.1f} mm / lead-out={lead_out_mm:.1f} mm · "
             f"safe approach={safe_approach_mm:.1f} mm / "
@@ -10673,6 +11401,8 @@ class WeldActionGui:
             f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°) · "
             + (
+                "START WAIT → align weld attitude → weld lead START → Fastech DO0 OFF → "
+                if approach_mode == "taught_wait" else
                 "START WAIT → SAFE(weld attitude) → PRE-START → START/Fastech DI0 → Fastech DO0 OFF → "
                 if safe_approach is not None
                 else "START WAIT → START/Fastech DI0(teaching attitude) → Fastech DO0 OFF → "
@@ -10683,7 +11413,7 @@ class WeldActionGui:
                     if safe_approach is not None
                     else "WAIT-XYZ retract (keep teaching attitude) → LEAD-IN → "
                 )
-                if has_lead_in
+                if has_lead_in and approach_mode != "taught_wait"
                 else ""
             )
             + "[pre-gas → D-WELD ON/ARC established → stabilize → endpoint-only LEAD→LEAD motion "
@@ -12081,6 +12811,9 @@ class WeldActionGui:
             "weld_safe_approach_mm": float(effective_motion_value(
                 "safe_approach_mm", self.weld_safe_approach_mm.get()
             )),
+            "weld_approach_mode": effective_motion_value(
+                "weld_approach_mode", self.weld_approach_mode.get()
+            ),
             "weld_pre_start_lead_mm": float(effective_motion_value(
                 "pre_start_lead_mm", self.weld_pre_start_lead_mm.get()
             )),
@@ -12559,6 +13292,8 @@ class WeldActionGui:
 
     def stop_sequence(self):
         self.sequence_stop_requested = True
+        # STOP NOW also invalidates any pending touch dwell/retract.
+        self.node.clear_touch_probe()
         if self.hicomm_client is not None:
             self.hicomm_client.inhibit_outputs()
             self._finish_weld_feedback_record(
@@ -12586,8 +13321,365 @@ class WeldActionGui:
             "STOP NOW · ARC/GAS/INCH OFF · canceling all robot motion"
         )
 
-    def emergency_stop_all(self):
+    def request_both_robot_power(self, enable):
+        if self.robot_power_busy:
+            return
+        if not enable and not messagebox.askyesno(
+            "Shutdown both robot arms",
+            "Stop motion and power down BOTH Rainbow robot arms?",
+        ):
+            return
+        self.robot_power_busy = True
+        self.robot_activate_both_button.configure(state=tk.DISABLED)
+        self.robot_shutdown_both_button.configure(state=tk.DISABLED)
+        action = "activating" if enable else "shutting down"
+        self.robot_power_status.set(f"BOTH arms {action}...")
+        if not enable:
+            # The shutdown worker restores a possible velocity controller
+            # synchronously before deactivating both trajectory controllers.
+            self.emergency_stop_all(restore_keyboard_controller=False)
+        threading.Thread(
+            target=self._both_robot_power_worker,
+            args=(bool(enable),),
+            daemon=True,
+        ).start()
+
+    def _both_robot_power_worker(self, enable):
+        controller_results = {}
+        if not enable:
+            velocity_arm = self.keyboard_velocity_arm
+            if velocity_arm is not None:
+                self.node.clear_keyboard_velocity()
+                time.sleep(0.05)
+                controller_results[velocity_arm] = (
+                    self.node.set_keyboard_velocity_controller_enabled(
+                        velocity_arm, False
+                    )
+                )
+            for arm in ("left", "right"):
+                controller_results[arm] = self.node.switch_arm_controller(
+                    arm, False
+                )
+        power_results = self.node.set_both_robot_power_sync(enable)
+        if enable:
+            for arm in ("left", "right"):
+                if power_results.get(arm, (False, ""))[0]:
+                    controller_results[arm] = self.node.switch_arm_controller(
+                        arm, True
+                    )
+        elif self.keyboard_velocity_arm is not None:
+            self.keyboard_velocity_arm = None
+        self.post(
+            self._both_robot_power_result,
+            enable,
+            power_results,
+            controller_results,
+        )
+
+    def _both_robot_power_result(
+        self, enable, power_results, controller_results
+    ):
+        self.robot_power_busy = False
+        self.robot_activate_both_button.configure(state=tk.NORMAL)
+        self.robot_shutdown_both_button.configure(state=tk.NORMAL)
+        details = []
+        all_ok = True
+        for arm in ("left", "right"):
+            power_ok, power_message = power_results.get(
+                arm, (False, "no power response")
+            )
+            controller_ok, controller_message = controller_results.get(
+                arm, (False, "controller not switched")
+            )
+            arm_ok = power_ok and controller_ok
+            all_ok = all_ok and arm_ok
+            details.append(
+                f"{arm.upper()} power={'OK' if power_ok else 'FAIL'} "
+                f"controller={'OK' if controller_ok else 'FAIL'} "
+                f"({power_message}; {controller_message})"
+            )
+        action = "ACTIVATE" if enable else "SHUTDOWN"
+        summary = " · ".join(details)
+        self.robot_power_status.set(
+            f"{action} BOTH {'OK' if all_ok else 'FAILED'}"
+        )
+        if all_ok:
+            self.pipeline_result(f"{action} BOTH COMPLETE · {summary}")
+        else:
+            self.error(f"{action} BOTH · {summary}")
+
+    @staticmethod
+    def _keyboard_focus_accepts_arrows(widget):
+        return isinstance(
+            widget,
+            (tk.Entry, tk.Listbox, tk.Text, ttk.Entry, ttk.Spinbox, ttk.Combobox),
+        )
+
+    def keyboard_jog_enable_changed(self):
+        enable = bool(self.keyboard_jog_enabled.get())
+        if self.keyboard_velocity_switching:
+            self.keyboard_jog_enabled.set(self.keyboard_velocity_arm is not None)
+            return
+        if enable:
+            arm = self._selected_arm()
+            if self.sequence_running or self.node.active_motion_goal is not None:
+                self.keyboard_jog_enabled.set(False)
+                self.error("Keyboard velocity mode is unavailable during motion")
+                return
+            if not self.robot_connected.get(arm, False):
+                self.keyboard_jog_enabled.set(False)
+                self.error(f"Activate and connect the {arm.upper()} robot first")
+                return
+            if not self.node.keyboard_velocity_controller_ready(arm):
+                self.keyboard_jog_enabled.set(False)
+                self.error(
+                    f"{arm.upper()} Cartesian velocity command publisher is unavailable"
+                )
+                return
+        else:
+            arm = self.keyboard_velocity_arm
+            self._cancel_keyboard_release_timer()
+            self.keyboard_velocity_active_key = None
+            self.node.clear_keyboard_velocity()
+            if arm is None:
+                self.keyboard_jog_status.set("Keyboard teaching locked")
+                return
+        self.keyboard_velocity_switching = True
+        self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
+        self.keyboard_jog_status.set(
+            "SWITCHING to native Cartesian velocity..."
+            if enable
+            else "ZERO command · restoring trajectory controller..."
+        )
+        threading.Thread(
+            target=self._keyboard_velocity_mode_worker,
+            args=(arm, enable),
+            daemon=True,
+        ).start()
+
+    def _keyboard_velocity_mode_worker(self, arm, enable):
+        if enable:
+            # The velocity controller starts with a zero command. Do not send
+            # a motion until the operator presses a direction key.
+            self.node.set_keyboard_velocity(None, (0.0,) * 6)
+            if not self.node.wait_for_keyboard_velocity_feedback(arm):
+                self.post(
+                    self._keyboard_velocity_mode_result,
+                    arm,
+                    enable,
+                    False,
+                    "fresh measured joint feedback is unavailable",
+                )
+                return
+            canceled, cancel_message = self.node.cancel_controller_goals(arm)
+            if not canceled:
+                self.post(
+                    self._keyboard_velocity_mode_result,
+                    arm,
+                    enable,
+                    False,
+                    f"cannot establish exclusive teaching control: {cancel_message}",
+                )
+                return
+            if not self.node.wait_until_arm_stopped(arm, timeout=1.5):
+                self.post(
+                    self._keyboard_velocity_mode_result,
+                    arm,
+                    enable,
+                    False,
+                    "arm did not reach standstill before controller exchange",
+                )
+                return
+            if not self.node.wait_for_robot_idle(arm, timeout=1.0):
+                # Measured standstill above is the hard safety condition. Some
+                # RB firmware keeps reporting Moving briefly after the final
+                # servo sample; do not turn that status lag into a permanent
+                # keyboard-mode lockout.
+                self.node.get_logger().warning(
+                    f"{arm.upper()} RB motion state did not settle to Idle; "
+                    "continuing atomic controller exchange after confirmed standstill"
+                )
+        else:
+            self.node.clear_keyboard_velocity()
+            # Let jog_robot_l consume one explicit stop before ownership is
+            # returned to the trajectory controller.
+            time.sleep(0.10)
+        success, message = self.node.set_keyboard_velocity_controller_enabled(
+            arm, enable
+        )
+        self.post(
+            self._keyboard_velocity_mode_result,
+            arm,
+            enable,
+            success,
+            message,
+        )
+
+    def _keyboard_velocity_mode_result(
+        self, arm, enable, success, message
+    ):
+        self.keyboard_velocity_switching = False
+        self.keyboard_jog_enable_button.configure(state=tk.NORMAL)
+        if success and enable:
+            self.keyboard_velocity_arm = arm
+            # Arrow keys are motion controls while teaching is enabled. Move
+            # focus away from a speed Spinbox/Combobox so their class binding
+            # cannot consume the first key event.
+            self.root.focus_set()
+            self.keyboard_jog_status.set(
+                f"READY {arm.upper()} · hold arrow to move"
+            )
+            self.log(f"Keyboard native Cartesian velocity enabled · {message}")
+            return
+        if success:
+            self.keyboard_velocity_arm = None
+            self.node.set_keyboard_velocity(None, (0.0,) * 6)
+            self.keyboard_jog_enabled.set(False)
+            self.keyboard_jog_status.set("Keyboard teaching locked")
+            self.log(f"Keyboard trajectory controller restored · {message}")
+            return
+        self.keyboard_velocity_arm = None
+        self.keyboard_jog_enabled.set(False)
+        self.keyboard_jog_status.set(f"VELOCITY MODE FAILED · {message}")
+        self.error(f"Keyboard controller exchange failed · {message}")
+
+    def _cancel_keyboard_release_timer(self):
+        if self.keyboard_release_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self.keyboard_release_after_id)
+        except tk.TclError:
+            pass
+        self.keyboard_release_after_id = None
+
+    def keyboard_jog_selection_key(self, event):
+        if not self.keyboard_jog_enabled.get():
+            return None
+        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+            return None
+        selection = {
+            "1": "X",
+            "2": "Y",
+            "3": "Z",
+            "4": "RX",
+            "5": "RY",
+            "6": "RZ",
+            "7": "XY",
+            "8": "XZ",
+            "9": "YZ",
+            "a": "RX/RY",
+            "s": "RX/RZ",
+            "d": "RY/RZ",
+        }.get(str(event.keysym).lower())
+        if selection is None:
+            return None
+        if self.keyboard_velocity_active_key is not None:
+            self.node.clear_keyboard_velocity()
+            self.keyboard_velocity_active_key = None
+        self.keyboard_jog_selection.set(selection)
+        self.keyboard_jog_status.set(f"Selected {selection}")
+        return "break"
+
+    def keyboard_jog_key_press(self, event):
+        if not self.keyboard_jog_enabled.get():
+            return None
+        if event.keysym not in ("Left", "Right", "Up", "Down"):
+            return None
+        if self.sequence_running or self.node.active_motion_goal is not None:
+            self.error("Keyboard teaching is unavailable during another motion")
+            return "break"
+        arm = self._selected_arm()
+        if arm != self.keyboard_velocity_arm or self.keyboard_velocity_switching:
+            self.error("Enable keyboard velocity mode for the selected arm first")
+            return "break"
+        self._cancel_keyboard_release_timer()
+        if self.keyboard_velocity_active_key == event.keysym:
+            return "break"
+        try:
+            linear_speed_m_s = (
+                float(self.keyboard_jog_linear_speed.get()) * 0.001
+            )
+            angular_speed_rad_s = math.radians(
+                float(self.keyboard_jog_angular_speed.get())
+            )
+            velocity = self.node.resolve_keyboard_velocity(
+                self.planning_group.get(),
+                self.keyboard_jog_selection.get(),
+                event.keysym,
+                linear_speed_m_s,
+                angular_speed_rad_s,
+                self.keyboard_jog_frame.get(),
+            )
+        except (ValueError, tk.TclError) as error:
+            self.error(str(error))
+            return "break"
+        except Exception as error:
+            self.error(f"Keyboard velocity TF failed · {error}")
+            return "break"
+        self.node.set_keyboard_velocity(arm, velocity)
+        self.keyboard_velocity_active_key = event.keysym
+        self.log(
+            f"Keyboard jog START · {arm.upper()} "
+            f"{self.keyboard_jog_selection.get()} {event.keysym} · "
+            f"robot-base velocity=[{', '.join(f'{value:.6f}' for value in velocity)}]"
+        )
+        self.keyboard_jog_status.set(
+            f"MOVING {self.keyboard_jog_selection.get()} {event.keysym} · "
+            "release to stop"
+        )
+        return "break"
+
+    def keyboard_jog_key_release(self, event):
+        if event.keysym != self.keyboard_velocity_active_key:
+            return None
+        self._cancel_keyboard_release_timer()
+        # X11 key repeat can emit a synthetic release/press pair.  A repeated
+        # press cancels this short timer; the final physical release does not.
+        self.keyboard_release_after_id = self.root.after(
+            35,
+            lambda selected=event.keysym: self._finish_keyboard_key_release(
+                selected
+            ),
+        )
+        return "break"
+
+    def _finish_keyboard_key_release(self, key_name):
+        self.keyboard_release_after_id = None
+        if key_name != self.keyboard_velocity_active_key:
+            return
+        self.node.clear_keyboard_velocity()
+        self.keyboard_velocity_active_key = None
+        arm = self.keyboard_velocity_arm
+        self.log(f"Keyboard jog STOP · {(arm or 'robot').upper()} velocity zero")
+        self.keyboard_jog_status.set(
+            f"STOPPED · {(arm or 'robot').upper()} velocity zero"
+        )
+
+    def _disable_keyboard_velocity_async(self):
+        arm = self.keyboard_velocity_arm
+        self._cancel_keyboard_release_timer()
+        self.keyboard_velocity_active_key = None
+        self.node.clear_keyboard_velocity()
+        self.keyboard_jog_enabled.set(False)
+        if arm is None or self.keyboard_velocity_switching:
+            return
+        self.keyboard_velocity_switching = True
+        self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
+        threading.Thread(
+            target=self._keyboard_velocity_mode_worker,
+            args=(arm, False),
+            daemon=True,
+        ).start()
+
+    def emergency_stop_all(self, restore_keyboard_controller=True):
         """Stop every GUI-owned workflow, robot goal, and welder output."""
+        self._cancel_keyboard_release_timer()
+        self.keyboard_velocity_active_key = None
+        self.node.clear_keyboard_velocity()
+        self.keyboard_jog_enabled.set(False)
+        self.keyboard_jog_status.set("Keyboard velocity ZERO sent")
+        if restore_keyboard_controller:
+            self._disable_keyboard_velocity_async()
         self.seam_auto_running = False
         self.seam_auto_expected_kind = None
         self.seam_auto_stage_success = False
@@ -12618,6 +13710,8 @@ class WeldActionGui:
     def arm_changed(self, *_args):
         if not hasattr(self, "node"):
             return
+        if self.keyboard_velocity_arm is not None:
+            self._disable_keyboard_velocity_async()
         group = self.planning_group.get()
         if group != "right_manipulator":
             self.clear_hicomm_test_outputs()
@@ -12695,6 +13789,32 @@ class WeldActionGui:
             )
         )
         self._refresh_initial_position_controls()
+        self._refresh_wide_sensing_controls()
+
+    def _refresh_wide_sensing_controls(self):
+        if not hasattr(self, "wide_sensing_plan_button"):
+            return
+        usable = bool(
+            self.latest_wide_sensing_result is not None
+            and self.latest_wide_sensing_result.success
+            and self.wide_sensing_segments
+        )
+        connected = self._selected_robot_connected()
+        self.wide_sensing_load_button.configure(
+            state=tk.NORMAL if usable else tk.DISABLED
+        )
+        self.wide_sensing_plan_button.configure(
+            state=tk.NORMAL if usable and connected else tk.DISABLED
+        )
+        can_execute = bool(
+            str(self.path_kind).startswith("wide_sensing:")
+            and self.plan_approved
+            and self.execution_allowed
+            and connected
+        )
+        self.wide_sensing_execute_button.configure(
+            state=tk.NORMAL if can_execute else tk.DISABLED
+        )
 
     def _refresh_initial_position_controls(self):
         if not hasattr(self, "plan_initial_button"):
@@ -12765,6 +13885,8 @@ class WeldActionGui:
         )
         self.plan_button.configure(state=state)
         self.execute_button.configure(state=tk.DISABLED)
+        if hasattr(self, "wide_sensing_execute_button"):
+            self.wide_sensing_execute_button.configure(state=tk.DISABLED)
 
     @staticmethod
     def _pose_values(pose):
@@ -12804,6 +13926,152 @@ class WeldActionGui:
             self.weave_base_paths["linear"] = copy.deepcopy(list(points))
         self.path_kind = kind
         self.set_points(points)
+
+    def update_wide_sensing_result(self, message):
+        """Display the newest detected weld segments without moving a robot."""
+        self.latest_wide_sensing_result = message
+        if str(message.frame_id).strip():
+            self.wide_sensing_source_frame.set(str(message.frame_id).strip())
+        segments = {}
+        for index, segment in enumerate(message.weld_segments, 1):
+            segment_id = str(segment.id).strip() or f"segment_{index}"
+            unique_id = segment_id
+            duplicate = 2
+            while unique_id in segments:
+                unique_id = f"{segment_id}#{duplicate}"
+                duplicate += 1
+            segments[unique_id] = copy.deepcopy(segment)
+        self.wide_sensing_segments = segments
+        ids = tuple(segments)
+        self.wide_sensing_segment_box.configure(values=ids)
+        if ids and self.wide_sensing_segment_id.get() not in segments:
+            self.wide_sensing_segment_id.set(ids[0])
+        if not ids:
+            self.wide_sensing_segment_id.set("")
+        self._refresh_wide_sensing_controls()
+        self.wide_sensing_status.set(
+            f"{message.status or 'result'} · success={bool(message.success)} · "
+            f"segments={len(ids)} · {message.message}"
+            + (
+                " · selected robot not ready: ACTIVATE BOTH first"
+                if ids and not self._selected_robot_connected()
+                else ""
+            )
+        )
+        self.log(
+            "Wide Sensing result received · "
+            f"success={bool(message.success)} · segments={len(ids)} · "
+            f"{message.message}"
+        )
+
+    def load_wide_sensing_segment(self, plan_after_load=False):
+        """Resolve one sensed segment to World and load it for normal planning."""
+        segment_id = self.wide_sensing_segment_id.get()
+        segment = self.wide_sensing_segments.get(segment_id)
+        if segment is None:
+            self.error("Select a valid Wide Sensing weld segment")
+            return
+        if self.sequence_running:
+            self.error("Cannot replace the path while a sequence is running")
+            return
+        planning_group = self.planning_group.get()
+        if planning_group not in PLANNING_GROUP_TIPS:
+            self.error("Wide Sensing requires a left or right manipulator")
+            return
+        try:
+            offset_m = tuple(
+                float(variable.get()) * 0.001
+                for variable in (
+                    self.wide_sensing_offset_x_mm,
+                    self.wide_sensing_offset_y_mm,
+                    self.wide_sensing_offset_z_mm,
+                )
+            )
+        except (ValueError, tk.TclError):
+            self.error("Wide Sensing World offset must be numeric")
+            return
+        self.wide_sensing_load_button.configure(state=tk.DISABLED)
+        self.wide_sensing_plan_button.configure(state=tk.DISABLED)
+        self.wide_sensing_status.set(
+            f"Resolving {self.wide_sensing_source_frame.get()} → World TF..."
+        )
+        threading.Thread(
+            target=self._wide_sensing_segment_worker,
+            args=(
+                segment_id,
+                copy.deepcopy(segment),
+                self.wide_sensing_source_frame.get(),
+                planning_group,
+                offset_m,
+                bool(self.wide_sensing_reverse.get()),
+                bool(plan_after_load),
+            ),
+            daemon=True,
+        ).start()
+
+    def _wide_sensing_segment_worker(
+        self,
+        segment_id,
+        segment,
+        source_frame,
+        planning_group,
+        offset_m,
+        reverse,
+        plan_after_load,
+    ):
+        try:
+            poses = self.node.resolve_wide_sensing_segment(
+                segment,
+                source_frame,
+                planning_group,
+                offset_m,
+                reverse,
+            )
+        except Exception as error:
+            self.post(
+                self._wide_sensing_segment_result,
+                segment_id,
+                None,
+                str(error),
+                plan_after_load,
+            )
+            return
+        self.post(
+            self._wide_sensing_segment_result,
+            segment_id,
+            poses,
+            "",
+            plan_after_load,
+        )
+
+    def _wide_sensing_segment_result(
+        self, segment_id, poses, error, plan_after_load=False
+    ):
+        self._refresh_wide_sensing_controls()
+        if poses is None:
+            self.wide_sensing_status.set(f"TF/path conversion failed · {error}")
+            self.error(f"Wide Sensing segment conversion failed: {error}")
+            return
+        self.set_new_points(poses, f"wide_sensing:{segment_id}")
+        start, end = poses
+        length_mm = math.dist(
+            (start.position.x, start.position.y, start.position.z),
+            (end.position.x, end.position.y, end.position.z),
+        ) * 1000.0
+        self.wide_sensing_status.set(
+            f"Loaded {segment_id} in World · length={length_mm:.2f} mm · "
+            "current TCP orientation preserved · Plan Preview required"
+        )
+        self.log(
+            f"Wide Sensing segment loaded · {segment_id} · "
+            f"START=({start.position.x:.6f}, {start.position.y:.6f}, "
+            f"{start.position.z:.6f}) m · "
+            f"END=({end.position.x:.6f}, {end.position.y:.6f}, "
+            f"{end.position.z:.6f}) m · length={length_mm:.2f} mm"
+        )
+        self._refresh_wide_sensing_controls()
+        if plan_after_load:
+            self.plan_preview()
 
     def set_execution_configuration(
         self,
@@ -12868,6 +14136,8 @@ class WeldActionGui:
         self.plan_approved = False
         if hasattr(self, "execute_button"):
             self.execute_button.configure(state=tk.DISABLED)
+        if hasattr(self, "wide_sensing_execute_button"):
+            self.wide_sensing_execute_button.configure(state=tk.DISABLED)
 
     def selected_index(self):
         selection = self.table.selection()
@@ -13788,12 +15058,18 @@ class WeldActionGui:
         return speed_mm_s * 0.001
 
     def plan_preview(self):
+        if self.keyboard_velocity_arm is not None:
+            self.error("Disable Keyboard Teaching before planning")
+            return
         if not self._selected_robot_connected():
             self.error("Connect the robot and wait for live /joint_states")
             return
         self._send_path(execute_requested=False)
 
     def execute_approved(self):
+        if self.keyboard_velocity_arm is not None:
+            self.error("Disable Keyboard Teaching before execution")
+            return
         if not self.plan_approved:
             self.error("Plan Preview is required before execution")
             return
@@ -14217,6 +15493,7 @@ class WeldActionGui:
         source,
         probe_start=None,
         stopped_pose=None,
+        cancel_event=None,
     ):
         self.last_touch_pose = copy.deepcopy(pose)
         values = self._pose_values(pose)
@@ -14258,7 +15535,7 @@ class WeldActionGui:
             self.automatic_probe_kind = None
             # Contact is complete.  The following motion is a deliberate
             # retract and must not be treated as the same active touch probe.
-            self.node.clear_touch_probe()
+            self.node.clear_touch_probe(cancel_return=False)
             completed = [
                 name
                 for name, value in self.seam_probe_touches.items()
@@ -14296,6 +15573,7 @@ class WeldActionGui:
                         0.001,
                         kind,
                         settle_seconds,
+                        cancel_event,
                     ),
                     daemon=True,
                 ).start()
@@ -14444,7 +15722,7 @@ class WeldActionGui:
             self.node.clear_touch_probe()
             self._signal_auto_seam_stage(False, kind)
             self.error(
-                f"{kind} probe reached maximum travel without a Fastech DI0 edge"
+                f"{kind} probe reached maximum travel without a Fastech DI4 edge"
             )
             return
         self.bar["value"] = 100
@@ -14467,6 +15745,7 @@ class WeldActionGui:
                 else tk.DISABLED
             )
         )
+        self._refresh_wide_sensing_controls()
         if self.plan_approved:
             self.pipeline_result(
                 f"{text} · plan approved; inspect RViz, then execute"
@@ -14481,6 +15760,14 @@ class WeldActionGui:
         if self._closing:
             return
         self._closing = True
+        self._cancel_keyboard_release_timer()
+        self.node.clear_keyboard_velocity()
+        if self.keyboard_velocity_arm is not None:
+            time.sleep(0.30)
+            self.node.set_keyboard_velocity_controller_enabled(
+                self.keyboard_velocity_arm, False
+            )
+            self.keyboard_velocity_arm = None
         if self.hicomm_client is not None:
             self.hicomm_client.stop()
         self.root.quit()

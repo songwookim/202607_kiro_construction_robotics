@@ -14,7 +14,7 @@ from construct_msgs.srv import SetDigitalOutput
 from construct_robot.fastech_ethernet import FastechEthernetClient
 
 
-TOUCH_INPUT_CHANNEL = 0
+TOUCH_INPUT_CHANNEL = 4
 TOUCH_OUTPUT_CHANNEL = 0
 
 
@@ -84,9 +84,15 @@ class FastechIONode(Node):
         self.declare_parameter("poll_period_s", 0.01)
         self.declare_parameter("reconnect_period_s", 1.0)
         self.declare_parameter("auto_connect", True)
+        self.declare_parameter("touch_input_channel", TOUCH_INPUT_CHANNEL)
 
         self.ip_address = str(self.get_parameter("ip_address").value)
         self.board_id = int(self.get_parameter("board_id").value)
+        self.touch_input_channel = int(
+            self.get_parameter("touch_input_channel").value
+        )
+        if not 0 <= self.touch_input_channel <= 31:
+            raise ValueError("touch_input_channel must be in 0..31")
         self.poll_period_s = max(
             0.001, float(self.get_parameter("poll_period_s").value)
         )
@@ -103,6 +109,7 @@ class FastechIONode(Node):
             self._connection_requested.set()
         self._stop_event = threading.Event()
         self._last_error = ""
+        self._last_raw_contact = None
 
         state_qos = QoSProfile(depth=1)
         state_qos.reliability = ReliabilityPolicy.RELIABLE
@@ -147,8 +154,11 @@ class FastechIONode(Node):
         return message
 
     def _publish_snapshot(self, snapshot, detail=""):
-        if len(snapshot.inputs) <= TOUCH_INPUT_CHANNEL:
-            raise RuntimeError("Fastech device does not expose physical DI0")
+        if len(snapshot.inputs) <= self.touch_input_channel:
+            raise RuntimeError(
+                "Fastech device does not expose physical "
+                f"DI{self.touch_input_channel}"
+            )
         self._state_publisher.publish(
             self._state_message(
                 snapshot,
@@ -156,8 +166,16 @@ class FastechIONode(Node):
                 detail=detail or self._manager.device_detail,
             )
         )
+        raw_contact = bool(snapshot.inputs[self.touch_input_channel])
+        if raw_contact != self._last_raw_contact:
+            self.get_logger().info(
+                f"Fastech DI{self.touch_input_channel}="
+                f"{'ON' if raw_contact else 'OFF'} · "
+                f"raw_input=0x{int(snapshot.raw_input):08X}"
+            )
+            self._last_raw_contact = raw_contact
         contact = Bool()
-        contact.data = bool(snapshot.inputs[TOUCH_INPUT_CHANNEL])
+        contact.data = raw_contact
         self._contact_publisher.publish(contact)
 
     def _publish_disconnected(self, detail):
@@ -173,6 +191,7 @@ class FastechIONode(Node):
             self.get_logger().info(
                 f"Fastech connected · {self.ip_address} · board "
                 f"{self.board_id} · {self._manager.device_detail} · "
+                f"touch=DI{self.touch_input_channel} · "
                 f"poll target={1.0 / self.poll_period_s:.0f} Hz"
             )
             return True, self._manager.device_detail

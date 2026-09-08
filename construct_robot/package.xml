@@ -27,6 +27,7 @@
   <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
+  <depend>wide_sensing_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
