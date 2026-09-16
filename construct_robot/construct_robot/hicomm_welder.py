@@ -122,6 +122,11 @@ class TxState:
     correction: float = 0.0
     pre_gas_s: float = 0.0
     post_gas_s: float = 0.0
+    # Official Rainbow -> Hi-COMM TX Byte14-15.  Zero disables the
+    # power-source-native Hot Start and preserves the captured golden frame.
+    hot_start_current_a: int = 0
+    # Official TX Byte16: raw 0..30 represents adjustment -15..+15.
+    hot_start_hold_adjustment: int = 0
     base_profile: str = PROFILE_WELDING
 
 
@@ -159,6 +164,10 @@ def build_request(state):
         raise ValueError("pre-gas must be in 0..10 seconds")
     if not 0.0 <= float(state.post_gas_s) <= 10.0:
         raise ValueError("post-gas must be in 0..10 seconds")
+    if not 0 <= int(state.hot_start_current_a) <= 600:
+        raise ValueError("Hot Start current must be in 0..600 A")
+    if not -15 <= int(state.hot_start_hold_adjustment) <= 15:
+        raise ValueError("Hot Start hold adjustment must be in -15..15")
     try:
         base_request = BASE_PROFILE_REQUESTS[state.base_profile]
     except KeyError as error:
@@ -181,6 +190,8 @@ def build_request(state):
     frame[7] = int(round((float(state.correction) + 5.0) * 10.0))
     _put_u16le(frame, 8, round(float(state.pre_gas_s) * 100.0))
     _put_u16le(frame, 10, round(float(state.post_gas_s) * 100.0))
+    _put_u16le(frame, 14, state.hot_start_current_a)
+    frame[16] = int(state.hot_start_hold_adjustment) + 15
     frame[53:55] = b"\x00\x00"
     request = bytes(frame)
     if len(request) != TX_SIZE:
@@ -262,6 +273,11 @@ def decode_response(frame):
         "correction_raw": frame[14],
         "pre_gas_raw": _u16le(frame, 15),
         "post_gas_raw": _u16le(frame, 17),
+        # Welder -> external-device setting echo from the official 64-byte
+        # status body (the observed RX frame carries seven trailing bytes).
+        "hot_start_current_a": _u16le(frame, 21),
+        "hot_start_hold_adjustment": int(frame[23]) - 15,
+        "hot_start_arc_voltage_adjustment": int(frame[24]) - 50,
         "extra7": frame[64:71].hex(" ").upper(),
     }
 
@@ -387,6 +403,8 @@ class HiCommWelderClient:
             f"{candidate.material} {candidate.diameter_mm:.1f} mm · "
             f"{candidate.mode} / {candidate.gas} · "
             f"synergic={candidate.synergic} · "
+            f"hot_start={candidate.hot_start_current_a}A/"
+            f"hold_adj={candidate.hot_start_hold_adjustment:+d} · "
             f"pre={candidate.pre_gas_s:.2f}s "
             f"post={candidate.post_gas_s:.2f}s"
         )
@@ -589,6 +607,14 @@ class HiCommWelderClient:
                 status["set_voltage_v"]
                 - requested.voltage_tenths / 10.0
             ) <= 0.05,
+            "hot_start_current": (
+                status["hot_start_current_a"]
+                == requested.hot_start_current_a
+            ),
+            "hot_start_hold_adjustment": (
+                status["hot_start_hold_adjustment"]
+                == requested.hot_start_hold_adjustment
+            ),
         }
         return {"available": True, "all_match": all(checks.values()),
                 "checks": checks}

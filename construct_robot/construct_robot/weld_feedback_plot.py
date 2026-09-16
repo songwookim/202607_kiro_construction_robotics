@@ -230,11 +230,6 @@ def parse_weld_trajectory_log(path):
     }
 
 
-def _waypoint_number(name):
-    match = re.fullmatch(r"waypoints\[(\d+)\]", name)
-    return int(match.group(1)) if match else None
-
-
 def _set_equal_3d(axis, points):
     if not points:
         return
@@ -259,32 +254,14 @@ def _decorate_3d(axis, title):
 
 
 def plot_weld_trajectory_3d(path, output=None, show=True):
-    """Save a two-view 3D plot of every trajectory/pose embedded in a log."""
+    """Plot every recorded actual-TCP sample as one World-frame 3D point."""
     data = parse_weld_trajectory_log(path)
     actual_mm = [
         (sample["x_m"] * 1000.0, sample["y_m"] * 1000.0, sample["z_m"] * 1000.0)
         for sample in data["actual"]
     ]
-    step_positions = {
-        index: {
-            name: tuple(value * 1000.0 for value in position)
-            for name, position in step.get("positions", {}).items()
-        }
-        for index, step in data["steps"].items()
-    }
-    teaching_mm = {
-        name: tuple(value * 1000.0 for value in position)
-        for name, position in data["teaching"].items()
-    }
-    touch_mm = {
-        name: tuple(value * 1000.0 for value in position)
-        for name, position in data["touch"].items()
-    }
-    all_commanded = [
-        point for positions in step_positions.values() for point in positions.values()
-    ]
-    if not actual_mm and not all_commanded and not teaching_mm and not touch_mm:
-        raise ValueError(f"no 3D trajectory or pose data found in {data['path']}")
+    if not actual_mm:
+        raise ValueError(f"no recorded actual TCP samples found in {data['path']}")
 
     try:
         _prepare_mplot3d()
@@ -294,9 +271,8 @@ def plot_weld_trajectory_3d(path, output=None, show=True):
             "matplotlib is unavailable; run with ~/ros2_ws/.venv/bin/python"
         ) from error
 
-    figure = plt.figure(figsize=(17, 8), constrained_layout=True)
-    full_axis = figure.add_subplot(1, 2, 1, projection="3d")
-    detail_axis = figure.add_subplot(1, 2, 2, projection="3d")
+    figure = plt.figure(figsize=(11, 9), constrained_layout=True)
+    axis = figure.add_subplot(111, projection="3d")
     result = "unknown"
     try:
         sections, _samples = parse_weld_feedback_log(data["path"])
@@ -304,100 +280,17 @@ def plot_weld_trajectory_3d(path, output=None, show=True):
     except ValueError:
         pass
     figure.suptitle(
-        f"Weld trajectories · {data['path'].name} · result={result}"
+        f"Actual TCP samples · {data['path'].name} · result={result}"
     )
-
-    full_points = []
-    detail_points = []
-    command_colors = ("#2563eb", "#0891b2", "#7c3aed", "#ea580c", "#16a34a")
-    for order, index in enumerate(sorted(step_positions)):
-        positions = step_positions[index]
-        metadata = data["steps"][index].get("metadata", {})
-        stage = metadata.get("weld_scenario_stage", f"step {index + 1}")
-        waypoints = sorted(
-            (
-                (_waypoint_number(name), point)
-                for name, point in positions.items()
-                if _waypoint_number(name) is not None
-            ),
-            key=lambda item: item[0],
-        )
-        color = command_colors[order % len(command_colors)]
-        if waypoints:
-            points = [point for _number, point in waypoints]
-            xs, ys, zs = zip(*points)
-            for axis in (full_axis, detail_axis):
-                axis.plot(
-                    xs, ys, zs, marker="o", markersize=3, linestyle="--",
-                    linewidth=1.2, color=color, alpha=0.75,
-                    label=f"command {index + 1}: {stage}" if axis is full_axis else None,
-                )
-            full_points.extend(points)
-            detail_points.extend(points)
-        target = positions.get("target_tcp")
-        if target is not None:
-            full_axis.scatter(*target, marker="s", s=28, color=color)
-            full_axis.text(*target, f" {index + 1}:{stage}", fontsize=7)
-            full_points.append(target)
-
-        for name in (
-            "safe_approach",
-            "approach_lead",
-            "lead_start",
-            "usable_seam_start",
-            "usable_seam_goal",
-            "lead_end",
-        ):
-            point = positions.get(name)
-            if point is None:
-                continue
-            detail_axis.scatter(*point, marker="D", s=35, color=color)
-            detail_axis.text(*point, f" {index + 1}:{name}", fontsize=7)
-            detail_points.append(point)
-
-    if actual_mm:
-        xs, ys, zs = zip(*actual_mm)
-        elapsed = [sample["elapsed_s"] for sample in data["actual"]]
-        for axis in (full_axis, detail_axis):
-            axis.plot(xs, ys, zs, color="#111827", linewidth=2.2, label="actual TCP")
-        colored = detail_axis.scatter(
-            xs, ys, zs, c=elapsed, cmap="turbo", s=10, alpha=0.85,
-            label="actual TCP samples",
-        )
-        figure.colorbar(colored, ax=detail_axis, shrink=0.68, label="Elapsed (s)")
-        full_points.extend(actual_mm)
-        detail_points.extend(actual_mm)
-
-    if teaching_mm:
-        points = list(teaching_mm.values())
-        xs, ys, zs = zip(*points)
-        full_axis.scatter(
-            xs, ys, zs, marker="^", s=34, facecolors="none",
-            edgecolors="#6b7280", label="teaching poses",
-        )
-        for name, point in teaching_mm.items():
-            full_axis.text(*point, f" {name.split('.')[0]}", fontsize=7, color="#4b5563")
-        full_points.extend(points)
-
-    if touch_mm:
-        points = list(touch_mm.values())
-        xs, ys, zs = zip(*points)
-        for axis in (full_axis, detail_axis):
-            axis.scatter(xs, ys, zs, marker="x", s=40, color="#db2777", label="touch poses")
-        for name, point in touch_mm.items():
-            detail_axis.text(*point, f" {name}", fontsize=7, color="#9d174d")
-        full_points.extend(points)
-        detail_points.extend(points)
-
-    _decorate_3d(full_axis, "Complete workflow: commands + teaching + touch + actual")
-    _decorate_3d(detail_axis, "Weld detail: measured TCP + seam/lead/safe geometry")
-    _set_equal_3d(full_axis, full_points)
-    _set_equal_3d(detail_axis, detail_points or full_points)
-    for axis in (full_axis, detail_axis):
-        handles, labels = axis.get_legend_handles_labels()
-        unique = dict(zip(labels, handles))
-        if unique:
-            axis.legend(unique.values(), unique.keys(), loc="best", fontsize=7)
+    xs, ys, zs = zip(*actual_mm)
+    elapsed = [sample["elapsed_s"] for sample in data["actual"]]
+    colored = axis.scatter(
+        xs, ys, zs, c=elapsed, cmap="turbo", marker="o", s=10,
+        alpha=0.8, edgecolors="none",
+    )
+    figure.colorbar(colored, ax=axis, shrink=0.72, label="Elapsed (s)")
+    _decorate_3d(axis, f"Recorded TCP point density · {len(actual_mm)} samples")
+    _set_equal_3d(axis, actual_mm)
 
     path = data["path"]
     output_path = (
@@ -414,7 +307,7 @@ def plot_weld_trajectory_3d(path, output=None, show=True):
 
 
 def plot_all_weld_trajectories_3d(paths, output=None, show=True):
-    """Overlay every log in World coordinates and start-aligned coordinates."""
+    """Overlay every recorded actual-TCP sample from all logs as 3D points."""
     paths = [Path(path).expanduser().resolve() for path in paths]
     parsed = []
     for path in sorted(paths, key=lambda item: item.name):
@@ -427,26 +320,10 @@ def plot_all_weld_trajectories_3d(paths, output=None, show=True):
             )
             for sample in data["actual"]
         ]
-        commanded = []
-        for index in sorted(data["steps"]):
-            positions = data["steps"][index].get("positions", {})
-            waypoints = sorted(
-                (
-                    (_waypoint_number(name), position)
-                    for name, position in positions.items()
-                    if _waypoint_number(name) is not None
-                ),
-                key=lambda item: item[0],
-            )
-            commanded.extend(
-                tuple(value * 1000.0 for value in position)
-                for _number, position in waypoints
-            )
-        trajectory = actual or commanded
-        if trajectory:
-            parsed.append((path, trajectory, bool(actual)))
+        if actual:
+            parsed.append((path, actual))
     if not parsed:
-        raise ValueError("no 3D trajectories found in the selected logs")
+        raise ValueError("no recorded actual TCP samples found in the selected logs")
 
     try:
         _prepare_mplot3d()
@@ -456,67 +333,32 @@ def plot_all_weld_trajectories_3d(paths, output=None, show=True):
             "matplotlib is unavailable; run with ~/ros2_ws/.venv/bin/python"
         ) from error
 
-    figure = plt.figure(figsize=(19, 10), constrained_layout=True)
-    world_axis = figure.add_subplot(1, 2, 1, projection="3d")
-    aligned_axis = figure.add_subplot(1, 2, 2, projection="3d")
+    figure = plt.figure(figsize=(12, 10), constrained_layout=True)
+    world_axis = figure.add_subplot(111, projection="3d")
     figure.suptitle(
         f"All weld trajectories · {len(parsed)}/{len(paths)} logs"
     )
     color_map = plt.get_cmap("turbo")
     world_points = []
-    aligned_points = []
     handles = []
     labels = []
     denominator = max(1, len(parsed) - 1)
-    for index, (path, trajectory, measured) in enumerate(parsed):
+    for index, (path, trajectory) in enumerate(parsed):
         color = color_map(index / denominator)
         xs, ys, zs = zip(*trajectory)
-        style = "-" if measured else "--"
-        width = 1.8 if measured else 1.2
-        handle, = world_axis.plot(
-            xs, ys, zs, linestyle=style, linewidth=width,
-            color=color, alpha=0.82,
-        )
-        world_axis.scatter(
-            xs[0], ys[0], zs[0], marker="o", s=14, color=color
-        )
-        world_axis.scatter(
-            xs[-1], ys[-1], zs[-1], marker="x", s=22, color=color
-        )
-        origin = trajectory[0]
-        aligned = [
-            (
-                point[0] - origin[0],
-                point[1] - origin[1],
-                point[2] - origin[2],
-            )
-            for point in trajectory
-        ]
-        axs, ays, azs = zip(*aligned)
-        aligned_axis.plot(
-            axs, ays, azs, linestyle=style, linewidth=width,
-            color=color, alpha=0.82,
-        )
-        aligned_axis.scatter(
-            axs[-1], ays[-1], azs[-1], marker="x", s=22, color=color
+        handle = world_axis.scatter(
+            xs, ys, zs, marker="o", s=8, color=color,
+            alpha=0.70, edgecolors="none",
         )
         world_points.extend(trajectory)
-        aligned_points.extend(aligned)
         handles.append(handle)
-        labels.append(
-            path.stem + ("" if measured else " [command only]")
-        )
+        labels.append(f"{path.stem} · {len(trajectory)} samples")
 
-    _decorate_3d(world_axis, "World-frame overlay · ○ start / × end")
     _decorate_3d(
-        aligned_axis,
-        "Start-aligned comparison · each first TCP = (0, 0, 0)",
+        world_axis,
+        f"Recorded TCP point density · {sum(len(item[1]) for item in parsed)} samples",
     )
-    aligned_axis.set_xlabel("ΔX (mm)")
-    aligned_axis.set_ylabel("ΔY (mm)")
-    aligned_axis.set_zlabel("ΔZ (mm)")
     _set_equal_3d(world_axis, world_points)
-    _set_equal_3d(aligned_axis, aligned_points)
     figure.legend(
         handles,
         labels,

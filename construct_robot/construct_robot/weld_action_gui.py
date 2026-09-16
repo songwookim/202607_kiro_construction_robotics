@@ -17,13 +17,6 @@ import yaml
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import Point, Pose, PoseArray, TransformStamped
 from control_msgs.action import FollowJointTrajectory
-try:
-    # Newer joint_trajectory_controller versions expose an on-controller
-    # speed-scaling input. Humble does not, so adaptive welding also includes
-    # a conservative trajectory-replacement fallback below.
-    from control_msgs.msg import SpeedScalingFactor
-except ImportError:
-    SpeedScalingFactor = None
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (
@@ -63,6 +56,8 @@ from construct_robot.cartesian_path_common import (
     trajectory_duration_seconds,
     straight_waypoints,
     tip_link_for_group,
+    sine_weaving_with_dwell,
+    weave_cycles_for_pitch,
     weaving_from_path,
 )
 from construct_robot.cartesian_path_server import make_weld_visualization
@@ -114,17 +109,6 @@ KEYBOARD_JOG_SELECTIONS = {
 LEGACY_RAINBOW_TOUCH_INPUT_PORT = 8
 LEGACY_RAINBOW_TOUCH_OUTPUT_PORT = 4
 
-# Slow supervisory line-energy governor.  It intentionally acts much slower
-# than the welder's internal arc control.
-ADAPTIVE_UPDATE_PERIOD_S = 0.50
-ADAPTIVE_SPEED_REISSUE_THRESHOLD_M_S = 0.00008  # 0.08 mm/s
-ADAPTIVE_SLEW_M_S2 = 0.00025  # 0.25 mm/s per second
-ADAPTIVE_POWER_DEADBAND_RATIO = 0.05
-ADAPTIVE_CURRENT_DEADBAND_A = 8.0
-ADAPTIVE_END_FREEZE_MM = 10.0
-ADAPTIVE_MIN_BASELINE_SAMPLES = 8
-ADAPTIVE_TRAJECTORY_BRIDGE_S = 0.12
-
 ARM_JOINT_NAMES = {
     arm: frozenset(
         f"{arm}_manipulator_joint{index}" for index in range(1, 7)
@@ -150,6 +134,16 @@ KEYBOARD_VELOCITY_CONTROLLER_NAMES = {
     "right": "right_cartesian_velocity_controller",
 }
 
+KEYBOARD_LINEAR_SPEEDS_MM_S = (5.0, 15.0, 45.0)
+KEYBOARD_ANGULAR_SPEEDS_DEG_S = (3.0, 7.0, 10.0)
+KEYBOARD_TEACHING_POSE_SHORTCUTS = {
+    "o": "weld_start_wait",
+    "k": "weld_goal_wait",
+    "p": "weld_wait",
+    "l": "weld_finish",
+    "m": "robot_start",
+}
+
 CORNER_TOUCH_NAMES = (
     "start_floor",
     "start_wall",
@@ -157,7 +151,8 @@ CORNER_TOUCH_NAMES = (
     "goal_wall",
 )
 
-WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed Tool-XYZ tilt"
+WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed World-XYZ tilt"
+LEGACY_WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed Tool-XYZ tilt"
 
 TEACHING_POSES = {
     "robot_start": "1 · Initial pose",
@@ -192,8 +187,8 @@ DIGITAL_WELD_RECIPE_KEYS = (
     "gas",
     "synergic",
     "correction",
-    "pre_gas_s",
-    "post_gas_s",
+    "hot_start_current_a",
+    "hot_start_hold_adjustment",
 )
 DIGITAL_WELD_COMMANDS = frozenset(("set", "on", "off"))
 
@@ -209,10 +204,20 @@ DEFAULT_DIGITAL_WELD_SETTINGS = {
     "gas": "CO2",
     "synergic": False,
     "correction": 0.0,
-    "pre_gas_s": 0.7,
-    "post_gas_s": 0.0,
-    # Sequence timing metadata. It is intentionally not part of TX Byte1..11.
-    "preflow_seconds": 0.0,
+    # Sequence-level current profile; these values are not Hi-COMM bytes.
+    "hot_start_enabled": True,
+    "hot_start_percent": 20.0,
+    "hot_start_hold_adjustment": 0,
+    "crater_enabled": True,
+    "crater_percent": 30.0,
+    # The shared Hi-COMM TX table has no crater setpoint fields. These two
+    # values mirror the welder-panel test recipe and are logged as references.
+    "crater_current_a": 60.0,
+    "crater_voltage_v": 25.0,
+    "crater_seconds": 1.0,
+    # Added to the integrated wire-feed estimate. Keep at zero until a
+    # measured torch/liner run-out allowance has been calibrated.
+    "wire_consumable_alpha_mm": 0.0,
 }
 
 WELD_SCENARIO_STAGE_ORDER = (
@@ -231,13 +236,19 @@ WELD_SCENARIO_STAGE_ORDER = (
 
 def digital_weld_recipe(settings):
     """Return only the values encoded into the Hi-COMM welding frame."""
-    return {key: settings[key] for key in DIGITAL_WELD_RECIPE_KEYS}
+    recipe = {key: settings[key] for key in DIGITAL_WELD_RECIPE_KEYS}
+    # Gas timing controls were deliberately removed from the application;
+    # transmit zero explicitly so a prior recipe cannot leak into a test.
+    recipe.update(pre_gas_s=0.0, post_gas_s=0.0)
+    return recipe
 
 
 def validate_digital_weld_settings(settings):
     """Normalize and validate GUI/sequence digital-welding settings."""
     normalized = copy.deepcopy(DEFAULT_DIGITAL_WELD_SETTINGS)
     normalized.update(settings)
+    for removed_key in ("pre_gas_s", "post_gas_s", "preflow_seconds"):
+        normalized.pop(removed_key, None)
     normalized["current_a"] = int(round(float(normalized["current_a"])))
     normalized["voltage_tenths"] = int(round(
         float(normalized["voltage_tenths"])
@@ -245,13 +256,70 @@ def validate_digital_weld_settings(settings):
     normalized["voltage"] = normalized["voltage_tenths"] / 10.0
     normalized["diameter_mm"] = float(normalized["diameter_mm"])
     normalized["synergic"] = bool(normalized["synergic"])
-    for key in ("correction", "pre_gas_s", "post_gas_s", "preflow_seconds"):
+    for key in (
+        "correction",
+        "hot_start_percent", "hot_start_hold_adjustment",
+        "crater_percent", "crater_seconds",
+        "crater_current_a", "crater_voltage_v",
+        "wire_consumable_alpha_mm",
+    ):
         normalized[key] = float(normalized[key])
-    if not 0.0 <= normalized["preflow_seconds"] <= 10.0:
-        raise ValueError("pre-weld gas flow must be in 0..10 seconds")
+    normalized["hot_start_enabled"] = bool(normalized["hot_start_enabled"])
+    normalized["crater_enabled"] = bool(normalized["crater_enabled"])
+    if not 0.0 <= normalized["hot_start_percent"] <= 100.0:
+        raise ValueError("hot-start boost must be in 0..100 percent")
+    normalized["hot_start_hold_adjustment"] = int(round(
+        normalized["hot_start_hold_adjustment"]
+    ))
+    if not -15 <= normalized["hot_start_hold_adjustment"] <= 15:
+        raise ValueError("hot-start hold adjustment must be in -15..15")
+    if not 20.0 <= normalized["crater_percent"] <= 40.0:
+        raise ValueError("crater current must be in 20..40 percent of nominal")
+    if "crater_current_a" not in settings:
+        normalized["crater_current_a"] = (
+            normalized["current_a"] * normalized["crater_percent"] / 100.0
+        )
+    else:
+        normalized["crater_percent"] = (
+            normalized["crater_current_a"]
+            / max(1.0, normalized["current_a"]) * 100.0
+        )
+    if not 0.0 <= normalized["crater_current_a"] <= 600.0:
+        raise ValueError("crater panel current must be in 0..600 A")
+    if not 3.0 <= normalized["crater_voltage_v"] <= 80.0:
+        raise ValueError("crater panel voltage must be in 3.0..80.0 V")
+    if not 0.5 <= normalized["crater_seconds"] <= 1.5:
+        raise ValueError("crater time must be in 0.5..1.5 seconds")
+    if not -1000.0 <= normalized["wire_consumable_alpha_mm"] <= 1000.0:
+        raise ValueError("wire consumable alpha must be in -1000..1000 mm")
+    profile = weld_current_profile(normalized)
+    normalized["hot_start_current_a"] = (
+        profile["hot"] if normalized["hot_start_enabled"] else 0
+    )
     # build_request is the protocol's single source of range/enum validation.
     build_request(TxState(**digital_weld_recipe(normalized)))
+    for current in profile.values():
+        candidate = copy.deepcopy(normalized)
+        candidate["current_a"] = current
+        build_request(TxState(**digital_weld_recipe(candidate)))
     return normalized
+
+
+def weld_current_profile(settings):
+    """Return validated nominal/hot/crater current targets in amperes."""
+    nominal = int(round(float(settings["current_a"])))
+    hot = nominal
+    if bool(settings.get("hot_start_enabled", True)):
+        hot = int(round(
+            nominal * (1.0 + float(settings.get("hot_start_percent", 20.0)) / 100.0)
+        ))
+    crater = nominal
+    if bool(settings.get("crater_enabled", True)):
+        crater = int(round(float(settings.get(
+            "crater_current_a",
+            nominal * float(settings.get("crater_percent", 30.0)) / 100.0,
+        ))))
+    return {"nominal": nominal, "hot": hot, "crater": crater}
 
 
 def next_sequential_slot(steps, requested=1):
@@ -421,9 +489,6 @@ def validate_managed_weld_sequence(steps, require_complete=False):
                     raise ValueError(
                         "Fastech DI0 must be ignored during weld motion"
                     )
-                stabilize_s = float(step.get("arc_stabilize_s", 0.0))
-                if not 0.0 <= stabilize_s <= 5.0:
-                    raise ValueError("ARC stabilize time must be in 0..5 seconds")
                 arc_steps = [
                     candidate for candidate in scenario_steps
                     if candidate.get("weld_scenario_stage") == "arc_on"
@@ -849,6 +914,21 @@ def keyboard_jog_velocity(selection, direction, linear_speed, angular_speed):
     return tuple(velocity)
 
 
+def next_keyboard_speed(current, choices):
+    """Return the next discrete teaching speed, wrapping to the first."""
+    values = tuple(float(value) for value in choices)
+    if not values:
+        raise ValueError("keyboard speed choices must not be empty")
+    try:
+        index = next(
+            i for i, value in enumerate(values)
+            if math.isclose(float(current), value, abs_tol=1e-9)
+        )
+    except (StopIteration, TypeError, ValueError):
+        return values[0]
+    return values[(index + 1) % len(values)]
+
+
 def keyboard_velocity_vector(
     orientation,
     selection,
@@ -1265,6 +1345,63 @@ def seam_lead_poses(start, goal, lead_in_m=0.0, lead_out_m=0.0):
     return lead_start, lead_end
 
 
+WELD_WEAVE_SAMPLES_PER_CYCLE = 12
+
+
+def weld_weave_geometry(
+    seam_start, seam_goal, pattern, amplitude_mm, pitch_mm, axis,
+    left_dwell_s=0.0, right_dwell_s=0.0, transverse_vector=None,
+):
+    """Derive whole cycles from pitch and build one consistent weld weave."""
+    seam_length = math.sqrt(sum(
+        (getattr(seam_goal.position, component)
+         - getattr(seam_start.position, component)) ** 2
+        for component in ("x", "y", "z")
+    ))
+    cycles = weave_cycles_for_pitch(seam_length, float(pitch_mm))
+    amplitude = float(amplitude_mm) * 0.001
+    if not math.isfinite(amplitude) or not 0.0001 <= amplitude <= 0.05:
+        raise ValueError("Weave one-side amplitude must be in 0.1..50 mm")
+    if pattern == "sine":
+        points, holds = sine_weaving_with_dwell(
+            (seam_start, seam_goal), amplitude, cycles,
+            float(left_dwell_s), float(right_dwell_s), axis,
+            transverse_vector,
+        )
+    elif pattern == "circle":
+        if float(left_dwell_s) != 0.0 or float(right_dwell_s) != 0.0:
+            raise ValueError("Circle weave has no left/right peaks; set dwell to 0 or use sine")
+        points = circular_weaving_from_path(
+            (seam_start, seam_goal), amplitude, cycles,
+            WELD_WEAVE_SAMPLES_PER_CYCLE, axis, transverse_vector,
+        )
+        holds = [0.0] * len(points)
+    else:
+        raise ValueError("Weld weave pattern must be sine or circle")
+    return points, holds, cycles, seam_length * 1000.0 / cycles
+
+
+def weave_path_speed_m_s(seam_length_m, path_length_m, travel_mm_s, holds):
+    """Nominal TCP speed for requested average seam advance, including dwell."""
+    target_s = seam_length_m / (travel_mm_s * 0.001)
+    moving_s = target_s - sum(holds)
+    if moving_s <= 0.0:
+        raise ValueError(
+            "Weave dwell exceeds travel-time target; lower dwell or seam speed"
+        )
+    if path_length_m <= 0.0 or seam_length_m <= 0.0:
+        raise ValueError("Weave path has no usable travel distance")
+    return path_length_m / moving_s
+
+
+def validated_seam_speed_factor(value):
+    """Accept harmless round-off above one, but reject invalid geometry."""
+    factor = float(value)
+    if not math.isfinite(factor) or factor <= 0.0 or factor > 1.0 + 1e-9:
+        raise ValueError("invalid path/seam speed factor")
+    return min(factor, 1.0)
+
+
 def update_weld_scenario_motion_values(
     steps, motion_index, *, tcp_speed_mm_s, lead_in_mm, lead_out_mm
 ):
@@ -1307,9 +1444,19 @@ def update_weld_scenario_motion_values(
         lead_out_mm * 0.001,
     )
     if motion.get("weld_weave_enabled", False):
-        core_points = tuple(motion.get("usable_weld_points", ()))
-        if len(core_points) < 2:
-            raise ValueError("Generated weave motion has no usable weave points")
+        core_points, holds, cycles, actual_pitch = weld_weave_geometry(
+            seam_start, seam_goal,
+            motion.get("weld_weave_pattern", "sine"),
+            motion.get("weld_weave_amplitude_mm", 3.0),
+            motion.get("weld_weave_pitch_mm", 5.0),
+            motion.get("weld_weave_axis", "tool_y"),
+            motion.get("weld_weave_left_dwell_s", 0.0),
+            motion.get("weld_weave_right_dwell_s", 0.0),
+            motion.get("weld_weave_transverse_vector"),
+        )
+        motion["usable_weld_points"] = copy.deepcopy(core_points)
+        motion["weld_weave_cycles"] = cycles
+        motion["weld_weave_actual_pitch_mm"] = actual_pitch
         updated_points = []
         if lead_in_mm > 1e-6:
             updated_points.append(copy.deepcopy(lead_start))
@@ -1317,16 +1464,37 @@ def update_weld_scenario_motion_values(
         if lead_out_mm > 1e-6:
             updated_points.append(copy.deepcopy(lead_end))
         motion["points"] = tuple(updated_points)
+        if any(holds):
+            motion["waypoint_hold_s"] = (
+                ([0.0] if lead_in_mm > 1e-6 else []) + holds
+                + ([0.0] if lead_out_mm > 1e-6 else [])
+            )
+            motion["linear_motion_profile"] = False
+        else:
+            motion.pop("waypoint_hold_s", None)
+            motion["linear_motion_profile"] = True
     else:
         motion["points"] = (
             copy.deepcopy(lead_start if lead_in_mm > 1e-6 else seam_start),
             copy.deepcopy(lead_end if lead_out_mm > 1e-6 else seam_goal),
         )
+        motion["path_to_seam_speed_factor"] = 1.0
     motion["lead_start"] = copy.deepcopy(lead_start)
     motion["lead_end"] = copy.deepcopy(lead_end)
     motion["lead_in_mm"] = lead_in_mm
     motion["lead_out_mm"] = lead_out_mm
     motion["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
+    if motion.get("weld_weave_enabled"):
+        seam_length = math.sqrt(sum((getattr(seam_goal.position, a)-getattr(seam_start.position, a))**2 for a in ("x", "y", "z")))
+        core = motion["usable_weld_points"]
+        path_length = sum(math.sqrt(sum((getattr(b.position, a)-getattr(c.position, a))**2 for a in ("x", "y", "z"))) for c, b in zip(core[:-1], core[1:]))
+        motion["path_to_seam_speed_factor"] = validated_seam_speed_factor(
+            seam_length / path_length
+        )
+        motion["tcp_speed_m_s"] = weave_path_speed_m_s(
+            seam_length, path_length, tcp_speed_mm_s,
+            motion.get("waypoint_hold_s", ()),
+        )
     # Retain this metadata for readable logs, but keep it synchronized instead
     # of treating it as an authoritative Build-time override.
     motion["weld_tcp_speed_mm_s"] = tcp_speed_mm_s
@@ -1347,6 +1515,9 @@ def update_weld_scenario_motion_values(
             and linked.get("weld_scenario_stage") == "arc_off"
         ):
             linked["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
+            if motion.get("weld_weave_enabled"):
+                linked["tcp_speed_m_s"] = motion["tcp_speed_m_s"]
+            linked["path_to_seam_speed_factor"] = motion["path_to_seam_speed_factor"]
             linked["lead_in_mm"] = lead_in_mm
             linked["lead_out_mm"] = lead_out_mm
             linked_arc_off = True
@@ -1532,7 +1703,7 @@ def apply_sensed_seam_orientation(
         start, goal, delta_yaw = yaw_corrected_seam_poses(
             taught_start, taught_goal, sensed_start, sensed_goal
         )
-        return start, goal, delta_yaw, "WAIT + fixed Tool-XYZ tilt"
+        return start, goal, delta_yaw, "WAIT + fixed World-XYZ tilt"
     if normalized.startswith("yaw") or normalized.startswith("follow"):
         start, goal, delta_yaw = yaw_corrected_seam_poses(
             taught_start, taught_goal, sensed_start, sensed_goal
@@ -1602,8 +1773,8 @@ def fixed_tilt_wait_reference_poses(
 ):
     """Create consistent seam attitudes from START/GOAL WAIT teaching.
 
-    The WAIT poses supply the two base orientations.  Exactly the same local
-    Tool XYZ RPY rotation is then applied at both ends.  Their XYZ values are
+    The WAIT poses supply the two base orientations. Exactly the same fixed
+    World XYZ RPY rotation is then applied at both ends. Their XYZ values are
     kept so the WAIT-to-WAIT vector can also serve as the nominal seam
     direction when no separate weld START/GOAL teaching exists.
     """
@@ -1617,11 +1788,11 @@ def fixed_tilt_wait_reference_poses(
         math.isfinite(value) and -180.0 <= value <= 180.0
         for value in tilts
     ):
-        raise ValueError("fixed Tool XYZ angles must each be in -180..180 degrees")
+        raise ValueError("fixed World XYZ angles must each be in -180..180 degrees")
     rpy = tuple(math.radians(value) for value in tilts)
     return (
-        pose_with_rpy_offset(start_wait, *rpy, reference="tool"),
-        pose_with_rpy_offset(goal_wait, *rpy, reference="tool"),
+        pose_with_rpy_offset(start_wait, *rpy, reference="world"),
+        pose_with_rpy_offset(goal_wait, *rpy, reference="world"),
     )
 
 
@@ -1687,6 +1858,124 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp):
             temporary_path.unlink()
 
 
+def calculate_weld_production_metrics(
+    samples,
+    *,
+    weld_motion_start_elapsed_s=None,
+    weld_motion_complete_elapsed_s=None,
+    wire_consumable_alpha_mm=0.0,
+):
+    """Integrate actual ARC time and wire feed on the feedback time base.
+
+    Each RX value owns the interval until the following RX sample.  An arc is
+    considered physically active from WCR/current/output state, rather than
+    merely from the outbound ARC command bit.  This excludes pre-gas and ARC
+    recognition delay from production time.
+    """
+    ordered = sorted(
+        (sample for sample in samples if sample.get("elapsed_s") is not None),
+        key=lambda sample: float(sample["elapsed_s"]),
+    )
+    arc_on_time_s = 0.0
+    main_weld_arc_time_s = 0.0
+    crater_arc_time_s = 0.0
+    net_weld_arc_time_s = 0.0
+    wire_consumable_base_mm = 0.0
+    arc_started_elapsed_s = None
+    arc_completed_elapsed_s = None
+    start = (
+        None if weld_motion_start_elapsed_s is None
+        else float(weld_motion_start_elapsed_s)
+    )
+    complete = (
+        None if weld_motion_complete_elapsed_s is None
+        else float(weld_motion_complete_elapsed_s)
+    )
+    for first, second in zip(ordered, ordered[1:]):
+        interval_start = float(first["elapsed_s"])
+        interval_end = float(second["elapsed_s"])
+        dt = max(0.0, min(0.25, interval_end - interval_start))
+        effective_end = interval_start + dt
+        output_state = int(first.get("output_state", 0) or 0)
+        active = bool(
+            first.get("wcr_detected")
+            or float(first.get("feedback_current_a", 0.0) or 0.0) > 10.0
+            or output_state in (1, 2)
+        )
+        if not active or dt <= 0.0:
+            continue
+        if arc_started_elapsed_s is None:
+            arc_started_elapsed_s = interval_start
+        arc_completed_elapsed_s = effective_end
+        arc_on_time_s += dt
+        if output_state == 1:
+            main_weld_arc_time_s += dt
+        elif output_state == 2:
+            crater_arc_time_s += dt
+        wire_feed = max(
+            0.0, float(first.get("wire_feed_m_min", 0.0) or 0.0)
+        )
+        wire_consumable_base_mm += wire_feed * 1000.0 / 60.0 * dt
+        if start is not None and complete is not None and complete >= start:
+            overlap = max(
+                0.0,
+                min(effective_end, complete) - max(interval_start, start),
+            )
+            net_weld_arc_time_s += overlap
+    average_wire_feed = (
+        wire_consumable_base_mm * 60.0 / (1000.0 * arc_on_time_s)
+        if arc_on_time_s > 0.0 else 0.0
+    )
+    alpha = float(wire_consumable_alpha_mm)
+    motion_duration = (
+        max(0.0, complete - start)
+        if start is not None and complete is not None else None
+    )
+    return {
+        "arc_started_elapsed_s": arc_started_elapsed_s,
+        "arc_completed_elapsed_s": arc_completed_elapsed_s,
+        "arc_on_time_s": arc_on_time_s,
+        "main_weld_arc_time_s": main_weld_arc_time_s,
+        "crater_arc_time_s": crater_arc_time_s,
+        "weld_motion_start_elapsed_s": start,
+        "weld_motion_complete_elapsed_s": complete,
+        "weld_motion_duration_s": motion_duration,
+        "net_weld_arc_time_s": net_weld_arc_time_s,
+        "wire_feed_average_m_min": average_wire_feed,
+        "wire_consumable_base_mm": wire_consumable_base_mm,
+        "wire_consumable_alpha_mm": alpha,
+        "wire_consumable_mm": wire_consumable_base_mm + alpha,
+        "wire_consumable_formula": "integral(WFS*1000/60*dt)+alpha",
+    }
+
+
+def weld_weave_settings_text(conditions):
+    """Human-readable meaning of the effective scenario weave settings."""
+    if not conditions.get("weld_weave_enabled", False):
+        return "OFF"
+    pattern = str(conditions.get("weld_weave_pattern", "sine"))
+    amplitude = float(conditions.get("weld_weave_amplitude_mm", 0.0))
+    pitch = float(conditions.get("weld_weave_pitch_mm", 0.0))
+    cycles = int(conditions.get("weld_weave_cycles", 0))
+    actual_pitch = float(conditions.get("weld_weave_actual_pitch_mm", 0.0))
+    if pattern == "circle":
+        amplitude_text = (
+            f"radius {amplitude:.2f} mm (diameter {2 * amplitude:.2f} mm)"
+        )
+    else:
+        amplitude_text = (
+            f"centerline ±{amplitude:.2f} mm "
+            f"(full width {2 * amplitude:.2f} mm)"
+        )
+    return (
+        f"{pattern} · {amplitude_text} · requested pitch {pitch:.2f} mm/cycle "
+        f"· actual pitch {actual_pitch:.2f} mm/cycle · {cycles} cycles · "
+        f"axis {conditions.get('weld_weave_axis', 'tool_y')} · "
+        f"dwell L/R {float(conditions.get('weld_weave_left_dwell_s', 0.0)):.2f}/"
+        f"{float(conditions.get('weld_weave_right_dwell_s', 0.0)):.2f} s"
+    )
+
+
 def format_weld_feedback_log(document):
     """Return a readable, line-oriented weld report including every RX sample."""
     lines = [
@@ -1703,6 +1992,7 @@ def format_weld_feedback_log(document):
         or {}
     )
     feedback = document["feedback"]
+    production = document.get("production_metrics", {}) or {}
 
     def statistic_text(values):
         if values.get("average") is None:
@@ -1731,6 +2021,12 @@ def format_weld_feedback_log(document):
         f"CURRENT FB: {statistic_text(feedback['current_a'])} A",
         f"VOLTAGE FB: {statistic_text(feedback['voltage_v'])} V",
         f"WIRE FEED : {statistic_text(feedback['wire_feed_m_min'])} m/min",
+        f"ARC ON    : {float(production.get('arc_on_time_s', 0.0)):.3f} s",
+        f"NET WELD  : {float(production.get('net_weld_arc_time_s', 0.0)):.3f} s",
+        f"WIRE USED : {float(production.get('wire_consumable_mm', 0.0)):.3f} mm "
+        f"(base {float(production.get('wire_consumable_base_mm', 0.0)):.3f} "
+        f"+ alpha {float(production.get('wire_consumable_alpha_mm', 0.0)):.3f})",
+        f"WEAVE     : {weld_weave_settings_text(document.get('execution_conditions', {}))}",
         f"WCR       : {'DETECTED' if feedback['wcr_seen'] else 'NOT DETECTED'}",
         f"SAMPLES   : RX {feedback['rx_samples']} / "
         f"welding {feedback['welding_samples']} / "
@@ -1779,38 +2075,13 @@ def format_weld_feedback_log(document):
         for statistic in ("min", "average", "max"):
             lines.append(f"{name}.{statistic}={values[statistic]}")
 
+    lines.extend(("", "[production_metrics]"))
+    for key, value in production.items():
+        lines.append(f"{key}={value}")
+
     lines.extend(("", "[arc_off_control]"))
     for key, value in flattened("", document.get("arc_off_control", {})):
         lines.append(f"{key}={value}")
-
-    adaptive = copy.deepcopy(document.get("adaptive_speed_control", {}) or {})
-    adaptive_events = adaptive.pop("events", []) or []
-    lines.extend(("", "[adaptive_speed_control]"))
-    for key, value in flattened("", adaptive):
-        lines.append(f"{key}={value}")
-    lines.extend((
-        "",
-        "[adaptive_speed_samples]",
-        "elapsed_s event along_mm remaining_mm filtered_current_a "
-        "filtered_voltage_v power_w line_energy_j_mm governed_speed_mm_s "
-        "commanded_speed_mm_s",
-    ))
-    for event in adaptive_events:
-        def value_text(name, digits=3):
-            value = event.get(name)
-            return "nan" if value is None else f"{float(value):.{digits}f}"
-        lines.append(
-            f"{float(event.get('elapsed_s', 0.0)):.3f} "
-            f"{str(event.get('event', 'unknown')).replace(' ', '_')} "
-            f"{float(event.get('along_mm', 0.0)):.3f} "
-            f"{float(event.get('remaining_mm', 0.0)):.3f} "
-            f"{value_text('filtered_current_a', 2)} "
-            f"{value_text('filtered_voltage_v', 2)} "
-            f"{value_text('power_w', 1)} "
-            f"{value_text('line_energy_j_mm', 2)} "
-            f"{float(event.get('governed_speed_mm_s', 0.0)):.3f} "
-            f"{float(event.get('commanded_speed_mm_s', 0.0)):.3f}"
-        )
 
     # Embedded YAML snapshots of the taught poses/touch points active for
     # this run, so "Load teaching/touch from log" can restore exactly what
@@ -1987,9 +2258,13 @@ def read_last_execution_settings(path):
         ("mode", str),
         ("gas", str),
         ("correction", float),
-        ("pre_gas_s", float),
-        ("post_gas_s", float),
-        ("preflow_seconds", float),
+        ("hot_start_percent", float),
+        ("hot_start_hold_adjustment", lambda v: int(round(float(v)))),
+        ("crater_percent", float),
+        ("crater_current_a", float),
+        ("crater_voltage_v", float),
+        ("crater_seconds", float),
+        ("wire_consumable_alpha_mm", float),
     ):
         value = cast("commanded", key, converter)
         if value is not None:
@@ -1997,6 +2272,10 @@ def read_last_execution_settings(path):
     synergic = cast_bool("commanded", "synergic")
     if synergic is not None:
         settings["synergic"] = synergic
+    for key in ("hot_start_enabled", "crater_enabled"):
+        value = cast_bool("commanded", key)
+        if value is not None:
+            settings[key] = value
 
     motion = {}
 
@@ -2004,23 +2283,25 @@ def read_last_execution_settings(path):
         ("gui_velocity_percent", float),
         ("gui_speed_mode", str),
         ("gui_tcp_speed_mm_s", float),
-        ("weld_adaptive_min_percent", float),
-        ("weld_adaptive_max_percent", float),
-        ("weld_adaptive_filter_tau_s", float),
-        ("weld_adaptive_baseline_mm", float),
         ("weld_lead_in_mm", float),
         ("weld_lead_out_mm", float),
         ("weld_safe_approach_mm", float),
         ("weld_approach_mode", str),
         ("weld_pre_start_lead_mm", float),
         ("weld_arc_off_delay_ms", float),
-        ("weld_arc_stabilize_s", float),
         ("weld_tcp_speed_mm_s", float),
         ("weld_fixed_tilt_x_deg", float),
         ("weld_fixed_tilt_y_deg", float),
         ("weld_fixed_tilt_z_deg", float),
         ("weld_weave_pattern", str),
+        ("capping_width_mm", float),
+        ("capping_pitch_mm", float),
+        ("capping_left_dwell_s", float),
+        ("capping_right_dwell_s", float),
         ("weld_weave_amplitude_mm", float),
+        ("weld_weave_pitch_mm", float),
+        ("weld_weave_left_dwell_s", float),
+        ("weld_weave_right_dwell_s", float),
         ("weld_weave_cycles", lambda value: int(float(value))),
         ("weld_weave_samples_per_cycle", lambda value: int(float(value))),
         ("weld_weave_axis", str),
@@ -2029,11 +2310,6 @@ def read_last_execution_settings(path):
         if value is not None:
             motion[key] = value
 
-    adaptive_enabled = cast_bool(
-        "execution_conditions", "weld_adaptive_line_energy"
-    )
-    if adaptive_enabled is not None:
-        motion["weld_adaptive_line_energy"] = adaptive_enabled
     weave_enabled = cast_bool(
         "execution_conditions", "weld_weave_enabled"
     )
@@ -2384,17 +2660,6 @@ class WeldGuiNode(Node):
                 "/robot_head_controller/follow_joint_trajectory",
             ),
         }
-        self.speed_scaling_publishers = {}
-        if SpeedScalingFactor is not None:
-            scaling_qos = QoSProfile(depth=1)
-            scaling_qos.reliability = ReliabilityPolicy.RELIABLE
-            scaling_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
-            for arm in ("left", "right"):
-                self.speed_scaling_publishers[arm] = self.create_publisher(
-                    SpeedScalingFactor,
-                    f"/{CONTROLLER_NAMES[arm]}/speed_scaling_input",
-                    scaling_qos,
-                )
         self.keyboard_velocity_publishers = {
             arm: self.create_publisher(
                 Float64MultiArray,
@@ -3919,13 +4184,9 @@ class WeldGuiNode(Node):
 
     def stop_sequence_equipment(self, devices):
         """Cancel every robot goal and escalate until measured motion stops."""
-        do_success, do_message = self.ui._set_fastech_output_sync(
-            FASTECH_TOUCH_OUTPUT_PORT, False
-        )
-        results = [
-            f"Fastech DO{FASTECH_TOUCH_OUTPUT_PORT} OFF="
-            f"{'OK' if do_success else 'FAILED'} ({do_message})"
-        ]
+        # Operator STOP controls motion and welding outputs only. Keep Fastech
+        # DO0 exactly as-is so stopping a robot does not disable touch sensing.
+        results = [f"Fastech DO{FASTECH_TOUCH_OUTPUT_PORT} unchanged"]
         for device in tuple(dict.fromkeys(devices)):
             canceled, cancel_message = self.cancel_controller_goals(device)
             stationary = self.wait_until_device_stopped(device, timeout=1.5)
@@ -4799,632 +5060,8 @@ class WeldGuiNode(Node):
         )
         future.add_done_callback(self._cartesian_goal_response)
 
-    @staticmethod
-    def _trajectory_point_time_s(point):
-        return (
-            float(point.time_from_start.sec)
-            + float(point.time_from_start.nanosec) * 1e-9
-        )
-
-    @staticmethod
-    def _set_trajectory_point_time_s(point, seconds):
-        seconds = max(0.0, float(seconds))
-        whole = int(seconds)
-        nanos = int(round((seconds - whole) * 1e9))
-        if nanos >= 1_000_000_000:
-            whole += 1
-            nanos -= 1_000_000_000
-        point.time_from_start.sec = whole
-        point.time_from_start.nanosec = nanos
-
-    @staticmethod
-    def _interpolate_numeric_array(first, second, ratio):
-        if len(first) != len(second) or not first:
-            return list(first if ratio < 0.5 else second)
-        return [
-            float(a) + (float(b) - float(a)) * ratio
-            for a, b in zip(first, second)
-        ]
-
-    def _sample_joint_trajectory_point(self, points, sample_time_s):
-        """Linearly sample one already time-parameterized joint trajectory.
-
-        The controller still performs its configured interpolation between the
-        returned points.  This helper is only used to create a short, continuous
-        bridge when Humble fallback trajectory replacement changes speed.
-        """
-        if not points:
-            raise ValueError("adaptive trajectory has no points")
-        target = max(0.0, float(sample_time_s))
-        if target <= self._trajectory_point_time_s(points[0]):
-            return copy.deepcopy(points[0])
-        for first, second in zip(points, points[1:]):
-            first_t = self._trajectory_point_time_s(first)
-            second_t = self._trajectory_point_time_s(second)
-            if target <= second_t + 1e-9:
-                span = max(1e-9, second_t - first_t)
-                ratio = max(0.0, min(1.0, (target - first_t) / span))
-                result = copy.deepcopy(first)
-                result.positions = self._interpolate_numeric_array(
-                    first.positions, second.positions, ratio
-                )
-                result.velocities = self._interpolate_numeric_array(
-                    first.velocities, second.velocities, ratio
-                )
-                result.accelerations = self._interpolate_numeric_array(
-                    first.accelerations, second.accelerations, ratio
-                )
-                result.effort = self._interpolate_numeric_array(
-                    first.effort, second.effort, ratio
-                )
-                self._set_trajectory_point_time_s(result, target)
-                return result
-        return copy.deepcopy(points[-1])
-
-    def _retime_remaining_fjt_goal(
-        self, joint_trajectory, cursor_s, speed_factor
-    ):
-        """Build a replacement FJT goal for the remaining nominal trajectory."""
-        factor = max(0.05, float(speed_factor))
-        source_points = joint_trajectory.points
-        if not source_points:
-            raise ValueError("adaptive trajectory has no points")
-        total_s = self._trajectory_point_time_s(source_points[-1])
-        cursor_s = max(0.0, min(float(cursor_s), total_s))
-        bridge_s = ADAPTIVE_TRAJECTORY_BRIDGE_S
-        bridge_nominal_s = min(total_s, cursor_s + bridge_s * factor)
-        first = self._sample_joint_trajectory_point(
-            source_points, bridge_nominal_s
-        )
-        self._set_trajectory_point_time_s(first, bridge_s)
-        if first.velocities:
-            first.velocities = [float(v) * factor for v in first.velocities]
-        if first.accelerations:
-            first.accelerations = [
-                float(a) * factor * factor for a in first.accelerations
-            ]
-        remaining = [first]
-        for original in source_points:
-            original_t = self._trajectory_point_time_s(original)
-            if original_t <= bridge_nominal_s + 1e-6:
-                continue
-            point = copy.deepcopy(original)
-            relative = (original_t - cursor_s) / factor
-            if relative <= bridge_s + 1e-4:
-                continue
-            self._set_trajectory_point_time_s(point, relative)
-            if point.velocities:
-                point.velocities = [float(v) * factor for v in point.velocities]
-            if point.accelerations:
-                point.accelerations = [
-                    float(a) * factor * factor for a in point.accelerations
-                ]
-            remaining.append(point)
-        if len(remaining) == 1 and bridge_nominal_s < total_s - 1e-6:
-            final = copy.deepcopy(source_points[-1])
-            self._set_trajectory_point_time_s(
-                final, max(bridge_s + 0.02, (total_s - cursor_s) / factor)
-            )
-            if final.velocities:
-                final.velocities = [float(v) * factor for v in final.velocities]
-            if final.accelerations:
-                final.accelerations = [
-                    float(a) * factor * factor for a in final.accelerations
-                ]
-            remaining.append(final)
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(joint_trajectory.joint_names)
-        goal.trajectory.points = remaining
-        return goal
-
-    def _start_fjt_goal(self, arm, goal, description):
-        """Start one FJT goal and return a small asynchronous result state."""
-        client = self.joint_trajectory_clients[arm]
-        if not client.wait_for_server(timeout_sec=3.0):
-            raise RuntimeError(f"{description} action server unavailable")
-        accepted = threading.Event()
-        state = {"finished": threading.Event()}
-
-        def result_ready(future):
-            try:
-                state["result"] = future.result().result
-            except Exception as error:
-                state["error"] = str(error)
-            state["finished"].set()
-
-        def goal_ready(future):
-            try:
-                handle = future.result()
-                if not handle.accepted:
-                    state["error"] = f"{description} goal rejected"
-                    state["finished"].set()
-                    return
-                state["handle"] = handle
-                self.active_motion_goal = handle
-                handle.get_result_async().add_done_callback(result_ready)
-            except Exception as error:
-                state["error"] = str(error)
-                state["finished"].set()
-            finally:
-                accepted.set()
-
-        client.send_goal_async(goal).add_done_callback(goal_ready)
-        if not accepted.wait(timeout=5.0):
-            raise TimeoutError(f"{description} goal response timed out")
-        if "error" in state and "handle" not in state:
-            raise RuntimeError(state["error"])
-        return state
-
-    def _plan_adaptive_weld_trajectory(self, step):
-        """Ask the existing CartesianPath server for the nominal weld plan.
-
-        This deliberately reuses the deployed server's exact Cartesian
-        planning / timing policy (including any local linear-profile changes)
-        and then takes the freshly published DisplayTrajectory for direct JTC
-        execution in the Humble fallback.
-        """
-        previous_display_time = float(self.latest_rviz_display_at or 0.0)
-        plain = copy.deepcopy(step)
-        plain["adaptive_line_energy"] = False
-        plain["record_tcp_trajectory"] = False
-        success, message = self.run_sequence_cartesian_motion(plain, False)
-        if not success:
-            raise RuntimeError(
-                "adaptive nominal planning failed: " + str(message)
-            )
-        deadline = time.monotonic() + 1.0
-        display = None
-        while time.monotonic() < deadline:
-            display, _age = self.latest_rviz_plan()
-            if (
-                display is not None
-                and float(self.latest_rviz_display_at or 0.0)
-                > previous_display_time
-            ):
-                break
-            time.sleep(0.02)
-        if (
-            display is None
-            or float(self.latest_rviz_display_at or 0.0)
-            <= previous_display_time
-        ):
-            raise RuntimeError(
-                "CartesianPath plan completed without a fresh DisplayTrajectory"
-            )
-        arm = step["planning_group"].removesuffix("_manipulator")
-        expected = ARM_JOINT_NAMES[arm]
-        candidates = [
-            trajectory
-            for trajectory in display.trajectory
-            if trajectory.joint_trajectory.points
-            and expected.issubset(
-                set(trajectory.joint_trajectory.joint_names)
-            )
-        ]
-        if len(candidates) != 1:
-            raise RuntimeError(
-                "adaptive weld expected one fresh arm trajectory, got "
-                f"{len(candidates)}"
-            )
-        return copy.deepcopy(candidates[0])
-
-    def _adaptive_geometry(self, step):
-        start = step.get("usable_seam_start")
-        goal = step.get("usable_seam_goal")
-        if not pose_is_valid(start) or not pose_is_valid(goal):
-            raise ValueError("adaptive weld requires usable seam START/GOAL")
-        sx, sy, sz = _pose_position_tuple(start)
-        gx, gy, gz = _pose_position_tuple(goal)
-        dx, dy, dz = gx - sx, gy - sy, gz - sz
-        length = math.sqrt(dx * dx + dy * dy + dz * dz)
-        if length < 1e-6:
-            raise ValueError("adaptive weld seam length is zero")
-        return {
-            "start": (sx, sy, sz),
-            "tangent": (dx / length, dy / length, dz / length),
-            "length_m": length,
-        }
-
-    def _new_adaptive_control_state(self, step):
-        nominal = float(step.get("tcp_speed_m_s", 0.0))
-        if nominal <= 1e-6:
-            raise ValueError("adaptive weld requires a positive TCP speed")
-        min_factor = float(step.get("adaptive_min_factor", 0.75))
-        max_factor = float(step.get("adaptive_max_factor", 1.00))
-        tau = float(step.get("adaptive_filter_tau_s", 0.8))
-        baseline_mm = float(step.get("adaptive_baseline_mm", 10.0))
-        if not 0.2 <= min_factor <= 1.0:
-            raise ValueError("adaptive minimum factor must be 20..100%")
-        if not 1.0 <= max_factor <= 1.5 or max_factor < min_factor:
-            raise ValueError("adaptive maximum factor must be 100..150%")
-        if not 0.2 <= tau <= 5.0:
-            raise ValueError("adaptive filter must be 0.2..5.0 seconds")
-        if not 3.0 <= baseline_mm <= 30.0:
-            raise ValueError("adaptive baseline must be 3..30 mm")
-        now = time.monotonic()
-        return {
-            "geometry": self._adaptive_geometry(step),
-            "nominal_speed_m_s": nominal,
-            "min_speed_m_s": nominal * min_factor,
-            "max_speed_m_s": nominal * max_factor,
-            "filter_tau_s": tau,
-            "baseline_mm": baseline_mm,
-            "filtered_current_a": None,
-            "filtered_voltage_v": None,
-            "last_measurement_elapsed_s": None,
-            "baseline_current_sum": 0.0,
-            "baseline_voltage_sum": 0.0,
-            "baseline_power_sum": 0.0,
-            "baseline_count": 0,
-            "baseline_current_a": None,
-            "baseline_voltage_v": None,
-            "baseline_power_w": None,
-            "reference_line_energy_j_mm": None,
-            "governed_speed_m_s": nominal,
-            "commanded_speed_m_s": nominal,
-            "last_tick_monotonic": now,
-            "last_command_monotonic": now,
-            "last_log_monotonic": 0.0,
-            "end_frozen": False,
-        }
-
-    def _adaptive_control_tick(self, step, state):
-        """Update filtered electrical state and return a slow speed request."""
-        now = time.monotonic()
-        dt_tick = max(0.0, min(0.25, now - state["last_tick_monotonic"]))
-        state["last_tick_monotonic"] = now
-        pose = self._current_tcp_pose(step["planning_group"])
-        sx, sy, sz = state["geometry"]["start"]
-        tx, ty, tz = state["geometry"]["tangent"]
-        dx = float(pose.position.x) - sx
-        dy = float(pose.position.y) - sy
-        dz = float(pose.position.z) - sz
-        along_m = dx * tx + dy * ty + dz * tz
-        remaining_m = state["geometry"]["length_m"] - along_m
-        measurement = self.ui._latest_weld_electrical_state()
-        new_measurement = False
-        if measurement is not None:
-            elapsed = float(measurement.get("elapsed_s", -1.0))
-            previous_elapsed = state["last_measurement_elapsed_s"]
-            if previous_elapsed is None or elapsed > previous_elapsed + 1e-6:
-                state["last_measurement_elapsed_s"] = elapsed
-                current = float(measurement.get("current_a", 0.0))
-                voltage = float(measurement.get("voltage_v", 0.0))
-                valid = bool(
-                    measurement.get("wcr_detected")
-                    and current > 20.0
-                    and voltage > 5.0
-                )
-                if valid:
-                    sample_dt = (
-                        PERIOD_SECONDS
-                        if previous_elapsed is None
-                        else max(0.005, min(0.25, elapsed - previous_elapsed))
-                    )
-                    alpha = 1.0 - math.exp(
-                        -sample_dt / state["filter_tau_s"]
-                    )
-                    if state["filtered_current_a"] is None:
-                        state["filtered_current_a"] = current
-                        state["filtered_voltage_v"] = voltage
-                    else:
-                        state["filtered_current_a"] += alpha * (
-                            current - state["filtered_current_a"]
-                        )
-                        state["filtered_voltage_v"] += alpha * (
-                            voltage - state["filtered_voltage_v"]
-                        )
-                    new_measurement = True
-
-        along_mm = along_m * 1000.0
-        remaining_mm = remaining_m * 1000.0
-        filt_i = state["filtered_current_a"]
-        filt_v = state["filtered_voltage_v"]
-        if (
-            new_measurement
-            and filt_i is not None
-            and filt_v is not None
-            and along_mm >= 0.0
-            and state["baseline_power_w"] is None
-        ):
-            # Learn the electrical state of the initially good bead instead of
-            # assuming that commanded I/V equals the instantaneous arc feedback.
-            state["baseline_current_sum"] += filt_i
-            state["baseline_voltage_sum"] += filt_v
-            state["baseline_power_sum"] += filt_i * filt_v
-            state["baseline_count"] += 1
-            if (
-                along_mm >= state["baseline_mm"]
-                and state["baseline_count"] >= ADAPTIVE_MIN_BASELINE_SAMPLES
-            ):
-                count = float(state["baseline_count"])
-                state["baseline_current_a"] = (
-                    state["baseline_current_sum"] / count
-                )
-                state["baseline_voltage_v"] = (
-                    state["baseline_voltage_sum"] / count
-                )
-                state["baseline_power_w"] = state["baseline_power_sum"] / count
-                nominal_mm_s = state["nominal_speed_m_s"] * 1000.0
-                state["reference_line_energy_j_mm"] = (
-                    state["baseline_power_w"] / max(1e-6, nominal_mm_s)
-                )
-                self.ui._record_weld_adaptive_event(
-                    "baseline_locked", state, along_mm, remaining_mm
-                )
-
-        desired = state["nominal_speed_m_s"]
-        baseline_power = state["baseline_power_w"]
-        if (
-            baseline_power is not None
-            and filt_i is not None
-            and filt_v is not None
-            and remaining_mm > ADAPTIVE_END_FREEZE_MM
-        ):
-            power = filt_i * filt_v
-            power_ratio = power / max(1e-6, baseline_power)
-            if abs(power_ratio - 1.0) <= ADAPTIVE_POWER_DEADBAND_RATIO:
-                desired = state["nominal_speed_m_s"]
-            else:
-                # E_line = P / v. Therefore keeping E_line at the learned
-                # reference means v_target = P_filtered / E_reference.
-                desired = (
-                    state["nominal_speed_m_s"] * power_ratio
-                )
-            baseline_current = state["baseline_current_a"]
-            if (
-                baseline_current is not None
-                and filt_i < baseline_current - ADAPTIVE_CURRENT_DEADBAND_A
-            ):
-                # A voltage rise can mask a low-current / poor-deposition arc in
-                # pure P=VI.  Never let line-energy control speed the robot up
-                # while current is materially below the learned good baseline.
-                current_guard = state["nominal_speed_m_s"] * (
-                    filt_i / max(1e-6, baseline_current)
-                )
-                desired = min(desired, current_guard)
-            desired = max(
-                state["min_speed_m_s"],
-                min(state["max_speed_m_s"], desired),
-            )
-        elif remaining_mm <= ADAPTIVE_END_FREEZE_MM and not state["end_frozen"]:
-            state["end_frozen"] = True
-            self.ui._record_weld_adaptive_event(
-                "end_freeze", state, along_mm, remaining_mm
-            )
-            desired = state["commanded_speed_m_s"]
-
-        if not state["end_frozen"]:
-            max_delta = ADAPTIVE_SLEW_M_S2 * dt_tick
-            delta = desired - state["governed_speed_m_s"]
-            delta = max(-max_delta, min(max_delta, delta))
-            state["governed_speed_m_s"] += delta
-        else:
-            state["governed_speed_m_s"] = state["commanded_speed_m_s"]
-
-        should_command = bool(
-            baseline_power is not None
-            and not state["end_frozen"]
-            and now - state["last_command_monotonic"] >= ADAPTIVE_UPDATE_PERIOD_S
-            and abs(
-                state["governed_speed_m_s"] - state["commanded_speed_m_s"]
-            ) >= ADAPTIVE_SPEED_REISSUE_THRESHOLD_M_S
-        )
-        if now - state["last_log_monotonic"] >= 1.0:
-            state["last_log_monotonic"] = now
-            self.ui._record_weld_adaptive_event(
-                "monitor", state, along_mm, remaining_mm
-            )
-        return should_command, state["governed_speed_m_s"], along_mm, remaining_mm
-
-    def _adaptive_command_applied(self, state, speed_m_s, backend, along_mm, remaining_mm):
-        state["commanded_speed_m_s"] = float(speed_m_s)
-        state["last_command_monotonic"] = time.monotonic()
-        self.ui._set_weld_adaptive_runtime(
-            active=True,
-            commanded_speed_m_s=float(speed_m_s),
-            backend=backend,
-        )
-        self.ui._record_weld_adaptive_event(
-            "speed_command", state, along_mm, remaining_mm, backend=backend
-        )
-
-    def _speed_scaling_available(self, arm):
-        publisher = self.speed_scaling_publishers.get(arm)
-        return bool(
-            publisher is not None and publisher.get_subscription_count() > 0
-        )
-
-    def _publish_speed_scaling(self, arm, factor):
-        publisher = self.speed_scaling_publishers.get(arm)
-        if publisher is None or SpeedScalingFactor is None:
-            return False
-        message = SpeedScalingFactor()
-        # control_msgs/SpeedScalingFactor currently exposes `factor`.
-        message.factor = float(max(0.01, min(1.5, factor)))
-        publisher.publish(message)
-        return True
-
-    def _run_speed_scaling_governor(self, step, stop_event, state):
-        arm = step["planning_group"].removesuffix("_manipulator")
-        nominal = state["nominal_speed_m_s"]
-        backend = "jtc_speed_scaling_input"
-        self._publish_speed_scaling(arm, 1.0)
-        self.ui._set_weld_adaptive_runtime(
-            active=True, commanded_speed_m_s=nominal, backend=backend
-        )
-        try:
-            while not stop_event.is_set() and not self.ui.sequence_stop_requested:
-                try:
-                    should_command, requested, along_mm, remaining_mm = (
-                        self._adaptive_control_tick(step, state)
-                    )
-                except TransformException:
-                    time.sleep(0.05)
-                    continue
-                if should_command:
-                    factor = requested / nominal
-                    if self._publish_speed_scaling(arm, factor):
-                        self._adaptive_command_applied(
-                            state, requested, backend, along_mm, remaining_mm
-                        )
-                time.sleep(0.05)
-        finally:
-            self._publish_speed_scaling(arm, 1.0)
-            self.ui._set_weld_adaptive_runtime(
-                active=False,
-                commanded_speed_m_s=state["commanded_speed_m_s"],
-                backend=backend,
-            )
-
-    def _run_adaptive_fjt_replacement(self, step, execute_requested, state):
-        trajectory = self._plan_adaptive_weld_trajectory(step)
-        if not execute_requested:
-            return True, "adaptive line-energy weld trajectory planned in RViz"
-        arm = step["planning_group"].removesuffix("_manipulator")
-        nominal = state["nominal_speed_m_s"]
-        source = trajectory.joint_trajectory
-        total_s = trajectory_duration_seconds(trajectory)
-        if total_s <= 1e-6:
-            return False, "adaptive trajectory has no usable duration"
-        cursor_s = 0.0
-        factor = 1.0
-        goal = self._retime_remaining_fjt_goal(source, cursor_s, factor)
-        current_goal = self._start_fjt_goal(
-            arm, goal, "Adaptive weld trajectory"
-        )
-        backend = "humble_fjt_trajectory_replacement"
-        self.ui._set_weld_adaptive_runtime(
-            active=True, commanded_speed_m_s=nominal, backend=backend
-        )
-        last_time = time.monotonic()
-        timeout_deadline = last_time + total_s / max(0.1, float(step.get("adaptive_min_factor", 0.75))) + 30.0
-        try:
-            while not self.ui.sequence_stop_requested:
-                now = time.monotonic()
-                dt = max(0.0, min(0.25, now - last_time))
-                last_time = now
-                cursor_s = min(total_s, cursor_s + dt * factor)
-                if current_goal["finished"].is_set() and cursor_s < total_s - 0.10:
-                    result = current_goal.get("result")
-                    code = getattr(result, "error_code", None)
-                    if code != FollowJointTrajectory.Result.SUCCESSFUL:
-                        return False, (
-                            "adaptive trajectory ended early: "
-                            + str(current_goal.get("error") or getattr(result, "error_string", code))
-                        )
-                try:
-                    should_command, requested, along_mm, remaining_mm = (
-                        self._adaptive_control_tick(step, state)
-                    )
-                except TransformException:
-                    should_command = False
-                    requested = state["commanded_speed_m_s"]
-                    along_mm = 0.0
-                    remaining_mm = 0.0
-                if should_command and cursor_s < total_s - 0.25:
-                    new_factor = requested / nominal
-                    replacement = self._retime_remaining_fjt_goal(
-                        source, cursor_s, new_factor
-                    )
-                    current_goal = self._start_fjt_goal(
-                        arm, replacement, "Adaptive weld speed replacement"
-                    )
-                    factor = new_factor
-                    self._adaptive_command_applied(
-                        state, requested, backend, along_mm, remaining_mm
-                    )
-                if cursor_s >= total_s - 1e-3:
-                    break
-                if now >= timeout_deadline:
-                    return False, "adaptive weld trajectory timed out"
-                time.sleep(0.05)
-
-            if self.ui.sequence_stop_requested:
-                handle = current_goal.get("handle")
-                if handle is not None:
-                    try:
-                        handle.cancel_goal_async()
-                    except Exception:
-                        pass
-                return False, "adaptive weld motion stopped by operator"
-
-            remaining_timeout = max(5.0, timeout_deadline - time.monotonic())
-            if not current_goal["finished"].wait(timeout=remaining_timeout):
-                handle = current_goal.get("handle")
-                if handle is not None:
-                    try:
-                        handle.cancel_goal_async()
-                    except Exception:
-                        pass
-                return False, "adaptive weld final trajectory result timed out"
-            if "error" in current_goal:
-                return False, current_goal["error"]
-            result = current_goal.get("result")
-            success = bool(
-                result is not None
-                and result.error_code == FollowJointTrajectory.Result.SUCCESSFUL
-            )
-            return success, (
-                "adaptive line-energy weld completed via trajectory replacement"
-                if success
-                else f"adaptive FJT failed: {getattr(result, 'error_string', 'unknown error')}"
-            )
-        finally:
-            if self.active_motion_goal is current_goal.get("handle"):
-                self.active_motion_goal = None
-            self.ui._set_weld_adaptive_runtime(
-                active=False,
-                commanded_speed_m_s=state["commanded_speed_m_s"],
-                backend=backend,
-            )
-
-    def run_sequence_adaptive_weld_motion(self, step, execute_requested):
-        """Execute one weld with slow feedback-based line-energy speed control.
-
-        Preferred backend: JTC speed_scaling_input when supported by the local
-        ros2_controllers version.  Humble fallback: re-time and replace the
-        remaining FollowJointTrajectory at <=2 Hz with a 120 ms bridge.
-        """
-        try:
-            state = self._new_adaptive_control_state(step)
-        except (TypeError, ValueError) as error:
-            return False, str(error)
-        arm = step["planning_group"].removesuffix("_manipulator")
-        if self._speed_scaling_available(arm):
-            if not execute_requested:
-                plain = copy.deepcopy(step)
-                plain["adaptive_line_energy"] = False
-                return self.run_sequence_cartesian_motion(plain, False)
-            stop_event = threading.Event()
-            governor = threading.Thread(
-                target=self._run_speed_scaling_governor,
-                args=(step, stop_event, state),
-                daemon=True,
-            )
-            governor.start()
-            try:
-                plain = copy.deepcopy(step)
-                plain["adaptive_line_energy"] = False
-                success, message = self.run_sequence_cartesian_motion(
-                    plain, execute_requested
-                )
-                return success, (
-                    message + " · adaptive backend=jtc_speed_scaling_input"
-                )
-            finally:
-                stop_event.set()
-                governor.join(timeout=2.0)
-        return self._run_adaptive_fjt_replacement(
-            step, execute_requested, state
-        )
-
     def run_sequence_cartesian_motion(self, step, execute_requested):
         """Plan or execute one stored path and block only the worker thread."""
-        if bool(step.get("adaptive_line_energy", False)):
-            return self.run_sequence_adaptive_weld_motion(
-                step, execute_requested
-            )
         goal = CartesianPath.Goal()
         goal.planning_group = step["planning_group"]
         goal.interpolation_step = step["interpolation_step"]
@@ -5435,6 +5072,7 @@ class WeldGuiNode(Node):
         goal.visualize_path = True
         goal.linear_motion_profile = bool(step.get("linear_motion_profile", False))
         goal.waypoints = copy.deepcopy(step["points"])
+        goal.waypoint_hold_s = list(step.get("waypoint_hold_s", []))
         touch_guarded = bool(execute_requested and step.get("touch_guard", False))
         arm = step["planning_group"].removesuffix("_manipulator")
         guard_name = step.get("path_kind", "Cartesian approach")
@@ -5821,6 +5459,7 @@ class WeldActionGui:
             "body": body,
             "button": button,
             "title": title,
+            "number": len(self.motion_sections) + 1,
             "expanded": bool(expanded),
         }
         if expanded:
@@ -5832,7 +5471,7 @@ class WeldActionGui:
         section = self.motion_sections[key]
         marker = "▼" if section["expanded"] else "▶"
         section["button"].configure(
-            text=f"{marker}  {section['title']}",
+            text=f"{marker}  {section['number']}. {section['title']}",
         )
 
     def toggle_motion_section(self, key):
@@ -5897,6 +5536,8 @@ class WeldActionGui:
         self.keyboard_velocity_switching = False
         self.keyboard_velocity_active_key = None
         self.keyboard_release_after_id = None
+        self.keyboard_shortcut_active_keys = set()
+        self.keyboard_shortcut_release_ids = {}
         self.fake_head_hardware = False
         self.plan_approved = False
         self.linear_tcp_endpoints = [None, None]
@@ -5928,20 +5569,39 @@ class WeldActionGui:
         self.linear_motion_profile = tk.BooleanVar(value=True)
         self.show_path = tk.BooleanVar(value=True)
         self.weave_amplitude_mm = tk.DoubleVar(
-            value=last_execution_motion.get("weld_weave_amplitude_mm", 3.0)
+            value=(
+                float(last_execution_motion.get("capping_width_mm", 6.0)) * 0.5
+                if last_execution_motion.get("weld_weave_pattern") == "capping"
+                else last_execution_motion.get("weld_weave_amplitude_mm", 3.0)
+            )
         )
-        self.weave_cycles = tk.IntVar(
-            value=last_execution_motion.get("weld_weave_cycles", 4)
+        self.weave_pitch_mm = tk.DoubleVar(
+            value=last_execution_motion.get(
+                "weld_weave_pitch_mm",
+                last_execution_motion.get("capping_pitch_mm", 5.0),
+            )
         )
-        self.weave_samples = tk.IntVar(
-            value=last_execution_motion.get("weld_weave_samples_per_cycle", 8)
+        self.weave_left_dwell_s = tk.DoubleVar(
+            value=last_execution_motion.get(
+                "weld_weave_left_dwell_s",
+                last_execution_motion.get("capping_left_dwell_s", 0.0),
+            )
+        )
+        self.weave_right_dwell_s = tk.DoubleVar(
+            value=last_execution_motion.get(
+                "weld_weave_right_dwell_s",
+                last_execution_motion.get("capping_right_dwell_s", 0.0),
+            )
         )
         self.weave_axis = tk.StringVar(
             value=last_execution_motion.get("weld_weave_axis", "tool_y")
         )
         self.weave_base = tk.StringVar(value="linear")
         self.weave_pattern = tk.StringVar(
-            value=last_execution_motion.get("weld_weave_pattern", "sine")
+            value=(
+                "sine" if last_execution_motion.get("weld_weave_pattern") == "capping"
+                else last_execution_motion.get("weld_weave_pattern", "sine")
+            )
         )
         self.weld_weave_enabled = tk.BooleanVar(
             value=last_execution_motion.get("weld_weave_enabled", False)
@@ -5975,6 +5635,8 @@ class WeldActionGui:
         # to exercise motion only (no real welding output).
         self.fake_arc_enabled = tk.BooleanVar(value=False)
         self.hicomm_inching_direction = None
+        self.keyboard_wire_active_key = None
+        self.keyboard_wire_release_after_id = None
         self.inching_distance_lock = threading.Lock()
         self.inching_total_mm = 0.0
         self.inching_forward_mm = 0.0
@@ -6027,8 +5689,6 @@ class WeldActionGui:
         self.touch_probe_distance_mm = tk.DoubleVar(value=25.0)
         self.touch_probe_speed_percent = tk.DoubleVar(value=5.0)
         self.touch_settle_seconds = tk.DoubleVar(value=0.7)
-        self.seam_wall_offset_mm = tk.DoubleVar(value=0.0)
-        self.seam_floor_offset_mm = tk.DoubleVar(value=0.0)
         self.weld_approach_mode = tk.StringVar(
             value=last_execution_motion.get("weld_approach_mode", "corner_geometry")
         )
@@ -6059,28 +5719,6 @@ class WeldActionGui:
         self.weld_tcp_speed_mm_s = tk.DoubleVar(
             value=last_execution_motion.get("weld_tcp_speed_mm_s", 3.0)
         )
-        self.weld_adaptive_line_energy = tk.BooleanVar(
-            value=last_execution_motion.get("weld_adaptive_line_energy", False)
-        )
-        self.weld_adaptive_min_percent = tk.DoubleVar(
-            value=last_execution_motion.get("weld_adaptive_min_percent", 75.0)
-        )
-        self.weld_adaptive_max_percent = tk.DoubleVar(
-            value=last_execution_motion.get("weld_adaptive_max_percent", 100.0)
-        )
-        self.weld_adaptive_filter_tau_s = tk.DoubleVar(
-            value=last_execution_motion.get("weld_adaptive_filter_tau_s", 0.8)
-        )
-        self.weld_adaptive_baseline_mm = tk.DoubleVar(
-            value=last_execution_motion.get("weld_adaptive_baseline_mm", 10.0)
-        )
-        # Shared with the adaptive executor and ARC-OFF watcher. Access while
-        # holding weld_feedback_lock.
-        self.weld_adaptive_runtime = {
-            "active": False,
-            "commanded_speed_m_s": 0.0,
-            "backend": "disabled",
-        }
         self.seam_probe_touches = {
             name: None for name in CORNER_TOUCH_NAMES
         }
@@ -6160,20 +5798,33 @@ class WeldActionGui:
         self.weld_gas = tk.StringVar(value=weld_defaults["gas"])
         self.weld_synergic = tk.BooleanVar(value=weld_defaults["synergic"])
         self.weld_correction = tk.DoubleVar(value=weld_defaults["correction"])
-        self.weld_pre_gas_s = tk.DoubleVar(value=weld_defaults["pre_gas_s"])
-        self.weld_post_gas_s = tk.DoubleVar(value=weld_defaults["post_gas_s"])
-        self.weld_preflow_seconds = tk.DoubleVar(
-            value=weld_defaults["preflow_seconds"]
+        self.weld_hot_start_enabled = tk.BooleanVar(
+            value=weld_defaults["hot_start_enabled"]
         )
-        # Delay after Hi-COMM reports ARC ESTABLISHED and before the robot
-        # starts the continuous weld stroke. This lets the initial transfer
-        # settle on the sacrificial lead-in instead of inside the usable seam.
-        self.weld_arc_stabilize_seconds = tk.DoubleVar(
-            value=last_execution_motion.get("weld_arc_stabilize_s", 0.2)
+        self.weld_hot_start_percent = tk.DoubleVar(
+            value=weld_defaults["hot_start_percent"]
+        )
+        self.weld_hot_start_hold_adjustment = tk.IntVar(
+            value=weld_defaults["hot_start_hold_adjustment"]
+        )
+        self.weld_crater_enabled = tk.BooleanVar(
+            value=weld_defaults["crater_enabled"]
+        )
+        self.weld_crater_current_a = tk.DoubleVar(
+            value=weld_defaults["crater_current_a"]
+        )
+        self.weld_crater_voltage_v = tk.DoubleVar(
+            value=weld_defaults["crater_voltage_v"]
+        )
+        self.weld_crater_seconds = tk.DoubleVar(
+            value=weld_defaults["crater_seconds"]
+        )
+        self.weld_wire_consumable_alpha_mm = tk.DoubleVar(
+            value=weld_defaults["wire_consumable_alpha_mm"]
         )
         self.robot_ips = {
-            "left": "192.168.1.12",
-            "right": "192.168.1.19",
+            "left": "192.168.1.11",
+            "right": "192.168.1.12",
         }
 
         style = ttk.Style()
@@ -6222,6 +5873,17 @@ class WeldActionGui:
         self.root.bind_all("<MouseWheel>", self._scroll_content)
         self.root.bind_all("<Button-4>", self._scroll_content)
         self.root.bind_all("<Button-5>", self._scroll_content)
+        # Tk processes a widget's class binding before bind_all. Spinbox,
+        # Combobox and Scale can therefore change their values on a wheel
+        # event even though the page also scrolls. Override only those class
+        # wheel bindings so the wheel scrolls the page without editing values.
+        for widget_class in (
+            "TSpinbox", "Spinbox", "TCombobox", "Combobox", "TScale", "Scale",
+        ):
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                self.root.bind_class(
+                    widget_class, sequence, self._scroll_value_control
+                )
         ttk.Label(
             outer,
             text="Welding Interface",
@@ -6354,7 +6016,7 @@ class WeldActionGui:
         ttk.Spinbox(
             jog_row,
             from_=0.1,
-            to=20.0,
+            to=25.0,
             increment=0.5,
             textvariable=self.keyboard_jog_linear_speed,
             width=6,
@@ -6382,6 +6044,15 @@ class WeldActionGui:
         ttk.Label(
             keyboard_jog,
             text=(
+                "Speed: V=XYZ 5/15/25 mm/s · X=rotation 3/7/10 deg/s · "
+                "Save: I/J=TCP1/2 · O/K=START/GOAL WAIT · "
+                "P/L=Weld WAIT(init)/END · M=Initial pose"
+            ),
+            foreground="#174ea6",
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            keyboard_jog,
+            text=(
                 "Arrows: single axis Left/Down=-, Right/Up=+; plane "
                 "Left/Right=first axis, Down/Up=second axis. "
                 "Hold=move, release=zero velocity. "
@@ -6389,12 +6060,28 @@ class WeldActionGui:
             ),
             foreground="#137333",
         ).pack(anchor=tk.W)
+        ttk.Label(
+            keyboard_jog,
+            text="Wire (right arm, Hi-COMM connected): hold F=feed forward, R=reverse; release=OFF",
+            foreground="#b3261e",
+        ).pack(anchor=tk.W)
         for key_name in (
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "s", "d"
         ):
             self.root.bind(
                 f"<KeyPress-{key_name}>",
                 self.keyboard_jog_selection_key,
+                add="+",
+            )
+        for key_name in ("v", "x", "i", "j", "o", "k", "p", "l", "m"):
+            self.root.bind(
+                f"<KeyPress-{key_name}>",
+                self.keyboard_teaching_shortcut_key,
+                add="+",
+            )
+            self.root.bind(
+                f"<KeyRelease-{key_name}>",
+                self.keyboard_teaching_shortcut_release,
                 add="+",
             )
         for key_name in ("Left", "Right", "Up", "Down"):
@@ -6408,6 +6095,14 @@ class WeldActionGui:
                 self.keyboard_jog_key_release,
                 add="+",
             )
+        for key_name in ("f", "F", "r", "R"):
+            self.root.bind(
+                f"<KeyPress-{key_name}>", self.keyboard_wire_key_press, add="+"
+            )
+            self.root.bind(
+                f"<KeyRelease-{key_name}>", self.keyboard_wire_key_release, add="+"
+            )
+        self.root.bind("<FocusOut>", self.keyboard_wire_focus_out, add="+")
 
         motion_tests = self._create_toggle_section(
             outer, "motion_test", "Motion Test", expanded=False
@@ -6738,29 +6433,49 @@ class WeldActionGui:
         ttk.Checkbutton(
             digital, text="synergic", variable=self.weld_synergic
         ).grid(row=2, column=0, columnspan=2, padx=3, sticky=tk.W)
-        for offset, (label, variable) in enumerate((
-            ("correction", self.weld_correction),
-            ("recipe pre-gas s", self.weld_pre_gas_s),
-            ("recipe post-gas s", self.weld_post_gas_s),
-        )):
-            ttk.Label(digital, text=label).grid(
-                row=2, column=2 + offset * 2, padx=(3, 2), pady=3
-            )
-            ttk.Entry(digital, textvariable=variable, width=7).grid(
-                row=2, column=3 + offset * 2, padx=(0, 4), pady=3
-            )
-        ttk.Label(digital, text="pre-weld gas flow s").grid(
-            row=3, column=0, padx=(3, 2), pady=3
+        ttk.Label(digital, text="correction").grid(
+            row=2, column=2, padx=(3, 2), pady=3
+        )
+        ttk.Entry(digital, textvariable=self.weld_correction, width=7).grid(
+            row=2, column=3, padx=(0, 4), pady=3
+        )
+        ttk.Checkbutton(
+            digital, text="Hot start (native)", variable=self.weld_hot_start_enabled
+        ).grid(row=2, column=4, padx=(8, 2), pady=3, sticky=tk.W)
+        ttk.Label(digital, text="boost %").grid(row=2, column=5, padx=(2, 1))
+        ttk.Spinbox(
+            digital, from_=0.0, to=100.0, increment=5.0,
+            textvariable=self.weld_hot_start_percent, width=5,
+        ).grid(row=2, column=6, padx=(1, 3))
+        ttk.Label(digital, text="hold adj").grid(row=2, column=7, padx=(2, 1))
+        ttk.Spinbox(
+            digital, from_=-15, to=15, increment=1,
+            textvariable=self.weld_hot_start_hold_adjustment, width=5,
+        ).grid(row=2, column=8, padx=(1, 3))
+        ttk.Checkbutton(
+            digital, text="Crater (welder panel)", variable=self.weld_crater_enabled
+        ).grid(row=3, column=0, padx=(3, 2), pady=3, sticky=tk.W)
+        ttk.Label(digital, text="panel A").grid(row=3, column=1, padx=(2, 1))
+        ttk.Spinbox(
+            digital, from_=0.0, to=600.0, increment=5.0,
+            textvariable=self.weld_crater_current_a, width=5,
+        ).grid(row=3, column=2, padx=(1, 3))
+        ttk.Label(digital, text="panel V").grid(row=3, column=3, padx=(2, 1))
+        ttk.Spinbox(
+            digital, from_=3.0, to=80.0, increment=0.1,
+            textvariable=self.weld_crater_voltage_v, width=5,
+        ).grid(row=3, column=4, padx=(1, 3))
+        ttk.Label(digital, text="time ref s").grid(row=3, column=5, padx=(2, 1))
+        ttk.Spinbox(
+            digital, from_=0.5, to=1.5, increment=0.1,
+            textvariable=self.weld_crater_seconds, width=5,
+        ).grid(row=3, column=6, padx=(1, 3))
+        ttk.Label(digital, text="Wire alpha mm").grid(
+            row=4, column=0, padx=(8, 2), pady=3
         )
         ttk.Entry(
-            digital, textvariable=self.weld_preflow_seconds, width=7
-        ).grid(row=3, column=1, padx=(0, 6), pady=3)
-        ttk.Label(digital, text="ARC stabilize s").grid(
-            row=3, column=2, padx=(8, 2), pady=3
-        )
-        ttk.Entry(
-            digital, textvariable=self.weld_arc_stabilize_seconds, width=7
-        ).grid(row=3, column=3, padx=(0, 6), pady=3)
+            digital, textvariable=self.weld_wire_consumable_alpha_mm, width=7
+        ).grid(row=4, column=1, padx=(0, 4), pady=3)
         self.hicomm_rx_bit_status = ttk.Label(
             digital,
             text="RX Byte0 · b5 WCR=0 · b4 STICK=0 · "
@@ -6768,7 +6483,7 @@ class WeldActionGui:
             font=("Monospace", 10, "bold"),
         )
         self.hicomm_rx_bit_status.grid(
-            row=4, column=0, columnspan=9, padx=8, pady=3, sticky=tk.W
+            row=5, column=0, columnspan=9, padx=8, pady=3, sticky=tk.W
         )
 
         tcp_teaching = self._create_toggle_section(
@@ -6935,9 +6650,8 @@ class WeldActionGui:
             width=7,
         ).pack(side=tk.LEFT, padx=(3, 8))
         for label, variable, start, end in (
-            ("one-side amplitude mm", self.weave_amplitude_mm, 0.1, 50),
-            ("weave count", self.weave_cycles, 1, 30),
-            ("samples/cycle", self.weave_samples, 4, 30),
+            ("A mm (sine ±A / circle R)", self.weave_amplitude_mm, 0.1, 50),
+            ("pitch mm/cycle", self.weave_pitch_mm, 0.1, 100),
         ):
             ttk.Label(weaving, text=label).pack(side=tk.LEFT)
             ttk.Spinbox(
@@ -7032,7 +6746,7 @@ class WeldActionGui:
             ("Y", self.weld_fixed_tilt_y_deg),
             ("Z", self.weld_fixed_tilt_z_deg),
         ):
-            ttk.Label(geometry_controls, text=f"Tool-{axis} °").pack(
+            ttk.Label(geometry_controls, text=f"World-{axis} °").pack(
                 side=tk.LEFT
             )
             ttk.Spinbox(
@@ -7057,28 +6771,6 @@ class WeldActionGui:
             ttk.Label(yaw_summary, textvariable=variable).pack(
                 side=tk.LEFT, padx=(0, 14)
             )
-
-        offset_controls = ttk.Frame(touch_corner)
-        offset_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Label(offset_controls, text="wall plane offset mm").pack(side=tk.LEFT)
-        ttk.Entry(
-            offset_controls,
-            textvariable=self.seam_wall_offset_mm,
-            width=6,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(offset_controls, text="base plane offset mm").pack(side=tk.LEFT)
-        ttk.Entry(
-            offset_controls,
-            textvariable=self.seam_floor_offset_mm,
-            width=6,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(
-            offset_controls,
-            text=(
-                "AUTO wall = World-XY normal of taught START→GOAL; "
-                "positive offsets follow each configured +normal"
-            ),
-        ).pack(side=tk.LEFT, padx=(8, 0))
 
         safe_approach_controls = ttk.Frame(touch_corner)
         safe_approach_controls.pack(fill=tk.X, pady=(0, 3))
@@ -7140,7 +6832,7 @@ class WeldActionGui:
             textvariable=self.weld_lead_out_mm,
             width=6,
         ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(weld_lead_controls, text="weld TCP mm/s").pack(side=tk.LEFT)
+        ttk.Label(weld_lead_controls, text="avg seam travel mm/s").pack(side=tk.LEFT)
         ttk.Spinbox(
             weld_lead_controls,
             from_=0.1,
@@ -7182,22 +6874,17 @@ class WeldActionGui:
             state="readonly",
             width=7,
         ).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(weld_weave_controls, text="amplitude/radius mm").pack(
+        ttk.Label(weld_weave_controls, text="A mm").pack(
             side=tk.LEFT
         )
         ttk.Spinbox(
             weld_weave_controls, from_=0.1, to=50.0, increment=0.1,
             textvariable=self.weave_amplitude_mm, width=6,
         ).pack(side=tk.LEFT, padx=(3, 8))
-        ttk.Label(weld_weave_controls, text="cycles").pack(side=tk.LEFT)
+        ttk.Label(weld_weave_controls, text="pitch mm/cycle").pack(side=tk.LEFT)
         ttk.Spinbox(
-            weld_weave_controls, from_=1, to=100, increment=1,
-            textvariable=self.weave_cycles, width=5,
-        ).pack(side=tk.LEFT, padx=(3, 8))
-        ttk.Label(weld_weave_controls, text="samples/cycle").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_weave_controls, from_=4, to=50, increment=1,
-            textvariable=self.weave_samples, width=5,
+            weld_weave_controls, from_=0.1, to=100.0, increment=0.1,
+            textvariable=self.weave_pitch_mm, width=6,
         ).pack(side=tk.LEFT, padx=(3, 8))
         ttk.Label(weld_weave_controls, text="radial/transverse axis").pack(
             side=tk.LEFT
@@ -7212,38 +6899,29 @@ class WeldActionGui:
             state="readonly",
             width=10,
         ).pack(side=tk.LEFT, padx=(3, 8))
-
-        adaptive_controls = ttk.Frame(touch_corner)
-        adaptive_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Checkbutton(
-            adaptive_controls,
-            text="line-energy adaptive speed",
-            variable=self.weld_adaptive_line_energy,
-        ).pack(side=tk.LEFT)
-        ttk.Label(adaptive_controls, text="min %").pack(side=tk.LEFT, padx=(12, 2))
-        ttk.Spinbox(
-            adaptive_controls, from_=40.0, to=100.0, increment=5.0,
-            textvariable=self.weld_adaptive_min_percent, width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(adaptive_controls, text="max %").pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Spinbox(
-            adaptive_controls, from_=100.0, to=150.0, increment=5.0,
-            textvariable=self.weld_adaptive_max_percent, width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(adaptive_controls, text="filter s").pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Spinbox(
-            adaptive_controls, from_=0.2, to=5.0, increment=0.1,
-            textvariable=self.weld_adaptive_filter_tau_s, width=5,
-        ).pack(side=tk.LEFT)
-        ttk.Label(adaptive_controls, text="baseline mm").pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Spinbox(
-            adaptive_controls, from_=3.0, to=30.0, increment=1.0,
-            textvariable=self.weld_adaptive_baseline_mm, width=5,
-        ).pack(side=tk.LEFT)
         ttk.Label(
-            adaptive_controls,
-            text="P=V×I line-energy + low-current guard · default OFF",
-        ).pack(side=tk.LEFT, padx=(10, 0))
+            touch_corner,
+            text=(
+                "A: sine = centerline ±A (full width 2A); "
+                "circle = orbit radius A (diameter 2A, ramped at ends)."
+            ),
+            foreground="#174ea6",
+        ).pack(anchor=tk.W, pady=(0, 3))
+        dwell_controls = ttk.Frame(touch_corner)
+        dwell_controls.pack(fill=tk.X, pady=(0, 3))
+        ttk.Label(dwell_controls, text="Sine peak dwell (travel stops)").pack(side=tk.LEFT)
+        for label, variable in (
+            ("Left s", self.weave_left_dwell_s),
+            ("Right s", self.weave_right_dwell_s),
+        ):
+            ttk.Label(dwell_controls, text=label).pack(side=tk.LEFT, padx=(10, 2))
+            ttk.Spinbox(
+                dwell_controls, from_=0.0, to=10.0, increment=0.1,
+                textvariable=variable, width=5,
+            ).pack(side=tk.LEFT)
+        ttk.Label(dwell_controls, text="Circle requires both 0").pack(
+            side=tk.LEFT, padx=(12, 0)
+        )
 
         motion_controls = ttk.Frame(touch_corner)
         motion_controls.pack(fill=tk.X, pady=(0, 3))
@@ -7376,6 +7054,7 @@ class WeldActionGui:
             ("Add Sleep", self.add_sleep_sequence_step),
             ("Add Head Move J", self.add_head_motion_sequence_step),
             ("Delete", self.delete_sequence_step),
+            ("Delete All", self.delete_all_sequence_steps),
             ("↑", lambda: self.move_sequence_step(-1)),
             ("↓", lambda: self.move_sequence_step(1)),
             ("Edit selected...", self.open_sequence_step_editor),
@@ -7963,6 +7642,10 @@ class WeldActionGui:
             return
         self.content_canvas.yview_scroll(direction * 2, "units")
 
+    def _scroll_value_control(self, event):
+        self._scroll_content(event)
+        return "break"
+
     def _set_welder_test_controls(self, enabled):
         active = bool(enabled and self.hicomm_connected)
         state = tk.NORMAL if active else tk.DISABLED
@@ -7985,7 +7668,7 @@ class WeldActionGui:
     def request_hicomm_inching(self, direction, active):
         client = self.hicomm_client
         if client is None or not client.connected:
-            return
+            return False
         mask = BIT_FORWARD if direction == "forward" else BIT_REVERSE
         try:
             if active:
@@ -8003,9 +7686,12 @@ class WeldActionGui:
                 text=f"{direction} inch {state}"
             )
             self.log(f"Hi-COMM {direction} inch {state}")
+            return True
         except Exception as error:
             client.clear_outputs()
+            self.hicomm_inching_direction = None
             self.error(f"Hi-COMM inching failed: {error}")
+            return False
 
     def request_hicomm_gas(self):
         enabled = bool(self.hicomm_gas_enabled.get())
@@ -8027,6 +7713,7 @@ class WeldActionGui:
             self.error(f"Hi-COMM gas test failed: {error}")
 
     def clear_hicomm_test_outputs(self):
+        self._stop_keyboard_wire()
         client = self.hicomm_client
         if client is not None:
             client.clear_outputs()
@@ -8121,19 +7808,12 @@ class WeldActionGui:
         arc_on = bool(status["arc_ack"])
         arc_established = bool(status.get("arc_established"))
         error_code = int(status["welder_error"])
-        adaptive_speed = self._current_weld_adaptive_speed_m_s()
-        adaptive_text = (
-            f" · ADAPT {adaptive_speed * 1000.0:.2f}mm/s"
-            if adaptive_speed > 1e-6
-            else ""
-        )
         self.hicomm_weld_status.configure(
             text=(
                 f"ARC={'ESTABLISHED' if arc_established else ('ON' if arc_on else 'OFF')} · "
                 f"{status.get('sequence_stage', 'unknown')} · "
                 f"FB {status['feedback_current_a']}A/"
-                f"{status['feedback_voltage_v']:.1f}V"
-                f"{adaptive_text} · ERR={error_code}"
+                f"{status['feedback_voltage_v']:.1f}V · ERR={error_code}"
             )
         )
         self.hicomm_rx_bit_status.configure(
@@ -8190,6 +7870,9 @@ class WeldActionGui:
             "wire_feed_m_min",
             "set_current_a",
             "set_voltage_v",
+            "hot_start_current_a",
+            "hot_start_hold_adjustment",
+            "hot_start_arc_voltage_adjustment",
             "welder_error",
             "db_unavailable",
             "torch_collision",
@@ -8234,104 +7917,6 @@ class WeldActionGui:
                 touches[name] = condition
         return touches
 
-    def _latest_weld_electrical_state(self):
-        """Return the newest valid weld measurement on the common log time base."""
-        with self.weld_feedback_lock:
-            session = self.active_weld_feedback_session
-            if session is None:
-                return None
-            latest = session.get("latest_measurement")
-            return copy.deepcopy(latest) if latest is not None else None
-
-    def _set_weld_adaptive_runtime(
-        self, *, active, commanded_speed_m_s, backend
-    ):
-        with self.weld_feedback_lock:
-            self.weld_adaptive_runtime = {
-                "active": bool(active),
-                "commanded_speed_m_s": max(0.0, float(commanded_speed_m_s)),
-                "backend": str(backend),
-            }
-            session = self.active_weld_feedback_session
-            if session is not None:
-                control = session.setdefault(
-                    "adaptive_speed_control", {"enabled": True, "events": []}
-                )
-                control["backend"] = str(backend)
-                control["last_commanded_speed_m_s"] = max(
-                    0.0, float(commanded_speed_m_s)
-                )
-
-    def _current_weld_adaptive_speed_m_s(self):
-        with self.weld_feedback_lock:
-            runtime = self.weld_adaptive_runtime
-            if not runtime.get("active"):
-                return 0.0
-            return max(0.0, float(runtime.get("commanded_speed_m_s", 0.0)))
-
-    def _record_weld_adaptive_event(
-        self, event, state, along_mm, remaining_mm, backend=None
-    ):
-        with self.weld_feedback_lock:
-            session = self.active_weld_feedback_session
-            if session is None:
-                return
-            control = session.setdefault(
-                "adaptive_speed_control", {"enabled": True, "events": []}
-            )
-            control["enabled"] = True
-            if backend is not None:
-                control["backend"] = str(backend)
-            for key in (
-                "baseline_current_a",
-                "baseline_voltage_v",
-                "baseline_power_w",
-                "reference_line_energy_j_mm",
-                "nominal_speed_m_s",
-                "min_speed_m_s",
-                "max_speed_m_s",
-                "filter_tau_s",
-                "baseline_mm",
-            ):
-                value = state.get(key)
-                if value is not None:
-                    control[key] = float(value)
-            elapsed = max(
-                0.0,
-                time.monotonic() - float(session["started_monotonic"]),
-            )
-            filt_i = state.get("filtered_current_a")
-            filt_v = state.get("filtered_voltage_v")
-            power_w = (
-                float(filt_i) * float(filt_v)
-                if filt_i is not None and filt_v is not None
-                else None
-            )
-            speed_m_s = float(state.get("commanded_speed_m_s", 0.0))
-            line_energy = (
-                power_w / max(1e-9, speed_m_s * 1000.0)
-                if power_w is not None and speed_m_s > 1e-9
-                else None
-            )
-            control.setdefault("events", []).append({
-                "elapsed_s": elapsed,
-                "event": str(event),
-                "along_mm": float(along_mm),
-                "remaining_mm": float(remaining_mm),
-                "filtered_current_a": (
-                    None if filt_i is None else float(filt_i)
-                ),
-                "filtered_voltage_v": (
-                    None if filt_v is None else float(filt_v)
-                ),
-                "power_w": power_w,
-                "line_energy_j_mm": line_energy,
-                "governed_speed_mm_s": float(
-                    state.get("governed_speed_m_s", speed_m_s)
-                ) * 1000.0,
-                "commanded_speed_mm_s": speed_m_s * 1000.0,
-            })
-
     def _begin_weld_feedback_record(self, settings, execution_conditions=None):
         conditions = copy.deepcopy(
             execution_conditions or {"mode": "manual_arc"}
@@ -8344,11 +7929,6 @@ class WeldActionGui:
         with self.weld_feedback_lock:
             if self.active_weld_feedback_session is not None:
                 return
-            self.weld_adaptive_runtime = {
-                "active": False,
-                "commanded_speed_m_s": 0.0,
-                "backend": "waiting",
-            }
             self.active_weld_feedback_session = {
                 "started_unix_time": time.time(),
                 "started_monotonic": time.monotonic(),
@@ -8370,16 +7950,37 @@ class WeldActionGui:
                 "latest_measurement": None,
                 "samples": [],
                 "tcp_samples": [],
-                "adaptive_speed_control": {
-                    "enabled": bool(
-                        conditions.get("weld_adaptive_line_energy", False)
-                    ),
-                    "events": [],
-                },
                 "latest_tcp_speed_m_s": 0.0,
                 "arc_off_control": {},
+                "weld_motion_timing": {},
                 "pending_final_status": None,
             }
+
+    def _mark_weld_motion_timing(self, event):
+        """Record weld-path start/completion on the feedback session clock."""
+        if event not in ("start", "complete"):
+            raise ValueError(f"unsupported weld motion timing event: {event}")
+        unix_time = time.time()
+        monotonic = time.monotonic()
+        with self.weld_feedback_lock:
+            session = self.active_weld_feedback_session
+            if session is None:
+                return
+            elapsed = max(
+                0.0, monotonic - float(session["started_monotonic"])
+            )
+            timing = session.setdefault("weld_motion_timing", {})
+            timing[f"{event}_elapsed_s"] = elapsed
+            timing[f"{event}_unix_time"] = unix_time
+            timing[f"{event}_wall_time"] = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(unix_time)
+            ) + f".{int((unix_time % 1.0) * 1000.0):03d}"
+        self.post(
+            self.log,
+            f"WELD MOTION {event.upper()} · "
+            f"elapsed={elapsed:.3f} s · "
+            f"wall={timing[f'{event}_wall_time']}",
+        )
 
     def _record_weld_feedback_sample(self, status):
         with self.weld_feedback_lock:
@@ -8390,6 +7991,12 @@ class WeldActionGui:
             session["setting_echo"] = {
                 "current_a": int(status.get("set_current_a", 0)),
                 "voltage_v": float(status.get("set_voltage_v", 0.0)),
+                "hot_start_current_a": int(
+                    status.get("hot_start_current_a", 0)
+                ),
+                "hot_start_hold_adjustment": int(
+                    status.get("hot_start_hold_adjustment", 0)
+                ),
             }
             sample = self._weld_status_snapshot(status)
             sample["elapsed_s"] = max(
@@ -8810,6 +8417,12 @@ class WeldActionGui:
         if any(key.startswith("weld_fixed_tilt_") for key in applied):
             self.seam_orientation_mode.set(WAIT_FIXED_TILT_ORIENTATION_MODE)
             self._update_seam_yaw_status()
+        if motion.get("weld_weave_pattern") == "capping":
+            motion["weld_weave_pattern"] = "sine"
+            motion["weld_weave_amplitude_mm"] = float(motion.get("capping_width_mm", 6.0)) * 0.5
+            motion["weld_weave_pitch_mm"] = motion.get("capping_pitch_mm", 5.0)
+            motion["weld_weave_left_dwell_s"] = motion.get("capping_left_dwell_s", 0.0)
+            motion["weld_weave_right_dwell_s"] = motion.get("capping_right_dwell_s", 0.0)
         for key, variable, allowed in (
             ("weld_approach_mode", self.weld_approach_mode,
              {"taught_wait", "corner_geometry"}),
@@ -8830,8 +8443,9 @@ class WeldActionGui:
             applied.append(key)
         for key, variable, minimum, maximum in (
             ("weld_weave_amplitude_mm", self.weave_amplitude_mm, 0.1, 50.0),
-            ("weld_weave_cycles", self.weave_cycles, 1, 100),
-            ("weld_weave_samples_per_cycle", self.weave_samples, 4, 50),
+            ("weld_weave_pitch_mm", self.weave_pitch_mm, 0.1, 100),
+            ("weld_weave_left_dwell_s", self.weave_left_dwell_s, 0, 10),
+            ("weld_weave_right_dwell_s", self.weave_right_dwell_s, 0, 10),
         ):
             if key not in motion:
                 continue
@@ -8914,6 +8528,27 @@ class WeldActionGui:
                 )
 
         ended = time.time()
+        motion_timing = copy.deepcopy(session.get("weld_motion_timing", {}))
+        production_metrics = calculate_weld_production_metrics(
+            session.get("samples", ()),
+            weld_motion_start_elapsed_s=motion_timing.get("start_elapsed_s"),
+            weld_motion_complete_elapsed_s=motion_timing.get(
+                "complete_elapsed_s"
+            ),
+            wire_consumable_alpha_mm=session.get("commanded", {}).get(
+                "wire_consumable_alpha_mm", 0.0
+            ),
+        )
+        production_metrics.update({
+            "weld_motion_start_unix_time": motion_timing.get("start_unix_time"),
+            "weld_motion_start_wall_time": motion_timing.get("start_wall_time"),
+            "weld_motion_complete_unix_time": motion_timing.get(
+                "complete_unix_time"
+            ),
+            "weld_motion_complete_wall_time": motion_timing.get(
+                "complete_wall_time"
+            ),
+        })
         document = {
             "format_version": 1,
             "result": str(result),
@@ -8952,9 +8587,7 @@ class WeldActionGui:
             "samples": session["samples"],
             "tcp_trajectory": session.get("tcp_samples", []),
             "arc_off_control": arc_off_control,
-            "adaptive_speed_control": copy.deepcopy(
-                session.get("adaptive_speed_control", {})
-            ),
+            "production_metrics": production_metrics,
             "teaching_snapshot": session.get("teaching_snapshot", {}),
             "touch_snapshot": session.get("touch_snapshot", {}),
         }
@@ -9223,9 +8856,18 @@ class WeldActionGui:
                 "gas": self.weld_gas.get(),
                 "synergic": self.weld_synergic.get(),
                 "correction": self.weld_correction.get(),
-                "pre_gas_s": self.weld_pre_gas_s.get(),
-                "post_gas_s": self.weld_post_gas_s.get(),
-                "preflow_seconds": self.weld_preflow_seconds.get(),
+                "hot_start_enabled": self.weld_hot_start_enabled.get(),
+                "hot_start_percent": self.weld_hot_start_percent.get(),
+                "hot_start_hold_adjustment": (
+                    self.weld_hot_start_hold_adjustment.get()
+                ),
+                "crater_enabled": self.weld_crater_enabled.get(),
+                "crater_current_a": self.weld_crater_current_a.get(),
+                "crater_voltage_v": self.weld_crater_voltage_v.get(),
+                "crater_seconds": self.weld_crater_seconds.get(),
+                "wire_consumable_alpha_mm": (
+                    self.weld_wire_consumable_alpha_mm.get()
+                ),
             })
         except (ValueError, tk.TclError) as error:
             raise ValueError(
@@ -9252,7 +8894,8 @@ class WeldActionGui:
         return True, "FAKE ARC SET · no command sent to welder"
 
     def _execute_hicomm_weld(
-        self, kind, settings, execution_conditions=None, *, finalize_feedback=True
+        self, kind, settings, execution_conditions=None, *, finalize_feedback=True,
+        apply_crater=True,
     ):
         if self.fake_arc_enabled.get():
             return self._execute_fake_arc(kind)
@@ -9265,6 +8908,7 @@ class WeldActionGui:
         if kind not in DIGITAL_WELD_COMMANDS:
             return False, f"unsupported D-WELD command: {kind}"
         try:
+            settings = validate_digital_weld_settings(settings or {})
             if kind == "set":
                 client.arc_set(**digital_weld_recipe(settings))
                 echo = client.setting_echo()
@@ -9273,31 +8917,15 @@ class WeldActionGui:
                 # The generated scenario owns a frozen recipe snapshot. Apply
                 # that exact snapshot immediately before ARC ON so execution
                 # never depends on whichever manual SET happened previously.
+                current_profile = weld_current_profile(settings)
+                # Hot Start has its own official TX field (Byte14-15). Keep
+                # Byte3-4 at the nominal main-weld current; changing the main
+                # setpoint for 0.5 s would only imitate, and can conflict with,
+                # the power source's native start sequence.
                 client.arc_set(**digital_weld_recipe(settings))
                 self._begin_weld_feedback_record(
                     settings, execution_conditions
                 )
-
-                # Optional explicit shielding-gas preflow before the welder's
-                # own ARC sequence. `pre_gas_s` is still transmitted in the
-                # recipe above; this `preflow_seconds` is an additional
-                # sequence-level GAS CHECK dwell when requested. ARC ON clears
-                # the manual GAS bit and then the power source takes over its
-                # normal pre-gas/main-weld sequence.
-                preflow_seconds = max(
-                    0.0, float(settings.get("preflow_seconds", 0.0))
-                )
-                if preflow_seconds > 0.0:
-                    client.set_command_bit(BIT_GAS, True)
-                    self.post(
-                        self.log,
-                        f"Pre-weld GAS flow · {preflow_seconds:.2f} s before ARC ON",
-                    )
-                    if not self._interruptible_wait(preflow_seconds):
-                        client.set_command_bit(BIT_GAS, False)
-                        self.weld_arc_on_success = False
-                        self.weld_arc_on_done_event.set()
-                        return False, "pre-weld gas flow interrupted"
 
                 # The pre-GOAL ARC-OFF watcher is allowed to run in parallel
                 # with motion, but it must remain DISARMED until this exact
@@ -9320,22 +8948,40 @@ class WeldActionGui:
                             time.monotonic() - float(session["started_monotonic"]),
                         )
                 self.weld_arc_established_event.set()
+                self.post(
+                    self.log,
+                    "HOT START NATIVE · "
+                    f"TX Byte14-15={settings['hot_start_current_a']} A · "
+                    f"TX Byte16 hold adjustment="
+                    f"{settings['hot_start_hold_adjustment']:+d}",
+                )
                 self.weld_arc_on_done_event.set()
                 return True, (
                     "ARC established (main_weld + WCR + feed) · "
+                    f"native hot={settings['hot_start_current_a']} A → "
+                    f"nominal={current_profile['nominal']} A · "
                     f"output={status['output_state_name']} · "
                     f"feedback={status['feedback_current_a']} A/"
                     f"{status['feedback_voltage_v']:.1f} V · "
                     f"WFS={status['wire_feed_m_min']:.1f} m/min"
+                )
+            if apply_crater and settings.get("crater_enabled", True):
+                # The available TX protocol has no crater-current/time field.
+                # Clearing ARC starts the welder-panel crater sequence; RX
+                # output_state=2 records when that native sequence is active.
+                self.post(
+                    self.log,
+                    "CRATER NATIVE · ARC OFF will use welder-panel settings · "
+                    f"panel reference={settings['crater_current_a']:.1f}A/"
+                    f"{settings['crater_voltage_v']:.1f}V/"
+                    f"{settings['crater_seconds']:.2f}s",
                 )
             self._mark_arc_off_control()
             status = client.arc_off(
                 timeout=max(
                     5.0,
                     (
-                        settings.get("post_gas_s", 0.0)
-                        if isinstance(settings, dict)
-                        else 0.0
+                        0.0
                     ) + 2.0,
                 ),
                 wait_idle=True,
@@ -9410,12 +9056,11 @@ class WeldActionGui:
         try:
             delay_s = max(0.0, float(step.get("arc_off_delay_s", 0.0)))
             configured_speed = max(0.0, float(step.get("tcp_speed_m_s", 0.0)))
-            adaptive_enabled = bool(step.get("adaptive_line_energy", False))
-            path_to_seam_speed_factor = float(
+            path_to_seam_speed_factor = validated_seam_speed_factor(
                 step.get("path_to_seam_speed_factor", 1.0)
             )
-            if not 0.0 < path_to_seam_speed_factor <= 1.0:
-                raise ValueError("invalid path/seam speed factor")
+            settings = validate_digital_weld_settings(step.get("settings") or {})
+            crater_enabled = bool(settings.get("crater_enabled", True))
         except (TypeError, ValueError):
             return False, "ARC OFF watcher timing is invalid"
 
@@ -9506,16 +9151,7 @@ class WeldActionGui:
             if 0.0 <= along <= seam_length:
                 seen_inside_seam = True
 
-            adaptive_speed = (
-                self._current_weld_adaptive_speed_m_s()
-                if adaptive_enabled
-                else 0.0
-            )
-            if adaptive_speed > 1e-6:
-                trigger_speed = adaptive_speed * path_to_seam_speed_factor
-                speed_source = "adaptive_line_energy_along_seam_speed"
-                speed_ready = True
-            elif configured_speed > 1e-6:
+            if configured_speed > 1e-6:
                 trigger_speed = configured_speed * path_to_seam_speed_factor
                 speed_source = "tcp_setpoint_projected_along_seam"
                 speed_ready = True
@@ -9527,15 +9163,17 @@ class WeldActionGui:
                 speed_ready = valid_speed_samples >= 3 and trigger_speed > 1e-4
 
             if speed_ready:
-                pre_off_distance = trigger_speed * delay_s
+                arc_off_lead_distance = trigger_speed * delay_s
                 # Safety bound: compensation can never exceed 20 mm nor 25% of
                 # the usable seam.  A bad speed estimate therefore cannot turn
                 # ARC OFF near START.
                 max_comp = min(0.020, 0.25 * seam_length)
-                pre_off_distance = max(0.0, min(pre_off_distance, max_comp))
-                trigger_along = seam_length - pre_off_distance
+                arc_off_lead_distance = max(
+                    0.0, min(arc_off_lead_distance, max_comp)
+                )
+                trigger_along = seam_length - arc_off_lead_distance
             else:
-                pre_off_distance = 0.0
+                arc_off_lead_distance = 0.0
                 trigger_along = seam_length
 
             if seen_inside_seam and speed_ready and along >= trigger_along:
@@ -9543,7 +9181,10 @@ class WeldActionGui:
                     delay_s=delay_s,
                     speed_source=speed_source,
                     trigger_speed_m_s=trigger_speed,
-                    calculated_pre_off_distance_m=pre_off_distance,
+                    calculated_pre_off_distance_m=arc_off_lead_distance,
+                    crater_source=(
+                        "welder_panel_native" if crater_enabled else "disabled"
+                    ),
                     seam_length_m=seam_length,
                     trigger_along_m=trigger_along,
                     actual_along_m=along,
@@ -9552,13 +9193,18 @@ class WeldActionGui:
                     tcp_y_m=float(pose.position.y),
                     tcp_z_m=float(pose.position.z),
                 )
+                crater_message = (
+                    "native welder-panel crater after ARC OFF"
+                    if crater_enabled else "crater disabled/reference only"
+                )
                 success, message = self._execute_hicomm_weld(
-                    "off", step.get("settings"), finalize_feedback=False
+                    "off", step.get("settings"), finalize_feedback=False,
+                    apply_crater=False,
                 )
                 return success, (
-                    f"pre-GOAL ARC OFF · lead={pre_off_distance * 1000.0:.2f} mm · "
+                    f"pre-GOAL ARC OFF · lead={arc_off_lead_distance * 1000.0:.2f} mm · "
                     f"v={trigger_speed * 1000.0:.2f} mm/s ({speed_source}) · "
-                    f"delay={delay_s * 1000.0:.0f} ms · {message}"
+                    f"delay={delay_s * 1000.0:.0f} ms · {crater_message} · {message}"
                 )
 
             if now - last_log >= 0.5:
@@ -9566,7 +9212,8 @@ class WeldActionGui:
                 self.post(
                     self.log,
                     f"ARC OFF watcher · actual remaining={remaining * 1000.0:.2f} mm · "
-                    f"lead={pre_off_distance * 1000.0:.2f} mm · "
+                    f"ARC-OFF lead={arc_off_lead_distance * 1000.0:.2f} mm · "
+                    f"crater={'native' if crater_enabled else 'off'} · "
                     f"v={trigger_speed * 1000.0:.2f} mm/s · "
                     f"speed_ready={int(speed_ready)}",
                 )
@@ -9686,7 +9333,7 @@ class WeldActionGui:
             self.error("Fastech DI4 is already ON; release it before auto correction")
             return
         orientation_note = (
-            "START/GOAL orientation = each WAIT orientation + fixed Tool XYZ "
+            "START/GOAL orientation = each WAIT orientation + fixed World XYZ "
             f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)\n"
@@ -9722,7 +9369,7 @@ class WeldActionGui:
                     0 if wait_name == "weld_start_wait" else 1
                 ]
                 orientation_source = (
-                    f"{TEACHING_POSES[wait_name]} + fixed Tool XYZ "
+                    f"{TEACHING_POSES[wait_name]} + fixed World XYZ "
                     f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)"
@@ -9864,8 +9511,8 @@ class WeldActionGui:
                     teaching_reference,
                     wall_normal,
                     floor_normal,
-                    float(self.seam_wall_offset_mm.get()) * 0.001,
-                    float(self.seam_floor_offset_mm.get()) * 0.001,
+                    0.0,
+                    0.0,
                 )
                 seam_point = (
                     geometry.start if endpoint == "start" else geometry.goal
@@ -9911,10 +9558,6 @@ class WeldActionGui:
                 str(plot_python),
                 str(plot_script),
                 str(touch_yaml),
-                "--wall-offset-mm",
-                str(float(self.seam_wall_offset_mm.get())),
-                "--floor-offset-mm",
-                str(float(self.seam_floor_offset_mm.get())),
             ]
             if endpoint in ("start", "goal"):
                 command.extend(("--endpoint", endpoint))
@@ -10405,8 +10048,9 @@ class WeldActionGui:
         self.error(f"{kind or 'touch'} probe failed: {message}")
 
     def _wait_fixed_tilt_mode_enabled(self):
-        return self.seam_orientation_mode.get().strip() == (
-            WAIT_FIXED_TILT_ORIENTATION_MODE
+        return self.seam_orientation_mode.get().strip() in (
+            WAIT_FIXED_TILT_ORIENTATION_MODE,
+            LEGACY_WAIT_FIXED_TILT_ORIENTATION_MODE,
         )
 
     def _wait_fixed_tilt_seam_reference(self, require_complete=False):
@@ -10456,7 +10100,7 @@ class WeldActionGui:
             reference = self._wait_fixed_tilt_seam_reference(require_complete)
             if reference is not None:
                 self.log(
-                    "Seam reference ready from START/GOAL WAIT + fixed Tool XYZ "
+                    "Seam reference ready from START/GOAL WAIT + fixed World XYZ "
                     f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)"
@@ -10537,8 +10181,8 @@ class WeldActionGui:
             )
             return None
         try:
-            wall_offset = float(self.seam_wall_offset_mm.get()) * 0.001
-            floor_offset = float(self.seam_floor_offset_mm.get()) * 0.001
+            wall_offset = 0.0
+            floor_offset = 0.0
             (
                 _reference,
                 wall_normal,
@@ -10859,9 +10503,6 @@ class WeldActionGui:
             # retransmit I/V, but retaining the snapshot also preserves post-gas
             # timing and makes the generated scenario self-describing.
             settings = copy.deepcopy(self._digital_weld_settings())
-            arc_stabilize_s = float(self.weld_arc_stabilize_seconds.get())
-            if not 0.0 <= arc_stabilize_s <= 5.0:
-                raise ValueError("ARC stabilize time must be in 0..5 seconds")
             start_wait_data = self.taught_robot_poses["weld_start_wait"]
             if start_wait_data is None:
                 raise ValueError(
@@ -10900,16 +10541,12 @@ class WeldActionGui:
             pre_start_lead_mm = float(self.weld_pre_start_lead_mm.get())
             arc_off_delay_ms = float(self.weld_arc_off_delay_ms.get())
             weld_tcp_speed_mm_s = float(self.weld_tcp_speed_mm_s.get())
-            adaptive_enabled = bool(self.weld_adaptive_line_energy.get())
-            adaptive_min_percent = float(self.weld_adaptive_min_percent.get())
-            adaptive_max_percent = float(self.weld_adaptive_max_percent.get())
-            adaptive_filter_tau_s = float(self.weld_adaptive_filter_tau_s.get())
-            adaptive_baseline_mm = float(self.weld_adaptive_baseline_mm.get())
             weave_enabled = bool(self.weld_weave_enabled.get())
             weave_pattern = self.weave_pattern.get().strip().lower()
             weave_amplitude_mm = float(self.weave_amplitude_mm.get())
-            weave_cycles = int(self.weave_cycles.get())
-            weave_samples = int(self.weave_samples.get())
+            weave_pitch_mm = float(self.weave_pitch_mm.get())
+            weave_left_dwell_s = float(self.weave_left_dwell_s.get())
+            weave_right_dwell_s = float(self.weave_right_dwell_s.get())
             weave_axis = self.weave_axis.get().strip().lower()
             if (
                 not math.isfinite(weld_tcp_speed_mm_s)
@@ -10926,30 +10563,17 @@ class WeldActionGui:
                 raise ValueError("pre-start lead distance must be in 0..100 mm")
             if not 0.0 <= arc_off_delay_ms <= 2000.0:
                 raise ValueError("ARC OFF lead time must be in 0..2000 ms")
-            if not 40.0 <= adaptive_min_percent <= 100.0:
-                raise ValueError("adaptive min speed must be in 40..100%")
-            if not 100.0 <= adaptive_max_percent <= 150.0:
-                raise ValueError("adaptive max speed must be in 100..150%")
-            if adaptive_max_percent < adaptive_min_percent:
-                raise ValueError("adaptive max speed must be >= adaptive min speed")
-            if not 0.2 <= adaptive_filter_tau_s <= 5.0:
-                raise ValueError("adaptive electrical filter must be in 0.2..5.0 s")
-            if not 3.0 <= adaptive_baseline_mm <= 30.0:
-                raise ValueError("adaptive baseline length must be in 3..30 mm")
             if weave_pattern not in ("sine", "circle"):
                 raise ValueError("weld weave pattern must be sine or circle")
             if not 0.1 <= weave_amplitude_mm <= 50.0:
                 raise ValueError("weld weave amplitude/radius must be 0.1..50 mm")
-            if not 1 <= weave_cycles <= 100:
-                raise ValueError("weld weave cycles must be in 1..100")
-            minimum_samples = 8 if weave_pattern == "circle" else 4
-            if not minimum_samples <= weave_samples <= 50:
-                raise ValueError(
-                    f"{weave_pattern} weld weave samples/cycle must be in "
-                    f"{minimum_samples}..50"
-                )
+            if not math.isfinite(weave_pitch_mm) or not 0.1 <= weave_pitch_mm <= 100.0:
+                raise ValueError("weld weave pitch must be in 0.1..100 mm/cycle")
+            if not all(math.isfinite(v) and 0.0 <= v <= 10.0 for v in
+                       (weave_left_dwell_s, weave_right_dwell_s)):
+                raise ValueError("weave left/right dwell must be in 0..10 s")
             # Welding orientation is already finalized by seam correction.
-            # In fixed-tilt mode it comes from WAIT + one Tool-XYZ RPY offset; in the
+            # In fixed-tilt mode it comes from WAIT + one World-XYZ RPY offset; in the
             # legacy modes it comes from the endpoint teaching.  Never apply a
             # second offset here, because probing and welding must use exactly
             # the same tool attitude.
@@ -11024,6 +10648,10 @@ class WeldActionGui:
                     f"align(lead,d_real)={lead_alignment:.9f}"
                 )
             seam_centerline = linear_pose_waypoints(start, goal, count)
+            weave_holds = []
+            weave_cycles = 0
+            weave_actual_pitch_mm = 0.0
+            geometry_weave_direction = None
             if weave_enabled:
                 geometry_weave_direction = (
                     self.corrected_seam_geometry.e_w
@@ -11033,18 +10661,11 @@ class WeldActionGui:
                     )
                     else None
                 )
-                weave_generator = (
-                    circular_weaving_from_path
-                    if weave_pattern == "circle"
-                    else weaving_from_path
-                )
-                usable_weld_points = weave_generator(
-                    seam_centerline,
-                    weave_amplitude_mm * 0.001,
-                    weave_cycles,
-                    weave_samples,
-                    weave_axis,
-                    geometry_weave_direction,
+                (usable_weld_points, weave_holds, weave_cycles,
+                 weave_actual_pitch_mm) = weld_weave_geometry(
+                    start, goal, weave_pattern, weave_amplitude_mm,
+                    weave_pitch_mm, weave_axis, weave_left_dwell_s,
+                    weave_right_dwell_s, geometry_weave_direction,
                 )
                 if geometry_weave_direction is not None:
                     self.log(
@@ -11069,8 +10690,9 @@ class WeldActionGui:
                 )
             )
             path_to_seam_speed_factor = (
-                seam_distance_m / usable_path_distance_m
-                if usable_path_distance_m > 1e-9 else 1.0
+                validated_seam_speed_factor(
+                    seam_distance_m / usable_path_distance_m
+                ) if weave_enabled else 1.0
             )
             preview = []
             if has_lead_in:
@@ -11282,52 +10904,57 @@ class WeldActionGui:
                 "usable_seam_start": copy.deepcopy(start),
                 "usable_seam_goal": copy.deepcopy(goal),
                 "lead_end": copy.deepcopy(lead_end),
-                # IMPORTANT: weld travel is commanded in physical TCP units.
-                # The action server prioritizes tcp_speed_m_s over velocity_scale;
-                # keeping the linear profile ON gives a constant-speed cruise
-                # with only the lead-in/out used for acceleration/deceleration.
+                # Convert the operator's seam-axis travel target to TCP path
+                # speed for weaving below. The action server still enforces
+                # MoveIt's trajectory limits and lead-in/out ramps.
                 "tcp_speed_m_s": weld_tcp_speed_mm_s * 0.001,
                 "linear_motion_profile": True,
                 "weld_tcp_speed_mm_s": weld_tcp_speed_mm_s,
                 "weld_weave_enabled": weave_enabled,
                 "weld_weave_pattern": weave_pattern,
                 "weld_weave_amplitude_mm": weave_amplitude_mm,
+                "weld_weave_pitch_mm": weave_pitch_mm,
                 "weld_weave_cycles": weave_cycles,
-                "weld_weave_samples_per_cycle": weave_samples,
+                "weld_weave_actual_pitch_mm": weave_actual_pitch_mm,
+                "weld_weave_samples_per_cycle": WELD_WEAVE_SAMPLES_PER_CYCLE,
+                "weld_weave_left_dwell_s": weave_left_dwell_s,
+                "weld_weave_right_dwell_s": weave_right_dwell_s,
                 "weld_weave_axis": weave_axis,
                 "usable_weld_points": copy.deepcopy(usable_weld_points),
-                "adaptive_line_energy": adaptive_enabled,
-                "adaptive_min_factor": adaptive_min_percent / 100.0,
-                "adaptive_max_factor": adaptive_max_percent / 100.0,
-                "adaptive_filter_tau_s": adaptive_filter_tau_s,
-                "adaptive_baseline_mm": adaptive_baseline_mm,
-                "adaptive_end_freeze_mm": ADAPTIVE_END_FREEZE_MM,
-                "adaptive_current_deadband_a": ADAPTIVE_CURRENT_DEADBAND_A,
-                "adaptive_power_deadband_ratio": ADAPTIVE_POWER_DEADBAND_RATIO,
-                "adaptive_slew_m_s2": ADAPTIVE_SLEW_M_S2,
-                "adaptive_update_period_s": ADAPTIVE_UPDATE_PERIOD_S,
-                "arc_stabilize_s": arc_stabilize_s,
+                "weld_weave_transverse_vector": geometry_weave_direction if weave_enabled else None,
                 "role": "weld_motion",
                 "seam_orientation_mode": self.seam_orientation_mode.get(),
-                "fixed_tool_x_tilt_deg": float(
+                "fixed_world_x_tilt_deg": float(
                     self.weld_fixed_tilt_x_deg.get()
                 ),
-                "fixed_tool_y_tilt_deg": float(
+                "fixed_world_y_tilt_deg": float(
                     self.weld_fixed_tilt_y_deg.get()
                 ),
-                "fixed_tool_z_tilt_deg": float(
+                "fixed_world_z_tilt_deg": float(
                     self.weld_fixed_tilt_z_deg.get()
                 ),
                 "safe_approach_mm": safe_approach_mm,
                 "pre_start_lead_mm": pre_start_lead_mm,
             })
 
+            if weave_enabled:
+                weld_motion["path_to_seam_speed_factor"] = path_to_seam_speed_factor
+                weld_motion["tcp_speed_m_s"] = weave_path_speed_m_s(
+                    seam_distance_m, usable_path_distance_m,
+                    weld_tcp_speed_mm_s, weave_holds,
+                )
+            if any(weave_holds):
+                weld_motion["waypoint_hold_s"] = (
+                    ([0.0] if has_lead_in else []) + weave_holds
+                    + ([0.0] if has_lead_out else [])
+                )
+                weld_motion["linear_motion_profile"] = False
+
             steps.extend([
                 managed({
                     "type": "digital_weld", "command": "on",
                     "settings": copy.deepcopy(settings),
                     "parallel_slot": weld_slot, "duration": 0.0,
-                    "arc_stabilize_s": arc_stabilize_s,
                 }, "arc_on"),
                 managed(weld_motion, "weld_motion"),
                 managed({
@@ -11340,7 +10967,6 @@ class WeldActionGui:
                     "arc_off_delay_s": arc_off_delay_ms * 0.001,
                     "tcp_speed_m_s": float(weld_motion.get("tcp_speed_m_s", 0.0)),
                     "velocity_scale": float(weld_motion.get("velocity_scale", 0.0)),
-                    "adaptive_line_energy": adaptive_enabled,
                     "path_to_seam_speed_factor": path_to_seam_speed_factor,
                 }, "arc_off"),
                 named_step(
@@ -11378,25 +11004,29 @@ class WeldActionGui:
             f"lead-in={lead_in_mm:.1f} mm / lead-out={lead_out_mm:.1f} mm · "
             f"safe approach={safe_approach_mm:.1f} mm / "
             f"pre-start lead={pre_start_lead_mm:.1f} mm · "
-            f"weld TCP={weld_tcp_speed_mm_s:.2f} mm/s nominal · "
+            f"seam travel target={weld_tcp_speed_mm_s:.2f} mm/s · "
             + (
-                f"weave={weave_pattern} {weave_amplitude_mm:.1f} mm · "
-                f"{weave_cycles} cycles · {weave_samples} samples/cycle · "
+                f"weave={weave_pattern} ±A={weave_amplitude_mm:.1f} mm · "
+                f"pitch≤{weave_pitch_mm:.1f} mm/cycle "
+                f"(actual {weave_actual_pitch_mm:.2f}, {weave_cycles} cycles) · "
+                f"dwell L/R={weave_left_dwell_s:.2f}/{weave_right_dwell_s:.2f} s · "
                 f"axis={weave_axis} · "
                 if weave_enabled else "weave=OFF · "
             )
-            + (
-                f"adaptive line-energy=ON ({adaptive_min_percent:.0f}..{adaptive_max_percent:.0f}%, "
-                f"filter={adaptive_filter_tau_s:.1f}s, baseline={adaptive_baseline_mm:.0f}mm) · "
-                if adaptive_enabled
-                else "adaptive line-energy=OFF · "
-            )
             + f"ARC-OFF lead={arc_off_delay_ms:.0f} ms · "
-            f"recipe pre-gas={settings['pre_gas_s']:.2f} s · "
-            f"pre-weld gas={settings['preflow_seconds']:.2f} s · "
-            f"ARC stabilize={arc_stabilize_s:.2f} s · "
-            f"orientation={self.seam_orientation_mode.get()} · "
-            "fixed Tool XYZ tilt="
+            + (
+                f"hot start=+{settings['hot_start_percent']:.1f}%/"
+                f"hold adj {settings['hot_start_hold_adjustment']:+d} · "
+                if settings["hot_start_enabled"] else "hot start=OFF · "
+            )
+            + (
+                f"crater panel ref={settings['crater_current_a']:.1f}A/"
+                f"{settings['crater_voltage_v']:.1f}V/"
+                f"{settings['crater_seconds']:.2f}s · "
+                if settings["crater_enabled"] else "crater=OFF · "
+            )
+            + f"orientation={self.seam_orientation_mode.get()} · "
+            "fixed World XYZ tilt="
             f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
             f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°) · "
@@ -11518,8 +11148,8 @@ class WeldActionGui:
             return
         try:
             count = int(self.corner_touch_count.get())
-            wall_offset = float(self.seam_wall_offset_mm.get()) * 0.001
-            floor_offset = float(self.seam_floor_offset_mm.get()) * 0.001
+            wall_offset = 0.0
+            floor_offset = 0.0
         except (ValueError, tk.TclError):
             self.error("Seam point count or probe offsets are invalid")
             return
@@ -12007,17 +11637,20 @@ class WeldActionGui:
                     if tcp_speed > 0.0
                     else f"speed {step['velocity_scale']:.1%}"
                 )
-                adaptive_detail = (
-                    " · ADAPTIVE E-line"
-                    if step.get("adaptive_line_energy", False)
-                    else ""
-                )
                 weave_detail = (
                     f" · {step.get('weld_weave_pattern', 'sine')} weave "
                     f"{float(step.get('weld_weave_amplitude_mm', 0.0)):.1f} mm"
                     if step.get("weld_weave_enabled", False)
                     else ""
                 )
+                if step.get("weld_weave_enabled"):
+                    speed_detail = f"seam travel target {step['weld_tcp_speed_mm_s']:.2f} mm/s"
+                if step.get("weld_weave_enabled"):
+                    weave_detail += (
+                        f" · pitch≤{step.get('weld_weave_pitch_mm', 5.0):.1f} mm/cycle"
+                        f" · dwell L/R {step.get('weld_weave_left_dwell_s', 0.0):.2f}/"
+                        f"{step.get('weld_weave_right_dwell_s', 0.0):.2f} s"
+                    )
                 lead_detail = (
                     f" · lead {float(step.get('lead_in_mm', 0.0)):.1f}/"
                     f"{float(step.get('lead_out_mm', 0.0)):.1f} mm"
@@ -12026,7 +11659,7 @@ class WeldActionGui:
                 )
                 detail = (
                     f"{step['planning_group']} · {len(step['points'])} poses · "
-                    f"{speed_detail}{lead_detail}{weave_detail}{adaptive_detail} · "
+                    f"{speed_detail}{lead_detail}{weave_detail} · "
                     f"{step['path_kind']}{guard_detail} · {timing}"
                 )
                 kind = "MOTION"
@@ -12116,7 +11749,7 @@ class WeldActionGui:
                 float(step.get("velocity_scale", 0.2)) * 100.0
             )
             self.sequence_edit_tcp_speed_mm_s.set(
-                float(step.get("tcp_speed_m_s", 0.0)) * 1000.0
+                float(step.get("weld_tcp_speed_mm_s", float(step.get("tcp_speed_m_s", 0.0))*1000.0))
             )
             self.sequence_edit_touch_guard.set(
                 bool(step.get("touch_guard", False))
@@ -12149,9 +11782,18 @@ class WeldActionGui:
             self.weld_gas.set(settings["gas"])
             self.weld_synergic.set(settings["synergic"])
             self.weld_correction.set(settings["correction"])
-            self.weld_pre_gas_s.set(settings["pre_gas_s"])
-            self.weld_post_gas_s.set(settings["post_gas_s"])
-            self.weld_preflow_seconds.set(settings["preflow_seconds"])
+            self.weld_hot_start_enabled.set(settings["hot_start_enabled"])
+            self.weld_hot_start_percent.set(settings["hot_start_percent"])
+            self.weld_hot_start_hold_adjustment.set(
+                settings["hot_start_hold_adjustment"]
+            )
+            self.weld_crater_enabled.set(settings["crater_enabled"])
+            self.weld_crater_current_a.set(settings["crater_current_a"])
+            self.weld_crater_voltage_v.set(settings["crater_voltage_v"])
+            self.weld_crater_seconds.set(settings["crater_seconds"])
+            self.weld_wire_consumable_alpha_mm.set(
+                settings["wire_consumable_alpha_mm"]
+            )
         self.sequence_status.configure(
             text=(
                 f"Editing sequence #{index + 1} · panel values apply "
@@ -12297,8 +11939,8 @@ class WeldActionGui:
             )
             entry(
                 "tcp_speed_mm_s",
-                "TCP average speed (mm/s, 0=scale)",
-                float(step.get("tcp_speed_m_s", 0.0)) * 1000.0,
+                "Average seam travel (mm/s, 0=scale)",
+                float(step.get("weld_tcp_speed_mm_s", float(step.get("tcp_speed_m_s", 0.0))*1000.0)),
             )
             if step["type"] == "motion":
                 entry(
@@ -12322,6 +11964,14 @@ class WeldActionGui:
                         "Weld lead-out (mm)",
                         float(step.get("lead_out_mm", 0.0)),
                     )
+                    if step.get("weld_weave_enabled"):
+                        for key, label, default in (
+                            ("weld_weave_amplitude_mm", "One-side amplitude ±A (mm)", 3.0),
+                            ("weld_weave_pitch_mm", "Pitch (mm/cycle)", 5.0),
+                            ("weld_weave_left_dwell_s", "Sine left dwell (s)", 0.0),
+                            ("weld_weave_right_dwell_s", "Sine right dwell (s)", 0.0),
+                        ):
+                            entry(key, label, step.get(key, default))
             check("touch_guard", "Stop this step on Fastech DI0", step.get("touch_guard"))
             check(
                 "continue_after_touch",
@@ -12356,12 +12006,21 @@ class WeldActionGui:
             choice("gas", "Gas type", settings["gas"], GAS_CODES)
             check("synergic", "Synergic", settings["synergic"])
             entry("correction", "Correction", settings["correction"])
-            entry("pre_gas_s", "Recipe pre-gas (s)", settings["pre_gas_s"])
-            entry("post_gas_s", "Recipe post-gas (s)", settings["post_gas_s"])
+            check("hot_start_enabled", "Hot start enabled", settings["hot_start_enabled"])
+            entry("hot_start_percent", "Hot start boost (%)", settings["hot_start_percent"])
             entry(
-                "preflow_seconds",
-                "ARC ON pre-flow (s)",
-                settings["preflow_seconds"],
+                "hot_start_hold_adjustment",
+                "Hot start hold adjustment (-15..+15)",
+                settings["hot_start_hold_adjustment"],
+            )
+            check("crater_enabled", "Crater enabled", settings["crater_enabled"])
+            entry("crater_current_a", "Crater panel current (A, log/ref)", settings["crater_current_a"])
+            entry("crater_voltage_v", "Crater panel voltage (V, log/ref)", settings["crater_voltage_v"])
+            entry("crater_seconds", "Crater time (s)", settings["crater_seconds"])
+            entry(
+                "wire_consumable_alpha_mm",
+                "Wire consumable alpha (mm)",
+                settings["wire_consumable_alpha_mm"],
             )
             if step.get("trigger_before_goal", False):
                 entry(
@@ -12430,6 +12089,9 @@ class WeldActionGui:
                         updated["linear_motion_profile"] = variables[
                             "linear_motion_profile"
                         ].get()
+                        for key in ("weld_weave_amplitude_mm", "weld_weave_pitch_mm", "weld_weave_left_dwell_s", "weld_weave_right_dwell_s"):
+                            if key in variables:
+                                updated[key] = float(variables[key].get())
                         if (
                             "usable_seam_start" in updated
                             and "usable_seam_goal" in updated
@@ -12494,10 +12156,17 @@ class WeldActionGui:
                             "gas": variables["gas"].get(),
                             "synergic": variables["synergic"].get(),
                             "correction": variables["correction"].get(),
-                            "pre_gas_s": variables["pre_gas_s"].get(),
-                            "post_gas_s": variables["post_gas_s"].get(),
-                            "preflow_seconds": variables[
-                                "preflow_seconds"
+                            "hot_start_enabled": variables["hot_start_enabled"].get(),
+                            "hot_start_percent": variables["hot_start_percent"].get(),
+                            "hot_start_hold_adjustment": variables[
+                                "hot_start_hold_adjustment"
+                            ].get(),
+                            "crater_enabled": variables["crater_enabled"].get(),
+                            "crater_current_a": variables["crater_current_a"].get(),
+                            "crater_voltage_v": variables["crater_voltage_v"].get(),
+                            "crater_seconds": variables["crater_seconds"].get(),
+                            "wire_consumable_alpha_mm": variables[
+                                "wire_consumable_alpha_mm"
                             ].get(),
                         })
                     else:
@@ -12514,10 +12183,17 @@ class WeldActionGui:
                             "gas": variables["gas"].get(),
                             "synergic": variables["synergic"].get(),
                             "correction": variables["correction"].get(),
-                            "pre_gas_s": variables["pre_gas_s"].get(),
-                            "post_gas_s": variables["post_gas_s"].get(),
-                            "preflow_seconds": variables[
-                                "preflow_seconds"
+                            "hot_start_enabled": variables["hot_start_enabled"].get(),
+                            "hot_start_percent": variables["hot_start_percent"].get(),
+                            "hot_start_hold_adjustment": variables[
+                                "hot_start_hold_adjustment"
+                            ].get(),
+                            "crater_enabled": variables["crater_enabled"].get(),
+                            "crater_current_a": variables["crater_current_a"].get(),
+                            "crater_voltage_v": variables["crater_voltage_v"].get(),
+                            "crater_seconds": variables["crater_seconds"].get(),
+                            "wire_consumable_alpha_mm": variables[
+                                "wire_consumable_alpha_mm"
                             ].get(),
                         })
                         updated["settings"] = settings
@@ -12550,7 +12226,7 @@ class WeldActionGui:
                         candidate_steps,
                         index,
                         tcp_speed_mm_s=(
-                            float(updated.get("tcp_speed_m_s", 0.0)) * 1000.0
+                            float(updated.get("weld_tcp_speed_mm_s", float(updated.get("tcp_speed_m_s", 0.0)) * 1000.0))
                         ),
                         lead_in_mm=float(updated.get("lead_in_mm", 0.0)),
                         lead_out_mm=float(updated.get("lead_out_mm", 0.0)),
@@ -12597,6 +12273,24 @@ class WeldActionGui:
         if not self.sequence_steps:
             self.sequence_parallel_slot.set(1)
         self.refresh_sequence_table()
+
+    def delete_all_sequence_steps(self):
+        if self.sequence_running:
+            self.error("Cannot delete the sequence while Plan/Execute is running")
+            return
+        if not self.sequence_steps:
+            return
+        if not messagebox.askyesno(
+            "Delete all sequence steps",
+            f"Delete all {len(self.sequence_steps)} Sequence Builder rows?",
+        ):
+            return
+        count = len(self.sequence_steps)
+        self.sequence_steps.clear()
+        self.sequence_parallel_slot.set(1)
+        self.refresh_sequence_table()
+        self.sequence_status.configure(text="Sequence empty")
+        self.log(f"Deleted all {count} Sequence Builder rows")
 
     def move_sequence_step(self, offset):
         index = self._selected_sequence_index()
@@ -12664,19 +12358,19 @@ class WeldActionGui:
                 "lead_in_mm",
                 "lead_out_mm",
                 "linear_motion_profile",
-                "adaptive_line_energy",
-                "adaptive_min_factor",
-                "adaptive_max_factor",
-                "adaptive_filter_tau_s",
-                "adaptive_baseline_mm",
-                "adaptive_end_freeze_mm",
-                "adaptive_current_deadband_a",
-                "adaptive_power_deadband_ratio",
-                "adaptive_slew_m_s2",
-                "adaptive_update_period_s",
+                "path_to_seam_speed_factor",
                 "trigger_before_goal",
                 "arc_off_delay_s",
-                "arc_stabilize_s",
+                "waypoint_hold_s",
+                "weld_weave_enabled",
+                "weld_weave_pattern",
+                "weld_weave_amplitude_mm",
+                "weld_weave_pitch_mm",
+                "weld_weave_cycles",
+                "weld_weave_actual_pitch_mm",
+                "weld_weave_left_dwell_s",
+                "weld_weave_right_dwell_s",
+                "weld_weave_axis",
                 "joint1_rad",
                 "joint2_rad",
             ):
@@ -12750,8 +12444,6 @@ class WeldActionGui:
             "gui_interpolation_step_mm": float(
                 self.interpolation_step_mm.get()
             ),
-            "seam_wall_offset_mm": float(self.seam_wall_offset_mm.get()),
-            "seam_floor_offset_mm": float(self.seam_floor_offset_mm.get()),
             "seam_orientation_mode": (
                 effective_weld_motion.get("seam_orientation_mode")
                 if effective_weld_motion is not None
@@ -12759,24 +12451,33 @@ class WeldActionGui:
             ),
             "weld_fixed_tilt_x_deg": float(
                 effective_weld_motion.get(
-                    "fixed_tool_x_tilt_deg",
-                    self.weld_fixed_tilt_x_deg.get(),
+                    "fixed_world_x_tilt_deg",
+                    effective_weld_motion.get(
+                        "fixed_tool_x_tilt_deg",
+                        self.weld_fixed_tilt_x_deg.get(),
+                    ),
                 )
                 if effective_weld_motion is not None
                 else self.weld_fixed_tilt_x_deg.get()
             ),
             "weld_fixed_tilt_y_deg": float(
                 effective_weld_motion.get(
-                    "fixed_tool_y_tilt_deg",
-                    self.weld_fixed_tilt_y_deg.get(),
+                    "fixed_world_y_tilt_deg",
+                    effective_weld_motion.get(
+                        "fixed_tool_y_tilt_deg",
+                        self.weld_fixed_tilt_y_deg.get(),
+                    ),
                 )
                 if effective_weld_motion is not None
                 else self.weld_fixed_tilt_y_deg.get()
             ),
             "weld_fixed_tilt_z_deg": float(
                 effective_weld_motion.get(
-                    "fixed_tool_z_tilt_deg",
-                    self.weld_fixed_tilt_z_deg.get(),
+                    "fixed_world_z_tilt_deg",
+                    effective_weld_motion.get(
+                        "fixed_tool_z_tilt_deg",
+                        self.weld_fixed_tilt_z_deg.get(),
+                    ),
                 )
                 if effective_weld_motion is not None
                 else self.weld_fixed_tilt_z_deg.get()
@@ -12787,15 +12488,26 @@ class WeldActionGui:
             "weld_weave_pattern": str(effective_motion_value(
                 "weld_weave_pattern", self.weave_pattern.get()
             )),
+            **{key: float(effective_motion_value(key, variable.get())) for key, variable in (
+                ("weld_weave_pitch_mm", self.weave_pitch_mm),
+                ("weld_weave_left_dwell_s", self.weave_left_dwell_s),
+                ("weld_weave_right_dwell_s", self.weave_right_dwell_s),
+            )},
             "weld_weave_amplitude_mm": float(effective_motion_value(
                 "weld_weave_amplitude_mm", self.weave_amplitude_mm.get()
             )),
             "weld_weave_cycles": int(effective_motion_value(
-                "weld_weave_cycles", self.weave_cycles.get()
+                "weld_weave_cycles", 0
             )),
-            "weld_weave_samples_per_cycle": int(effective_motion_value(
-                "weld_weave_samples_per_cycle", self.weave_samples.get()
+            "weld_weave_actual_pitch_mm": float(effective_motion_value(
+                "weld_weave_actual_pitch_mm", 0.0
             )),
+            "weld_weave_amplitude_definition": (
+                "centerline +/- A mm; full width = 2A"
+                if effective_motion_value("weld_weave_pattern", "sine") == "sine"
+                else "orbit radius = A mm; diameter = 2A"
+            ),
+            "weld_weave_samples_per_cycle": WELD_WEAVE_SAMPLES_PER_CYCLE,
             "weld_weave_axis": str(effective_motion_value(
                 "weld_weave_axis", self.weave_axis.get()
             )),
@@ -12818,23 +12530,13 @@ class WeldActionGui:
                 "pre_start_lead_mm", self.weld_pre_start_lead_mm.get()
             )),
             "weld_tcp_speed_mm_s": float(effective_motion_value(
-                "tcp_speed_m_s", float(self.weld_tcp_speed_mm_s.get()) * 0.001
-            )) * 1000.0,
-            "weld_adaptive_line_energy": bool(effective_motion_value(
-                "adaptive_line_energy", self.weld_adaptive_line_energy.get()
+                "weld_tcp_speed_mm_s", self.weld_tcp_speed_mm_s.get()
             )),
-            "weld_adaptive_min_percent": float(self.weld_adaptive_min_percent.get()),
-            "weld_adaptive_max_percent": float(self.weld_adaptive_max_percent.get()),
-            "weld_adaptive_filter_tau_s": float(self.weld_adaptive_filter_tau_s.get()),
-            "weld_adaptive_baseline_mm": float(self.weld_adaptive_baseline_mm.get()),
             "weld_arc_off_delay_ms": (
                 float(effective_arc_off.get("arc_off_delay_s", 0.0)) * 1000.0
                 if effective_arc_off is not None
                 else float(self.weld_arc_off_delay_ms.get())
             ),
-            "weld_arc_stabilize_s": float(effective_motion_value(
-                "arc_stabilize_s", self.weld_arc_stabilize_seconds.get()
-            )),
             "tcp_tracking.parent_frame": "World",
             "tcp_tracking.child_frame": tip_link_for_group(
                 effective_weld_motion.get("planning_group", "right_manipulator")
@@ -13126,9 +12828,8 @@ class WeldActionGui:
             client = self.hicomm_client
             if client is not None:
                 client.clear_outputs()
-            self._set_fastech_output_sync(
-                FASTECH_TOUCH_OUTPUT_PORT, False
-            )
+            # Keep touch-enable unchanged on STOP or failure. Explicit
+            # scenario/GUI DO0 commands remain responsible for this output.
             self._finish_weld_feedback_record(
                 "stopped" if self.sequence_stop_requested else f"failed: {message}",
                 client.latest_status() if client is not None else None,
@@ -13158,22 +12859,14 @@ class WeldActionGui:
                         return False, "weld motion timed out waiting for ARC established"
                     time.sleep(0.01)
 
+                self._mark_weld_motion_timing("start")
                 try:
-                    stabilize_s = max(
-                        0.0, float(step.get("arc_stabilize_s", 0.0))
+                    return self.node.run_sequence_cartesian_motion(
+                        step, execute_requested
                     )
-                except (TypeError, ValueError):
-                    return False, "invalid ARC stabilize time"
-                if stabilize_s > 0.0:
-                    self.post(
-                        self.log,
-                        f"ARC established · stabilizing {stabilize_s:.3f} s at LEAD START before motion",
-                    )
-                    if not self._interruptible_wait(stabilize_s):
-                        return False, "ARC stabilize dwell interrupted"
-            return self.node.run_sequence_cartesian_motion(
-                step, execute_requested
-            )
+                finally:
+                    self._mark_weld_motion_timing("complete")
+            return self.node.run_sequence_cartesian_motion(step, execute_requested)
         if step["type"] == "planned_trajectory":
             return self.node.run_sequence_planned_trajectory(
                 step, execute_requested
@@ -13291,6 +12984,7 @@ class WeldActionGui:
             self.error(f"SEQUENCE FAILED · {message}")
 
     def stop_sequence(self):
+        self._stop_keyboard_wire()
         self.sequence_stop_requested = True
         # STOP NOW also invalidates any pending touch dwell/retract.
         self.node.clear_touch_probe()
@@ -13417,6 +13111,8 @@ class WeldActionGui:
 
     def keyboard_jog_enable_changed(self):
         enable = bool(self.keyboard_jog_enabled.get())
+        if not enable:
+            self._stop_keyboard_wire()
         if self.keyboard_velocity_switching:
             self.keyboard_jog_enabled.set(self.keyboard_velocity_arm is not None)
             return
@@ -13552,6 +13248,187 @@ class WeldActionGui:
             pass
         self.keyboard_release_after_id = None
 
+    def _stop_keyboard_wire(self):
+        timer = self.keyboard_wire_release_after_id
+        self.keyboard_wire_release_after_id = None
+        if timer is not None:
+            try:
+                self.root.after_cancel(timer)
+            except tk.TclError:
+                pass
+        key = self.keyboard_wire_active_key
+        self.keyboard_wire_active_key = None
+        if key is not None:
+            self.request_hicomm_inching(
+                "forward" if key == "f" else "reverse", False
+            )
+            self.keyboard_jog_status.set("Wire inch OFF")
+
+    def keyboard_wire_key_press(self, event):
+        if not self.keyboard_jog_enabled.get():
+            return None
+        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+            return None
+        key = str(event.keysym).lower()
+        if key not in ("f", "r"):
+            return None
+        timer = self.keyboard_wire_release_after_id
+        self.keyboard_wire_release_after_id = None
+        if timer is not None:
+            self.root.after_cancel(timer)
+        if self.keyboard_wire_active_key == key:
+            return "break"
+        if self.keyboard_wire_active_key is not None:
+            self._stop_keyboard_wire()
+        if (
+            self.keyboard_velocity_switching
+            or self.keyboard_velocity_arm != "right_manipulator"
+            or self._selected_arm() != "right_manipulator"
+            or self.sequence_running
+            or self.node.active_motion_goal is not None
+        ):
+            self.error("Wire inching requires idle right-arm keyboard teaching")
+            return "break"
+        if not self.hicomm_connected:
+            self.error("Connect Hi-COMM before keyboard wire inching")
+            return "break"
+        direction = "forward" if key == "f" else "reverse"
+        if self.request_hicomm_inching(direction, True):
+            self.keyboard_wire_active_key = key
+            self.keyboard_jog_status.set(f"WIRE {direction.upper()} · release to stop")
+        return "break"
+
+    def keyboard_wire_key_release(self, event):
+        key = str(event.keysym).lower()
+        if key != self.keyboard_wire_active_key:
+            return None
+        if self.keyboard_wire_release_after_id is not None:
+            self.root.after_cancel(self.keyboard_wire_release_after_id)
+        # X11 key repeat may synthesize release/press pairs. The next press
+        # cancels this timer; the final physical release turns the output off.
+        self.keyboard_wire_release_after_id = self.root.after(
+            35, lambda selected=key: self._finish_keyboard_wire_release(selected)
+        )
+        return "break"
+
+    def _finish_keyboard_wire_release(self, key):
+        self.keyboard_wire_release_after_id = None
+        if key == self.keyboard_wire_active_key:
+            self._stop_keyboard_wire()
+
+    def keyboard_wire_focus_out(self, _event):
+        self._stop_keyboard_wire()
+
+    def keyboard_teaching_shortcut_key(self, event):
+        """Handle speed cycling and current-pose saves in teaching mode."""
+        if not self.keyboard_jog_enabled.get():
+            return None
+        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+            return None
+        key = str(event.keysym).lower()
+        pending_release = self.keyboard_shortcut_release_ids.pop(key, None)
+        if pending_release is not None:
+            try:
+                self.root.after_cancel(pending_release)
+            except tk.TclError:
+                pass
+        if key in self.keyboard_shortcut_active_keys:
+            return "break"
+        self.keyboard_shortcut_active_keys.add(key)
+
+        if self.keyboard_velocity_active_key is not None:
+            self._cancel_keyboard_release_timer()
+            self.node.clear_keyboard_velocity()
+            self.keyboard_velocity_active_key = None
+
+        if key == "v":
+            speed = next_keyboard_speed(
+                self.keyboard_jog_linear_speed.get(), KEYBOARD_LINEAR_SPEEDS_MM_S
+            )
+            self.keyboard_jog_linear_speed.set(speed)
+            self.keyboard_jog_status.set(f"XYZ speed {speed:g} mm/s")
+            self.log(f"Keyboard XYZ speed selected · {speed:g} mm/s")
+            return "break"
+        if key == "x":
+            speed = next_keyboard_speed(
+                self.keyboard_jog_angular_speed.get(),
+                KEYBOARD_ANGULAR_SPEEDS_DEG_S,
+            )
+            self.keyboard_jog_angular_speed.set(speed)
+            self.keyboard_jog_status.set(f"Rotation speed {speed:g} deg/s")
+            self.log(f"Keyboard rotation speed selected · {speed:g} deg/s")
+            return "break"
+
+        if self.sequence_running or self.node.active_motion_goal is not None:
+            self.error("Cannot save a teaching pose during another motion")
+            return "break"
+        arm = self._selected_arm()
+        if arm != self.keyboard_velocity_arm or self.keyboard_velocity_switching:
+            self.error("Enable keyboard velocity mode for the selected arm first")
+            return "break"
+        self.keyboard_jog_status.set(f"Stopping before {key.upper()} pose capture...")
+        threading.Thread(
+            target=self._keyboard_teaching_capture_worker,
+            args=(arm, key),
+            daemon=True,
+        ).start()
+        return "break"
+
+    def keyboard_teaching_shortcut_release(self, event):
+        key = str(event.keysym).lower()
+        if key not in self.keyboard_shortcut_active_keys:
+            return None
+        old_timer = self.keyboard_shortcut_release_ids.pop(key, None)
+        if old_timer is not None:
+            try:
+                self.root.after_cancel(old_timer)
+            except tk.TclError:
+                pass
+        # X11 autorepeat emits synthetic release/press pairs. Delay removal so
+        # holding a shortcut cannot cycle speeds or save repeatedly.
+        self.keyboard_shortcut_release_ids[key] = self.root.after(
+            50, lambda selected=key: self._finish_keyboard_shortcut_release(selected)
+        )
+        return "break"
+
+    def _finish_keyboard_shortcut_release(self, key):
+        self.keyboard_shortcut_release_ids.pop(key, None)
+        self.keyboard_shortcut_active_keys.discard(key)
+
+    def _keyboard_teaching_capture_worker(self, arm, key):
+        if not self.node.wait_until_arm_stopped(arm, timeout=2.0):
+            self.post(
+                self.error,
+                f"{key.upper()} teaching capture blocked: arm did not reach standstill",
+            )
+            return
+        self.post(self._capture_keyboard_teaching_shortcut, arm, key)
+
+    def _capture_keyboard_teaching_shortcut(self, arm, key):
+        if (
+            not self.keyboard_jog_enabled.get()
+            or arm != self.keyboard_velocity_arm
+            or arm != self._selected_arm()
+            or self.sequence_running
+            or self.node.active_motion_goal is not None
+        ):
+            self.error(f"{key.upper()} teaching capture canceled because state changed")
+            return
+        if key == "i":
+            self.capture_linear_tcp(0)
+            description = "Reference TCP 1"
+        elif key == "j":
+            self.capture_linear_tcp(1)
+            description = "Reference TCP 2"
+        else:
+            pose_name = KEYBOARD_TEACHING_POSE_SHORTCUTS.get(key)
+            if pose_name is None:
+                return
+            self.quick_capture_teaching_pose(pose_name)
+            description = TEACHING_POSES[pose_name]
+        self.keyboard_jog_status.set(f"{key.upper()} · saving {description}")
+        self.log(f"Keyboard teaching shortcut {key.upper()} · {description}")
+
     def keyboard_jog_selection_key(self, event):
         if not self.keyboard_jog_enabled.get():
             return None
@@ -13656,8 +13533,16 @@ class WeldActionGui:
         )
 
     def _disable_keyboard_velocity_async(self):
+        self._stop_keyboard_wire()
         arm = self.keyboard_velocity_arm
         self._cancel_keyboard_release_timer()
+        for timer in self.keyboard_shortcut_release_ids.values():
+            try:
+                self.root.after_cancel(timer)
+            except tk.TclError:
+                pass
+        self.keyboard_shortcut_release_ids.clear()
+        self.keyboard_shortcut_active_keys.clear()
         self.keyboard_velocity_active_key = None
         self.node.clear_keyboard_velocity()
         self.keyboard_jog_enabled.set(False)
@@ -13673,6 +13558,7 @@ class WeldActionGui:
 
     def emergency_stop_all(self, restore_keyboard_controller=True):
         """Stop every GUI-owned workflow, robot goal, and welder output."""
+        self._stop_keyboard_wire()
         self._cancel_keyboard_release_timer()
         self.keyboard_velocity_active_key = None
         self.node.clear_keyboard_velocity()
@@ -14332,8 +14218,8 @@ class WeldActionGui:
             return
         try:
             amplitude = float(self.weave_amplitude_mm.get()) * 0.001
-            cycles = int(self.weave_cycles.get())
-            samples = int(self.weave_samples.get())
+            pitch_mm = float(self.weave_pitch_mm.get())
+            samples = WELD_WEAVE_SAMPLES_PER_CYCLE
         except (ValueError, tk.TclError):
             self.error("Weave settings must be numeric")
             return
@@ -14352,13 +14238,18 @@ class WeldActionGui:
             ) ** 0.5
             for first, second in zip(source[:-1], source[1:])
         )
-        pitch_mm = seam_length * 1000.0 / max(cycles, 1)
+        try:
+            cycles = weave_cycles_for_pitch(seam_length, pitch_mm)
+        except ValueError as error:
+            self.error(str(error))
+            return
+        actual_pitch_mm = seam_length * 1000.0 / cycles
         self.weave_summary.configure(
             text=(
                 f"{self.weave_pattern.get()} "
                 f"{'±' if self.weave_pattern.get() == 'sine' else 'R='}"
                 f"{amplitude * 1000.0:.1f} mm · "
-                f"pitch≈{pitch_mm:.1f} mm · {cycles} cycles"
+                f"pitch≤{pitch_mm:.1f} mm (actual {actual_pitch_mm:.2f}) · {cycles} cycles"
             )
         )
         threading.Thread(
@@ -15442,13 +15333,13 @@ class WeldActionGui:
                     "base_direction": self.floor_probe_axis.get(),
                     "base_sign": self.floor_probe_sign.get(),
                     "orientation_mode": self.seam_orientation_mode.get(),
-                    "fixed_tool_x_tilt_deg": float(
+                    "fixed_world_x_tilt_deg": float(
                         self.weld_fixed_tilt_x_deg.get()
                     ),
-                    "fixed_tool_y_tilt_deg": float(
+                    "fixed_world_y_tilt_deg": float(
                         self.weld_fixed_tilt_y_deg.get()
                     ),
-                    "fixed_tool_z_tilt_deg": float(
+                    "fixed_world_z_tilt_deg": float(
                         self.weld_fixed_tilt_z_deg.get()
                     ),
                     "weld_lead_in_mm": float(self.weld_lead_in_mm.get()),
@@ -15760,6 +15651,7 @@ class WeldActionGui:
         if self._closing:
             return
         self._closing = True
+        self._stop_keyboard_wire()
         self._cancel_keyboard_release_timer()
         self.node.clear_keyboard_velocity()
         if self.keyboard_velocity_arm is not None:

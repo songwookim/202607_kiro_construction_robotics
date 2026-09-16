@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from geometry_msgs.msg import Pose, TransformStamped
 from moveit_msgs.msg import RobotTrajectory
 import numpy as np
+import pytest
 import yaml
 from rclpy.action import CancelResponse
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -58,6 +59,7 @@ from construct_robot.weld_action_gui import (
     corner_endpoint_from_two_touches,
     corrected_corner_seam_from_four_touches,
     compute_corrected_seam_geometry,
+    calculate_weld_production_metrics,
     compute_plane_intersection_line,
     compute_real_seam_direction,
     compute_safe_weld_approach,
@@ -67,6 +69,7 @@ from construct_robot.weld_action_gui import (
     fixed_tilt_wait_reference_poses,
     keyboard_jog_velocity,
     keyboard_velocity_vector,
+    next_keyboard_speed,
     next_sequential_slot,
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
@@ -84,6 +87,7 @@ from construct_robot.weld_action_gui import (
     update_weld_scenario_motion_values,
     validate_digital_weld_settings,
     validate_managed_weld_sequence,
+    weld_current_profile,
     wide_sensing_path_poses,
     yaw_corrected_seam_poses,
 )
@@ -187,6 +191,13 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
         "commanded": {"current_a": 200, "voltage": 25.0},
         "rx_setting_echo": {"current_a": 200, "voltage_v": 25.0},
         "execution_conditions": {
+            "weld_weave_enabled": True,
+            "weld_weave_pattern": "circle",
+            "weld_weave_amplitude_mm": 2.7,
+            "weld_weave_pitch_mm": 8.0,
+            "weld_weave_actual_pitch_mm": 7.5,
+            "weld_weave_cycles": 4,
+            "weld_weave_axis": "tool_y",
             "steps": [{
                 "type": "motion",
                 "weld_scenario_stage": "weld_motion",
@@ -257,6 +268,8 @@ def test_weld_feedback_log_is_persisted_atomically(tmp_path):
     assert "result=completed" in content
     assert "OPERATOR OVERVIEW" in content
     assert "REQUESTED : 200 A / 25.0 V" in content
+    assert "WEAVE     : circle · radius 2.70 mm (diameter 5.40 mm)" in content
+    assert "weld_weave_pitch_mm=8.0" in content
     assert "current_a.average=197.5" in content
     assert "0x2B main_weld 1 1 1 1 198 25.2 7.6" in content
     sections, samples = parse_weld_feedback_log(path)
@@ -502,7 +515,7 @@ def test_sensed_seam_yaw_rotates_taught_orientations_and_uses_sensed_xyz():
     assert math.isclose(corrected_start.orientation.w, math.sqrt(0.5))
 
 
-def test_fixed_tilt_wait_references_apply_the_same_local_y_rotation():
+def test_fixed_tilt_wait_references_apply_the_same_world_y_rotation():
     start_wait = make_pose(0.0, 0.0, 0.2)
     goal_wait = make_pose(1.0, 0.0, 0.2)
     start, goal = fixed_tilt_wait_reference_poses(
@@ -529,7 +542,7 @@ def test_fixed_tilt_wait_references_reject_unsafe_tilt_range():
             raise AssertionError(f"invalid fixed tilt {value} was accepted")
 
 
-def test_fixed_tilt_wait_references_accept_all_three_tool_axes():
+def test_fixed_tilt_wait_references_accept_all_three_world_axes():
     start_wait = make_pose(0.0, 0.0, 0.2)
     goal_wait = make_pose(1.0, 0.0, 0.2)
     start, goal = fixed_tilt_wait_reference_poses(
@@ -543,6 +556,28 @@ def test_fixed_tilt_wait_references_accept_all_three_tool_axes():
     assert not math.isclose(start.orientation.x, 0.0, abs_tol=1e-9)
     assert not math.isclose(start.orientation.y, 0.0, abs_tol=1e-9)
     assert not math.isclose(start.orientation.z, 0.0, abs_tol=1e-9)
+
+
+def test_fixed_tilt_wait_reference_pre_multiplies_about_world_axes():
+    start_wait = make_pose(
+        0.0, 0.0, 0.2,
+        quaternion=(math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)),
+    )
+    goal_wait = make_pose(
+        1.0, 0.0, 0.2,
+        quaternion=(math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)),
+    )
+    start, _ = fixed_tilt_wait_reference_poses(
+        start_wait, goal_wait, tilt_y_deg=0.0, tilt_z_deg=90.0
+    )
+    expected = pose_with_rpy_offset(
+        start_wait, 0.0, 0.0, math.radians(90.0), reference="world"
+    )
+    legacy_tool = pose_with_rpy_offset(
+        start_wait, 0.0, 0.0, math.radians(90.0), reference="tool"
+    )
+    assert start.orientation == expected.orientation
+    assert start.orientation != legacy_tool.orientation
 
 
 def test_corner_endpoint_and_wait_alignment_for_world_x_seam():
@@ -922,6 +957,15 @@ def test_hicomm_v4_recipe_encodes_documented_bytes_1_through_11():
     assert int.from_bytes(frame[10:12], "little") == 120
 
 
+def test_hicomm_native_hot_start_encodes_current_and_hold_adjustment():
+    frame = build_request(TxState(
+        hot_start_current_a=240,
+        hot_start_hold_adjustment=3,
+    ))
+    assert int.from_bytes(frame[14:16], "little") == 240
+    assert frame[16] == 18
+
+
 def test_hicomm_response_decodes_arc_feedback_and_error():
     frame = bytearray(71)
     frame[0] = BIT_ARC | 0x20 | 0x10 | 0x08
@@ -932,6 +976,9 @@ def test_hicomm_response_decodes_arc_feedback_and_error():
     frame[9] = 7
     frame[10:12] = (120).to_bytes(2, "little")
     frame[12:14] = (220).to_bytes(2, "little")
+    frame[21:23] = (240).to_bytes(2, "little")
+    frame[23] = 17
+    frame[24] = 45
     decoded = decode_response(bytes(frame))
     assert decoded["raw_frame"] == bytes(frame)
     assert decoded["arc_ack"] is True
@@ -944,6 +991,9 @@ def test_hicomm_response_decodes_arc_feedback_and_error():
     assert decoded["feedback_voltage_v"] == 21.9
     assert decoded["wire_feed_m_min"] == 3.2
     assert decoded["welder_error"] == 7
+    assert decoded["hot_start_current_a"] == 240
+    assert decoded["hot_start_hold_adjustment"] == 2
+    assert decoded["hot_start_arc_voltage_adjustment"] == -5
 
 
 def test_digital_weld_defaults_match_current_production_recipe():
@@ -953,24 +1003,78 @@ def test_digital_weld_defaults_match_current_production_recipe():
     assert settings["current_a"] == 200
     assert settings["voltage_tenths"] == 250
     assert settings["voltage"] == 25.0
-    assert settings["pre_gas_s"] == 0.7
+    assert "pre_gas_s" not in settings
+    assert "post_gas_s" not in settings
+    assert "preflow_seconds" not in settings
+    assert settings["hot_start_enabled"] is True
+    assert settings["hot_start_percent"] == 20.0
+    assert settings["hot_start_hold_adjustment"] == 0
+    assert settings["crater_enabled"] is True
+    assert settings["crater_percent"] == 30.0
+    assert settings["crater_current_a"] == 60.0
+    assert settings["crater_voltage_v"] == 25.0
+    assert settings["crater_seconds"] == 1.0
+    assert weld_current_profile(settings) == {
+        "nominal": 200, "hot": 240, "crater": 60,
+    }
     frame = build_request(TxState(**digital_weld_recipe(settings)))
     assert int.from_bytes(frame[3:5], "little") == 200
     assert int.from_bytes(frame[5:7], "little") == 250
-    assert int.from_bytes(frame[8:10], "little") == 70
+    assert int.from_bytes(frame[8:10], "little") == 0
+    assert int.from_bytes(frame[10:12], "little") == 0
+    assert int.from_bytes(frame[14:16], "little") == 240
+    assert frame[16] == 15
+
+
+def test_weld_production_metrics_integrate_arc_wire_and_motion_window():
+    samples = [
+        {"elapsed_s": 0.0, "output_state": 0, "wire_feed_m_min": 0.0},
+        {"elapsed_s": 1.0, "output_state": 1, "wire_feed_m_min": 6.0},
+        {"elapsed_s": 1.1, "output_state": 1, "wire_feed_m_min": 6.0},
+        {"elapsed_s": 1.2, "output_state": 1, "wire_feed_m_min": 6.0},
+        {"elapsed_s": 1.3, "output_state": 0, "wire_feed_m_min": 0.0},
+    ]
+    metrics = calculate_weld_production_metrics(
+        samples,
+        weld_motion_start_elapsed_s=1.05,
+        weld_motion_complete_elapsed_s=1.25,
+        wire_consumable_alpha_mm=2.0,
+    )
+    assert metrics["arc_on_time_s"] == pytest.approx(0.3)
+    assert metrics["net_weld_arc_time_s"] == pytest.approx(0.2)
+    assert metrics["wire_feed_average_m_min"] == pytest.approx(6.0)
+    assert metrics["wire_consumable_base_mm"] == pytest.approx(30.0)
+    assert metrics["wire_consumable_mm"] == pytest.approx(32.0)
 
 
 def test_digital_weld_recipe_excludes_gui_timing_metadata():
     settings = validate_digital_weld_settings({
         "current_a": "150",
         "voltage_tenths": "205",
-        "preflow_seconds": "1.5",
+        "preflow_seconds": "1.5",  # legacy input is deliberately discarded
     })
     recipe = digital_weld_recipe(settings)
     assert settings["voltage"] == 20.5
-    assert settings["preflow_seconds"] == 1.5
+    assert "preflow_seconds" not in settings
     assert "voltage" not in recipe
     assert "preflow_seconds" not in recipe
+    assert "hot_start_enabled" not in recipe
+    assert "hot_start_percent" not in recipe
+    assert "crater_enabled" not in recipe
+    assert "crater_percent" not in recipe
+
+
+def test_hot_start_and_crater_ranges_are_validated():
+    for override in (
+        {"hot_start_percent": -0.1},
+        {"hot_start_hold_adjustment": 16},
+        {"crater_percent": 19.9},
+        {"crater_percent": 40.1},
+        {"crater_seconds": 0.49},
+        {"crater_seconds": 1.51},
+    ):
+        with pytest.raises(ValueError):
+            validate_digital_weld_settings(override)
 
 
 def test_hicomm_inching_directions_are_mutually_exclusive():
@@ -1757,6 +1861,18 @@ def test_keyboard_jog_velocity_uses_angular_speed_for_rotation():
     assert keyboard_jog_velocity("RX/RZ", "Up", 5.0, 3.0) == (
         0.0, 0.0, 0.0, 0.0, 0.0, 3.0
     )
+
+
+def test_keyboard_speed_shortcuts_cycle_and_recover_from_custom_value():
+    linear = (5.0, 15.0, 25.0)
+    angular = (3.0, 7.0, 10.0)
+    assert next_keyboard_speed(5.0, linear) == 15.0
+    assert next_keyboard_speed(15.0, linear) == 25.0
+    assert next_keyboard_speed(25.0, linear) == 5.0
+    assert next_keyboard_speed(3.0, angular) == 7.0
+    assert next_keyboard_speed(7.0, angular) == 10.0
+    assert next_keyboard_speed(10.0, angular) == 3.0
+    assert next_keyboard_speed(9.5, linear) == 5.0
 
 
 def test_keyboard_velocity_vector_rotates_tool_translation_but_keeps_world_rotation():

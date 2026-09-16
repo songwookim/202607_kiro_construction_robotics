@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from construct_robot.weld_action_gui import WeldGuiNode
+from construct_robot.weld_action_gui import WeldActionGui, WeldGuiNode
 from construct_robot import weld_action_gui
 
 
@@ -117,3 +117,28 @@ def test_stop_during_dwell_prevents_controller_restore(monkeypatch):
     WeldGuiNode.return_touch_probe(node, "right_manipulator", None, None, .01, .001, "wall", .7)
     node.restore_touch_controller.assert_not_called()
     node.run_sequence_cartesian_motion.assert_not_called()
+
+
+def test_operator_motion_stop_does_not_change_touch_enable_output():
+    node = node_stub()
+    node.ui._set_fastech_output_sync = Mock()
+    node.ui.sequence_hard_stop_finished = Mock()
+    WeldGuiNode.stop_sequence_equipment(node, ())
+    node.ui._set_fastech_output_sync.assert_not_called()
+
+
+def test_delete_all_sequence_steps_resets_builder(monkeypatch):
+    gui = SimpleNamespace(
+        sequence_running=False,
+        sequence_steps=[{"type": "sleep"}, {"type": "sleep"}],
+        sequence_parallel_slot=SimpleNamespace(set=Mock()),
+        sequence_status=SimpleNamespace(configure=Mock()),
+        refresh_sequence_table=Mock(),
+        log=Mock(),
+        error=Mock(),
+    )
+    monkeypatch.setattr(weld_action_gui.messagebox, "askyesno", lambda *_args: True)
+    WeldActionGui.delete_all_sequence_steps(gui)
+    assert gui.sequence_steps == []
+    gui.sequence_parallel_slot.set.assert_called_once_with(1)
+    gui.refresh_sequence_table.assert_called_once_with()

@@ -382,6 +382,45 @@ def weaving_from_path(
     return points
 
 
+def weave_cycles_for_pitch(length_m, pitch_mm, max_cycles=100):
+    """Use whole cycles so the weave starts and ends on its centerline.
+
+    The requested pitch is a maximum. The actual pitch is length / cycles.
+    """
+    if not math.isfinite(length_m) or length_m <= 0.0:
+        raise ValueError("Weave seam length must be positive and finite")
+    if not math.isfinite(pitch_mm) or not 0.1 <= pitch_mm <= 100.0:
+        raise ValueError("Weave pitch must be in 0.1..100 mm/cycle")
+    cycles = max(1, math.ceil(length_m * 1000.0 / pitch_mm - 1e-9))
+    if cycles > max_cycles:
+        raise ValueError(f"Weave requires {cycles} cycles; increase pitch (max {max_cycles})")
+    return cycles
+
+
+def sine_weaving_with_dwell(
+    source_points, amplitude, cycles, left_dwell_s=0.0, right_dwell_s=0.0,
+    transverse_axis="tool_y", transverse_vector=None,
+):
+    """Generate one smooth ±amplitude sine and optional holds at its peaks."""
+    if not all(math.isfinite(v) and 0.0 <= v <= 10.0 for v in
+               (left_dwell_s, right_dwell_s)):
+        raise ValueError("Weave dwell must be in 0..10 seconds")
+    # Twelve samples put exact points at the ±A peaks, while retaining
+    # intermediate samples to round the turns rather than form a zigzag.
+    samples_per_cycle = 12
+    points = weaving_from_path(
+        source_points, amplitude, cycles, samples_per_cycle,
+        transverse_axis, transverse_vector,
+    )
+    points[0] = copy.deepcopy(source_points[0])
+    points[-1] = copy.deepcopy(source_points[-1])
+    holds = [0.0] * len(points)
+    for cycle in range(cycles):
+        holds[cycle * samples_per_cycle + 3] = left_dwell_s
+        holds[cycle * samples_per_cycle + 9] = right_dwell_s
+    return points, holds
+
+
 def circular_weaving_from_path(
     source_points,
     radius,

@@ -252,6 +252,8 @@ class CartesianPathActionServer(Node):
         start_state=None,
         publish=True,
     ):
+        if request.waypoint_hold_s:
+            return self.plan_with_holds(request, start_state, publish)
         if not self._cartesian_client.wait_for_service(timeout_sec=5.0):
             raise RuntimeError("/compute_cartesian_path service unavailable")
         cartesian = GetCartesianPath.Request()
@@ -333,6 +335,75 @@ class CartesianPathActionServer(Node):
         )
         return response
 
+    def plan_with_holds(self, request, start_state=None, publish=True):
+        """Plan stop-to-stop legs, concatenate into one cancelable trajectory."""
+        holds = list(request.waypoint_hold_s)
+        if len(holds) != len(request.waypoints) or not all(
+                math.isfinite(v) and 0 <= v <= 10 for v in holds):
+            raise ValueError("Waypoint holds must match poses and be 0..10 s")
+        if len(holds) < 2 or holds[0] != 0:
+            raise ValueError("Hold paths require two poses and no initial hold")
+        combined = None
+        offset = 0.0
+        state = start_state
+        segment_start = 0
+        for index in range(1, len(request.waypoints)):
+            # A zero-hold center/lead waypoint is a pass-through, not a stop.
+            # Splitting a 1 mm lead into its own TOTG path can produce zero
+            # duration. Retain that geometry inside the next dwell-to-dwell leg.
+            if holds[index] == 0 and index < len(request.waypoints) - 1:
+                continue
+            leg = copy.deepcopy(request)
+            leg.waypoint_hold_s = []
+            leg.linear_motion_profile = False
+            leg.waypoints = copy.deepcopy(request.waypoints[segment_start:index+1])
+            try:
+                response = self.plan_with_moveit(leg, start_state=state, publish=False)
+            except (RuntimeError, ValueError) as error:
+                length_mm = cartesian_path_length(leg.waypoints) * 1000.0
+                raise RuntimeError(
+                    f"Capping leg {segment_start}->{index} ({length_mm:.3f} mm): {error}"
+                ) from error
+            if response.fraction < 0.999 or not response.solution.joint_trajectory.points:
+                raise RuntimeError(f"Capping leg {index} is incomplete; execution inhibited")
+            first_leg = combined is None
+            if first_leg:
+                combined = copy.deepcopy(response)
+                combined.solution.joint_trajectory.points = []
+            points = copy.deepcopy(response.solution.joint_trajectory.points)
+            if len(points) < 2:
+                raise RuntimeError(f"Capping leg {index} has no travel trajectory")
+            points[0].velocities = [0.0]*len(points[0].positions)
+            points[0].accelerations = [0.0]*len(points[0].positions)
+            names = response.solution.joint_trajectory.joint_names
+            if names != combined.solution.joint_trajectory.joint_names:
+                raise RuntimeError("Capping joint order changed")
+            for point in points:
+                seconds = point.time_from_start.sec + point.time_from_start.nanosec*1e-9 + offset
+                ns = round(seconds*1e9)
+                point.time_from_start.sec, point.time_from_start.nanosec = divmod(ns, 1000000000)
+            endpoint = points[-1]
+            endpoint.velocities = [0.0]*len(endpoint.positions)
+            endpoint.accelerations = [0.0]*len(endpoint.positions)
+            combined.solution.joint_trajectory.points.extend(points if first_leg else points[1:])
+            offset = endpoint.time_from_start.sec + endpoint.time_from_start.nanosec*1e-9
+            if holds[index] > 0:
+                held = copy.deepcopy(endpoint)
+                offset += holds[index]
+                held.time_from_start.sec, held.time_from_start.nanosec = divmod(round(offset*1e9), 1000000000)
+                combined.solution.joint_trajectory.points.append(held)
+            state = copy.deepcopy(response.start_state)
+            positions = dict(zip(names, endpoint.positions))
+            state.joint_state.position = [positions.get(n, p) for n, p in
+                                         zip(state.joint_state.name, state.joint_state.position)]
+            state.joint_state.velocity = []
+            state.joint_state.effort = []
+            state.is_diff = False
+            segment_start = index
+        if publish:
+            self.publish_trajectories(combined.start_state, [combined.solution])
+        return combined
+
     def publish_trajectories(self, start_state, trajectories):
         display = DisplayTrajectory()
         display.model_id = "construct_robot_0528"
@@ -362,6 +433,7 @@ class CartesianPathActionServer(Node):
             request.velocity_scale,
             request.tcp_speed_m_s,
             request.linear_motion_profile,
+            tuple(request.waypoint_hold_s),
             tuple(pose_values),
         )
 
@@ -405,7 +477,7 @@ class CartesianPathActionServer(Node):
         try:
             result_wrapper = self._wait_for_future(
                 execute_handle.get_result_async(),
-                EXECUTION_TIMEOUT,
+                max(EXECUTION_TIMEOUT, trajectory_duration_seconds(trajectory) + 30.0),
                 "MoveIt trajectory execution",
             )
         finally:
