@@ -277,6 +277,7 @@ def decode_response(frame):
         # status body (the observed RX frame carries seven trailing bytes).
         "hot_start_current_a": _u16le(frame, 21),
         "hot_start_hold_adjustment": int(frame[23]) - 15,
+        "hot_start_rx_raw_hex": frame[21:24].hex(" ").upper(),
         "hot_start_arc_voltage_adjustment": int(frame[24]) - 50,
         "extra7": frame[64:71].hex(" ").upper(),
     }
@@ -293,6 +294,7 @@ class HiCommWelderClient:
         connection_callback=None,
         status_callback=None,
         log_callback=None,
+        tx_frame_callback=None,
     ):
         self.source_ip = source_ip
         self.welder_ip = welder_ip
@@ -300,6 +302,7 @@ class HiCommWelderClient:
         self.connection_callback = connection_callback or (lambda *_args: None)
         self.status_callback = status_callback or (lambda *_args: None)
         self.log_callback = log_callback or (lambda *_args: None)
+        self.tx_frame_callback = tx_frame_callback
         self._lock = threading.RLock()
         self._status_condition = threading.Condition(self._lock)
         self._state = TxState()
@@ -890,7 +893,14 @@ class HiCommWelderClient:
                             f"TX interval={interval * 1000.0:.1f} ms "
                             f"(target={PERIOD_SECONDS * 1000.0:.1f} ms)"
                         )
-                self._send_full(sock, build_request(state))
+                frame = build_request(state)
+                if self.tx_frame_callback is not None:
+                    try:
+                        self.tx_frame_callback(frame, time.time(), time.monotonic())
+                    except Exception:
+                        # Observability must never interrupt the 40 ms sender.
+                        pass
+                self._send_full(sock, frame)
                 next_tick += PERIOD_SECONDS
                 self._drain_rx(sock, rx_buffer, next_tick)
                 delay = next_tick - time.monotonic()

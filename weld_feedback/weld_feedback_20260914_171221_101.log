@@ -1,0 +1,686 @@
+WELD FEEDBACK LOG
+result=operator stop
+started=2026-09-14 17:12:18
+ended=2026-09-14 17:12:21
+elapsed_seconds=2.630
+
+================ OPERATOR OVERVIEW ================
+REQUESTED : 150 A / 20.0 V · FE-SOLID 1.2 mm · LSM · CO2 100%
+RX ECHO   : 150 A / 20.0 V · MATCH=YES
+CURRENT FB: no positive feedback A
+VOLTAGE FB: no positive feedback V
+WIRE FEED : no positive feedback m/min
+WCR       : NOT DETECTED
+SAMPLES   : RX 65 / welding 0 / TCP 48
+===================================================
+
+[commanded]
+current_a=150
+voltage_tenths=200
+voltage=20.0
+material=FE-SOLID
+diameter_mm=1.2
+mode=LSM
+gas=CO2 100%
+synergic=False
+correction=0.0
+pre_gas_s=0.0
+post_gas_s=0.0
+preflow_seconds=0.0
+
+[rx_setting_echo]
+current_a=150
+voltage_v=20.0
+
+[rx_welding_setting_echo]
+
+[execution_conditions]
+mode=sequence_execute
+run_all=True
+touch_io_backend=fastech_ethernet
+touch_input_port=4
+touch_sensing_output_port=0
+fastech_ip=192.168.0.3
+fastech_poll_target_hz=100.0
+hicomm_source_ip=192.168.1.2
+hicomm_welder_ip=192.168.1.10
+hicomm_port=60000
+gui_velocity_percent=36.95263157894737
+gui_speed_mode=scale
+gui_tcp_speed_mm_s=10.0
+gui_interpolation_step_mm=6.0
+seam_wall_offset_mm=0.0
+seam_floor_offset_mm=0.0
+seam_orientation_mode=Wait poses + fixed World-XYZ tilt
+weld_fixed_tilt_x_deg=0.0
+weld_fixed_tilt_y_deg=0.0
+weld_fixed_tilt_z_deg=-0.0
+weld_weave_enabled=False
+weld_weave_pattern=circle
+weld_weave_amplitude_mm=2.8
+weld_weave_cycles=4
+weld_weave_samples_per_cycle=8
+weld_weave_axis=tool_x
+weld_lead_in_mm=0.0
+weld_lead_out_mm=5.0
+weld_safe_approach_mm=30.0
+weld_approach_mode=taught_wait
+weld_pre_start_lead_mm=0.0
+weld_tcp_speed_mm_s=3.5
+weld_adaptive_line_energy=False
+weld_adaptive_min_percent=85.0
+weld_adaptive_max_percent=100.0
+weld_adaptive_filter_tau_s=0.7
+weld_adaptive_baseline_mm=6.0
+weld_arc_off_delay_ms=500.0
+weld_arc_stabilize_s=0.0
+tcp_tracking.parent_frame=World
+tcp_tracking.child_frame=right_manipulator_ee_point
+tcp_tracking.timestamp_source=TF_header_stamp
+initial_fastech_di0=False
+initial_fastech_do0=True
+robot_connected.left=True
+robot_connected.right=True
+robot_connected.head=True
+hicomm_connected=True
+execution_allowed=True
+steps[0].sequence_number=1
+steps[0].type=named_pose
+steps[0].parallel_slot=1
+steps[0].duration=0.0
+steps[0].planning_group=right_manipulator
+steps[0].velocity_scale=0.3695263157894737
+steps[0].tcp_speed_m_s=0.0
+steps[0].pose_name=weld_start_wait
+steps[0].pose_label=3 · Weld start wait pose
+steps[0].touch_guard=False
+steps[0].continue_after_touch=False
+steps[0].weld_scenario_id=weld-27991868200606
+steps[0].weld_scenario_stage=start_wait
+steps[0].target_tcp.position_m.x=0.04679661342158309
+steps[0].target_tcp.position_m.y=-1.7157272494256113
+steps[0].target_tcp.position_m.z=0.6808993470560196
+steps[0].target_tcp.orientation_xyzw.x=-0.4356040005965647
+steps[0].target_tcp.orientation_xyzw.y=0.6337302693138561
+steps[0].target_tcp.orientation_xyzw.z=-0.528315255502808
+steps[0].target_tcp.orientation_xyzw.w=-0.35988621982879293
+steps[0].joint_names[0]=right_manipulator_joint1
+steps[0].joint_names[1]=right_manipulator_joint2
+steps[0].joint_names[2]=right_manipulator_joint3
+steps[0].joint_names[3]=right_manipulator_joint4
+steps[0].joint_names[4]=right_manipulator_joint5
+steps[0].joint_names[5]=right_manipulator_joint6
+steps[0].joint_positions_rad[0]=5.165179096287744
+steps[0].joint_positions_rad[1]=1.3192841976545053
+steps[0].joint_positions_rad[2]=1.833801860251743
+steps[0].joint_positions_rad[3]=3.58926816861935
+steps[0].joint_positions_rad[4]=1.3973881876818586
+steps[0].joint_positions_rad[5]=1.4228621224567934
+steps[1].sequence_number=2
+steps[1].type=motion
+steps[1].parallel_slot=2
+steps[1].duration=0.0
+steps[1].planning_group=right_manipulator
+steps[1].velocity_scale=0.3695263157894737
+steps[1].tcp_speed_m_s=0.0
+steps[1].interpolation_step=0.006
+steps[1].path_kind=taught_wait_align_weld_attitude
+steps[1].touch_guard=False
+steps[1].continue_after_touch=False
+steps[1].accept_initial_touch=False
+steps[1].weld_scenario_id=weld-27991868200606
+steps[1].weld_scenario_stage=start_safe
+steps[1].waypoint_count=1
+steps[1].waypoints[0].position_m.x=0.04679661342158309
+steps[1].waypoints[0].position_m.y=-1.7157272494256113
+steps[1].waypoints[0].position_m.z=0.6808993470560196
+steps[1].waypoints[0].orientation_xyzw.x=-0.43568190743491547
+steps[1].waypoints[0].orientation_xyzw.y=0.633759300366467
+steps[1].waypoints[0].orientation_xyzw.z=-0.5282185051222237
+steps[1].waypoints[0].orientation_xyzw.w=-0.35988280811859236
+steps[2].sequence_number=3
+steps[2].type=motion
+steps[2].parallel_slot=3
+steps[2].duration=0.0
+steps[2].planning_group=right_manipulator
+steps[2].velocity_scale=0.3695263157894737
+steps[2].tcp_speed_m_s=0.0
+steps[2].interpolation_step=0.006
+steps[2].path_kind=taught_wait_to_weld_start
+steps[2].touch_guard=False
+steps[2].continue_after_touch=True
+steps[2].accept_initial_touch=False
+steps[2].weld_scenario_id=weld-27991868200606
+steps[2].weld_scenario_stage=start_contact
+steps[2].waypoint_count=1
+steps[2].waypoints[0].position_m.x=0.04639012308157919
+steps[2].waypoints[0].position_m.y=-1.7155348989806636
+steps[2].waypoints[0].position_m.z=0.6758045566264259
+steps[2].waypoints[0].orientation_xyzw.x=-0.43568190743491547
+steps[2].waypoints[0].orientation_xyzw.y=0.633759300366467
+steps[2].waypoints[0].orientation_xyzw.z=-0.5282185051222237
+steps[2].waypoints[0].orientation_xyzw.w=-0.35988280811859236
+steps[3].sequence_number=4
+steps[3].type=digital_output
+steps[3].parallel_slot=4
+steps[3].duration=0.0
+steps[3].port=0
+steps[3].value=False
+steps[3].weld_scenario_id=weld-27991868200606
+steps[3].weld_scenario_stage=touch_output_off
+steps[4].sequence_number=5
+steps[4].type=digital_weld
+steps[4].parallel_slot=5
+steps[4].duration=0.0
+steps[4].command=on
+steps[4].weld_scenario_id=weld-27991868200606
+steps[4].weld_scenario_stage=arc_on
+steps[4].arc_stabilize_s=0.0
+steps[4].settings.current_a=150
+steps[4].settings.voltage_tenths=200
+steps[4].settings.voltage=20.0
+steps[4].settings.material=FE-SOLID
+steps[4].settings.diameter_mm=1.2
+steps[4].settings.mode=LSM
+steps[4].settings.gas=CO2 100%
+steps[4].settings.synergic=False
+steps[4].settings.correction=0.0
+steps[4].settings.pre_gas_s=0.0
+steps[4].settings.post_gas_s=0.0
+steps[4].settings.preflow_seconds=0.0
+steps[5].sequence_number=6
+steps[5].type=motion
+steps[5].parallel_slot=5
+steps[5].duration=0.0
+steps[5].planning_group=right_manipulator
+steps[5].velocity_scale=0.3695263157894737
+steps[5].tcp_speed_m_s=0.0035
+steps[5].interpolation_step=0.006
+steps[5].path_kind=continuous_lead_to_lead_over_taught_goal_fastech_di0_ignored
+steps[5].touch_guard=False
+steps[5].weld_scenario_id=weld-27991868200606
+steps[5].weld_scenario_stage=weld_motion
+steps[5].lead_in_mm=0.0
+steps[5].lead_out_mm=5.0
+steps[5].linear_motion_profile=True
+steps[5].adaptive_line_energy=False
+steps[5].adaptive_min_factor=0.85
+steps[5].adaptive_max_factor=1.0
+steps[5].adaptive_filter_tau_s=0.7
+steps[5].adaptive_baseline_mm=6.0
+steps[5].adaptive_end_freeze_mm=10.0
+steps[5].adaptive_current_deadband_a=8.0
+steps[5].adaptive_power_deadband_ratio=0.05
+steps[5].adaptive_slew_m_s2=0.00025
+steps[5].adaptive_update_period_s=0.5
+steps[5].arc_stabilize_s=0.0
+steps[5].waypoint_count=2
+steps[5].waypoints[0].position_m.x=0.04639012308157919
+steps[5].waypoints[0].position_m.y=-1.7155348989806636
+steps[5].waypoints[0].position_m.z=0.6758045566264259
+steps[5].waypoints[0].orientation_xyzw.x=-0.43568190743491547
+steps[5].waypoints[0].orientation_xyzw.y=0.633759300366467
+steps[5].waypoints[0].orientation_xyzw.z=-0.5282185051222237
+steps[5].waypoints[0].orientation_xyzw.w=-0.35988280811859236
+steps[5].waypoints[1].position_m.x=0.040837591964028856
+steps[5].waypoints[1].position_m.y=-1.5314296988854754
+steps[5].waypoints[1].position_m.z=0.6785510474527979
+steps[5].waypoints[1].orientation_xyzw.x=-0.4355976651818463
+steps[5].waypoints[1].orientation_xyzw.y=0.6338379374848955
+steps[5].waypoints[1].orientation_xyzw.z=-0.5282534141248965
+steps[5].waypoints[1].orientation_xyzw.w=-0.35979504382135175
+steps[5].lead_start.position_m.x=0.04639012308157919
+steps[5].lead_start.position_m.y=-1.7155348989806636
+steps[5].lead_start.position_m.z=0.6758045566264259
+steps[5].lead_start.orientation_xyzw.x=-0.43568190743491547
+steps[5].lead_start.orientation_xyzw.y=0.633759300366467
+steps[5].lead_start.orientation_xyzw.z=-0.5282185051222237
+steps[5].lead_start.orientation_xyzw.w=-0.35988280811859236
+steps[5].usable_seam_start.position_m.x=0.04639012308157919
+steps[5].usable_seam_start.position_m.y=-1.7155348989806636
+steps[5].usable_seam_start.position_m.z=0.6758045566264259
+steps[5].usable_seam_start.orientation_xyzw.x=-0.43568190743491547
+steps[5].usable_seam_start.orientation_xyzw.y=0.633759300366467
+steps[5].usable_seam_start.orientation_xyzw.z=-0.5282185051222237
+steps[5].usable_seam_start.orientation_xyzw.w=-0.35988280811859236
+steps[5].usable_seam_goal.position_m.x=0.040988304454498636
+steps[5].usable_seam_goal.position_m.y=-1.5364268709187994
+steps[5].usable_seam_goal.position_m.z=0.6784764993838666
+steps[5].usable_seam_goal.orientation_xyzw.x=-0.4355976651818463
+steps[5].usable_seam_goal.orientation_xyzw.y=0.6338379374848955
+steps[5].usable_seam_goal.orientation_xyzw.z=-0.5282534141248965
+steps[5].usable_seam_goal.orientation_xyzw.w=-0.35979504382135175
+steps[5].lead_end.position_m.x=0.040837591964028856
+steps[5].lead_end.position_m.y=-1.5314296988854754
+steps[5].lead_end.position_m.z=0.6785510474527979
+steps[5].lead_end.orientation_xyzw.x=-0.4355976651818463
+steps[5].lead_end.orientation_xyzw.y=0.6338379374848955
+steps[5].lead_end.orientation_xyzw.z=-0.5282534141248965
+steps[5].lead_end.orientation_xyzw.w=-0.35979504382135175
+steps[6].sequence_number=7
+steps[6].type=digital_weld
+steps[6].parallel_slot=5
+steps[6].duration=0.0
+steps[6].velocity_scale=0.3695263157894737
+steps[6].tcp_speed_m_s=0.0035
+steps[6].command=off
+steps[6].weld_scenario_id=weld-27991868200606
+steps[6].weld_scenario_stage=arc_off
+steps[6].adaptive_line_energy=False
+steps[6].trigger_before_goal=True
+steps[6].arc_off_delay_s=0.5
+steps[6].settings.current_a=150
+steps[6].settings.voltage_tenths=200
+steps[6].settings.voltage=20.0
+steps[6].settings.material=FE-SOLID
+steps[6].settings.diameter_mm=1.2
+steps[6].settings.mode=LSM
+steps[6].settings.gas=CO2 100%
+steps[6].settings.synergic=False
+steps[6].settings.correction=0.0
+steps[6].settings.pre_gas_s=0.0
+steps[6].settings.post_gas_s=0.0
+steps[6].settings.preflow_seconds=0.0
+steps[7].sequence_number=8
+steps[7].type=motion
+steps[7].parallel_slot=6
+steps[7].duration=0.0
+steps[7].planning_group=right_manipulator
+steps[7].velocity_scale=0.3695263157894737
+steps[7].tcp_speed_m_s=0.0
+steps[7].interpolation_step=0.006
+steps[7].path_kind=weld_end_to_taught_wait_fixed_attitude
+steps[7].pose_name=weld_goal_wait
+steps[7].pose_label=5 · Weld goal wait pose
+steps[7].touch_guard=False
+steps[7].continue_after_touch=False
+steps[7].weld_scenario_id=weld-27991868200606
+steps[7].weld_scenario_stage=goal_wait
+steps[7].waypoint_count=1
+steps[7].waypoints[0].position_m.x=0.0423937317465059
+steps[7].waypoints[0].position_m.y=-1.5371105920713002
+steps[7].waypoints[0].position_m.z=0.6833915523748588
+steps[7].waypoints[0].orientation_xyzw.x=-0.4355976651818463
+steps[7].waypoints[0].orientation_xyzw.y=0.6338379374848955
+steps[7].waypoints[0].orientation_xyzw.z=-0.5282534141248965
+steps[7].waypoints[0].orientation_xyzw.w=-0.35979504382135175
+steps[8].sequence_number=9
+steps[8].type=named_pose
+steps[8].parallel_slot=7
+steps[8].duration=0.0
+steps[8].planning_group=right_manipulator
+steps[8].velocity_scale=0.3695263157894737
+steps[8].tcp_speed_m_s=0.0
+steps[8].pose_name=weld_finish
+steps[8].pose_label=7 · Weld end pose
+steps[8].touch_guard=False
+steps[8].continue_after_touch=False
+steps[8].weld_scenario_id=weld-27991868200606
+steps[8].weld_scenario_stage=finish
+steps[8].target_tcp.position_m.x=0.040986944407158665
+steps[8].target_tcp.position_m.y=-1.5364893594106015
+steps[8].target_tcp.position_m.z=0.8167834972443337
+steps[8].target_tcp.orientation_xyzw.x=-0.43559961213469944
+steps[8].target_tcp.orientation_xyzw.y=0.6337765362069385
+steps[8].target_tcp.orientation_xyzw.z=-0.5282946458701413
+steps[8].target_tcp.orientation_xyzw.w=-0.35984030792363536
+steps[8].joint_names[0]=right_manipulator_joint1
+steps[8].joint_names[1]=right_manipulator_joint2
+steps[8].joint_names[2]=right_manipulator_joint3
+steps[8].joint_names[3]=right_manipulator_joint4
+steps[8].joint_names[4]=right_manipulator_joint5
+steps[8].joint_names[5]=right_manipulator_joint6
+steps[8].joint_positions_rad[0]=5.272405951257604
+steps[8].joint_positions_rad[1]=1.1691705954383358
+steps[8].joint_positions_rad[2]=2.1249962880568054
+steps[8].joint_positions_rad[3]=3.687834157408164
+steps[8].joint_positions_rad[4]=1.5169816974896109
+steps[8].joint_positions_rad[5]=1.4982739229381858
+steps[9].sequence_number=10
+steps[9].type=digital_output
+steps[9].parallel_slot=8
+steps[9].duration=0.0
+steps[9].port=0
+steps[9].value=True
+steps[9].weld_scenario_id=weld-27991868200606
+steps[9].weld_scenario_stage=touch_output_on
+hicomm_cyclic_period_ms=40.0
+arc_wait_recognition=True
+arc_wait_main_welding=True
+arc_wait_established=True
+arc_establishment_timeout_s=5.0
+
+[summary]
+rx_samples=65
+welding_samples=0
+wcr_seen=0
+current_a.min=None
+current_a.average=None
+current_a.max=None
+voltage_v.min=None
+voltage_v.average=None
+voltage_v.max=None
+wire_feed_m_min.min=None
+wire_feed_m_min.average=None
+wire_feed_m_min.max=None
+
+[arc_off_control]
+
+[adaptive_speed_control]
+enabled=False
+
+[adaptive_speed_samples]
+elapsed_s event along_mm remaining_mm filtered_current_a filtered_voltage_v power_w line_energy_j_mm governed_speed_mm_s commanded_speed_mm_s
+
+[teaching_snapshot_yaml]
+robot_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.27240967968313
+    - 1.0710261184710546
+    - 2.180025851451385
+    - 3.6894743983235436
+    - 1.4802383302458966
+    - 1.475784459638848
+  tcp_pose_world:
+    position_m:
+      x: 0.0409882833240674
+      y: -1.5365128539727777
+      z: 0.8899872668309907
+    orientation_xyzw:
+      x: -0.4355837586611503
+      y: 0.6337556876271521
+      z: -0.5283180348228105
+      w: -0.3598618786031996
+weld_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1648525927381
+    - 1.2922420604716771
+    - 1.8539296322963983
+    - 3.589461780430599
+    - 1.391100331190127
+    - 1.4199194626103104
+  tcp_pose_world:
+    position_m:
+      x: 0.046493459423684325
+      y: -1.7156812209764052
+      z: 0.7039206836462237
+    orientation_xyzw:
+      x: -0.435586797430743
+      y: 0.6337639392821951
+      z: -0.528318038619688
+      w: -0.35984366221817626
+weld_start_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.165179096287744
+    - 1.3192841976545053
+    - 1.833801860251743
+    - 3.58926816861935
+    - 1.3973881876818586
+    - 1.4228621224567934
+  tcp_pose_world:
+    position_m:
+      x: 0.04679661342158309
+      y: -1.7157272494256113
+      z: 0.6808993470560196
+    orientation_xyzw:
+      x: -0.4356040005965647
+      y: 0.6337302693138561
+      z: -0.528315255502808
+      w: -0.35988621982879293
+weld_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1648525927381
+    - 1.3251391573110445
+    - 1.8296935347961323
+    - 3.588827681775051
+    - 1.3987550551113417
+    - 1.423484769519654
+  tcp_pose_world:
+    position_m:
+      x: 0.04639012308157919
+      y: -1.7155348989806636
+      z: 0.6758045566264259
+    orientation_xyzw:
+      x: -0.43568190743491547
+      y: 0.633759300366467
+      z: -0.5282185051222237
+      w: -0.35988280811859236
+weld_goal_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.273689062270805
+    - 1.337714737136453
+    - 2.0084516982230305
+    - 3.688240289474401
+    - 1.561243168490619
+    - 1.5254147302394014
+  tcp_pose_world:
+    position_m:
+      x: 0.0423937317465059
+      y: -1.5371105920713002
+      z: 0.6833915523748588
+    orientation_xyzw:
+      x: -0.43563211053380774
+      y: 0.6337733314661355
+      z: -0.5282603683300546
+      w: -0.35985693246896244
+weld_end:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.272428854442979
+    - 1.3439683720081772
+    - 2.005076141541355
+    - 3.686998723774206
+    - 1.5637338899001154
+    - 1.5268463124833733
+  tcp_pose_world:
+    position_m:
+      x: 0.040988304454498636
+      y: -1.5364268709187994
+      z: 0.6784764993838666
+    orientation_xyzw:
+      x: -0.4355976651818463
+      y: 0.6338379374848955
+      z: -0.5282534141248965
+      w: -0.35979504382135175
+weld_finish:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.272405951257604
+    - 1.1691705954383358
+    - 2.1249962880568054
+    - 3.687834157408164
+    - 1.5169816974896109
+    - 1.4982739229381858
+  tcp_pose_world:
+    position_m:
+      x: 0.040986944407158665
+      y: -1.5364893594106015
+      z: 0.8167834972443337
+    orientation_xyzw:
+      x: -0.43559961213469944
+      y: 0.6337765362069385
+      z: -0.5282946458701413
+      w: -0.35984030792363536
+
+[touch_snapshot_yaml]
+{}
+
+[samples]
+elapsed_s raw0 state arc gas fwd wcr current_a voltage_v wire_feed_m_min set_current_a set_voltage_v error db collision
+0.032 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.074 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.113 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.155 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.200 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.233 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.269 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.311 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.354 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.396 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.437 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.473 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.520 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.552 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.594 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.635 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.676 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.717 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.755 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.794 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.833 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.873 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.912 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.957 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+0.995 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.032 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.072 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.116 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.156 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.191 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.233 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.273 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.315 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.352 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.394 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.435 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.473 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.512 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.555 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.596 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.633 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.675 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.714 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.755 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.796 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.841 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.872 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.917 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+1.952 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.000 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.039 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.072 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.119 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.155 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.200 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.230 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.276 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.314 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.352 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.409 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.440 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.473 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.513 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.555 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+2.593 0x00 idle 0 0 0 0 0 0.0 0.0 150 20.0 0 0 0
+
+[tcp_trajectory]
+elapsed_s x_m y_m z_m qx qy qz qw speed_m_s tf_stamp_s along_mm remaining_mm cross_track_mm progress waypoint phase
+0.0012 0.0461659 -1.7157249 0.6764815 -0.43551884 0.63385795 -0.52818455 -0.35995628 0.000000 1789373538.434369564 -0.173 179.382 0.717 0.00000 -1 ACTUAL_TF
+0.0249 0.0461902 -1.7156734 0.6762392 -0.43556271 0.63383665 -0.52818288 -0.35994315 0.004446 1789373538.490340233 -0.126 179.335 0.482 0.00000 -1 ACTUAL_TF
+0.0873 0.0462111 -1.7156290 0.6760509 -0.43559471 0.63382144 -0.52818157 -0.35993314 0.004153 1789373538.546455145 -0.085 179.294 0.307 0.00000 -1 ACTUAL_TF
+0.1450 0.0462190 -1.7156099 0.6759703 -0.43560921 0.63381432 -0.52818156 -0.35992815 0.003352 1789373538.602484226 -0.067 179.277 0.241 0.00000 -1 ACTUAL_TF
+0.2033 0.0462193 -1.7156105 0.6759669 -0.43560924 0.63381434 -0.52818151 -0.35992814 0.002365 1789373538.658481121 -0.068 179.277 0.238 0.00000 -1 ACTUAL_TF
+0.2545 0.0461952 -1.7155762 0.6759545 -0.43561152 0.63382465 -0.52816582 -0.35993025 0.001890 1789373538.714448929 -0.033 179.243 0.247 0.00000 -1 ACTUAL_TF
+0.3147 0.0461723 -1.7155456 0.6759435 -0.43561390 0.63383358 -0.52815081 -0.35993367 0.001537 1789373538.770322561 -0.002 179.211 0.259 0.00000 -1 ACTUAL_TF
+0.3664 0.0461564 -1.7155227 0.6759352 -0.43561669 0.63383959 -0.52814014 -0.35993537 0.001230 1789373538.826662540 0.021 179.188 0.267 0.00000 -1 ACTUAL_TF
+0.4266 0.0461386 -1.7154960 0.6759255 -0.43562047 0.63384627 -0.52812794 -0.35993692 0.001042 1789373538.882490635 0.048 179.161 0.278 0.00000 -1 ACTUAL_TF
+0.4749 0.0461105 -1.7154502 0.6759089 -0.43562714 0.63385757 -0.52810855 -0.35993741 0.001031 1789373538.938353777 0.095 179.115 0.295 0.00000 -1 ACTUAL_TF
+0.5332 0.0460878 -1.7154121 0.6758949 -0.43562807 0.63387015 -0.52809411 -0.35993531 0.000971 1789373538.994413376 0.133 179.076 0.311 0.00000 -1 ACTUAL_TF
+0.5919 0.0460475 -1.7153473 0.6758828 -0.43562511 0.63388408 -0.52807891 -0.35993666 0.001094 1789373539.050320864 0.199 179.010 0.345 0.00000 -1 ACTUAL_TF
+0.6569 0.0460230 -1.7152829 0.6758832 -0.43560876 0.63389529 -0.52808076 -0.35993399 0.001135 1789373539.106374264 0.264 178.945 0.367 0.00000 -1 ACTUAL_TF
+0.7003 0.0460249 -1.7151766 0.6758861 -0.43560822 0.63389420 -0.52808432 -0.35993133 0.001363 1789373539.162529230 0.370 178.839 0.362 0.00000 -1 ACTUAL_TF
+0.7539 0.0460386 -1.7150656 0.6758944 -0.43561547 0.63388311 -0.52808990 -0.35993392 0.001556 1789373539.218355417 0.481 178.728 0.347 0.00000 -1 ACTUAL_TF
+0.8177 0.0460422 -1.7149592 0.6758991 -0.43561653 0.63387936 -0.52809333 -0.35993419 0.001660 1789373539.274425983 0.587 178.622 0.341 0.00000 -1 ACTUAL_TF
+0.8688 0.0460550 -1.7148193 0.6759056 -0.43561872 0.63387355 -0.52810013 -0.35993180 0.001916 1789373539.330404043 0.727 178.483 0.326 0.00000 -1 ACTUAL_TF
+0.9297 0.0460726 -1.7146916 0.6759097 -0.43562219 0.63386890 -0.52810654 -0.35992640 0.002032 1789373539.386358976 0.854 178.355 0.306 0.00000 -1 ACTUAL_TF
+0.9789 0.0460768 -1.7145221 0.6759165 -0.43562353 0.63386378 -0.52811273 -0.35992470 0.002330 1789373539.442457914 1.023 178.186 0.299 0.00000 -1 ACTUAL_TF
+1.0498 0.0460826 -1.7143946 0.6759307 -0.43561796 0.63385619 -0.52812402 -0.35992825 0.002320 1789373539.498369694 1.151 178.059 0.294 0.00000 -1 ACTUAL_TF
+1.1004 0.0460864 -1.7142110 0.6759385 -0.43561838 0.63385109 -0.52813068 -0.35992695 0.002608 1789373539.554411888 1.334 177.875 0.287 0.00000 -1 ACTUAL_TF
+1.1493 0.0460879 -1.7140794 0.6759565 -0.43561203 0.63384079 -0.52814383 -0.35993348 0.002537 1789373539.610362530 1.466 177.743 0.289 0.00000 -1 ACTUAL_TF
+1.2022 0.0460834 -1.7138971 0.6759511 -0.43561599 0.63384531 -0.52813781 -0.35992957 0.002751 1789373539.666509151 1.648 177.561 0.285 0.00000 -1 ACTUAL_TF
+1.2629 0.0460957 -1.7137245 0.6759647 -0.43561391 0.63383646 -0.52814937 -0.35993071 0.002859 1789373539.722328663 1.821 177.389 0.274 0.00000 -1 ACTUAL_TF
+1.3152 0.0460917 -1.7135885 0.6759780 -0.43560643 0.63383122 -0.52815932 -0.35993437 0.002731 1789373539.778494120 1.957 177.253 0.280 0.00000 -1 ACTUAL_TF
+1.3770 0.0460941 -1.7133989 0.6759881 -0.43560808 0.63382346 -0.52816602 -0.35993622 0.002927 1789373539.834573507 2.146 177.063 0.277 0.00000 -1 ACTUAL_TF
+1.4287 0.0460994 -1.7132449 0.6759992 -0.43560354 0.63381847 -0.52817550 -0.35993657 0.002880 1789373539.890423059 2.300 176.909 0.273 0.00000 -1 ACTUAL_TF
+1.4938 0.0460998 -1.7130621 0.6760088 -0.43560097 0.63381393 -0.52818194 -0.35993823 0.002997 1789373539.946376085 2.483 176.726 0.273 0.00000 -1 ACTUAL_TF
+1.5451 0.0461061 -1.7129206 0.6760242 -0.43559692 0.63380467 -0.52819368 -0.35994222 0.002860 1789373540.002432585 2.625 176.585 0.273 0.00000 -1 ACTUAL_TF
+1.5950 0.0461135 -1.7127308 0.6760225 -0.43559906 0.63380717 -0.52819437 -0.35993422 0.003022 1789373540.058326006 2.814 176.395 0.260 0.00000 -1 ACTUAL_TF
+1.6589 0.0461188 -1.7125390 0.6760311 -0.43559805 0.63380268 -0.52820064 -0.35993415 0.003146 1789373540.114219666 3.006 176.204 0.256 0.00000 -1 ACTUAL_TF
+1.7087 0.0461265 -1.7123651 0.6760320 -0.43560449 0.63379988 -0.52820196 -0.35992933 0.003133 1789373540.170350790 3.179 176.030 0.246 0.00000 -1 ACTUAL_TF
+1.7701 0.0461334 -1.7121609 0.6760362 -0.43560046 0.63380141 -0.52820859 -0.35992179 0.003289 1789373540.226295948 3.383 175.826 0.238 0.00000 -1 ACTUAL_TF
+1.8228 0.0461371 -1.7119747 0.6760282 -0.43561558 0.63380120 -0.52819883 -0.35991818 0.003302 1789373540.282238245 3.569 175.640 0.224 0.00000 -1 ACTUAL_TF
+1.8764 0.0461609 -1.7117858 0.6760428 -0.43560787 0.63379556 -0.52821628 -0.35991185 0.003333 1789373540.338284492 3.757 175.452 0.216 0.00000 -1 ACTUAL_TF
+1.9297 0.0461641 -1.7116052 0.6760395 -0.43561929 0.63379358 -0.52820962 -0.35991128 0.003299 1789373540.394386530 3.938 175.272 0.206 0.00000 -1 ACTUAL_TF
+1.9929 0.0461816 -1.7113906 0.6760456 -0.43560385 0.63380104 -0.52822638 -0.35989224 0.003459 1789373540.450629234 4.152 175.058 0.198 0.00000 -1 ACTUAL_TF
+2.0519 0.0461835 -1.7112026 0.6760499 -0.43562203 0.63378802 -0.52822052 -0.35990176 0.003434 1789373540.506334782 4.340 174.870 0.196 0.00000 -1 ACTUAL_TF
+2.1020 0.0461926 -1.7109855 0.6760518 -0.43561702 0.63379266 -0.52822613 -0.35989140 0.003570 1789373540.562219143 4.557 174.653 0.189 0.00000 -1 ACTUAL_TF
+2.1681 0.0461955 -1.7107685 0.6760626 -0.43561988 0.63378444 -0.52822994 -0.35989685 0.003658 1789373540.618448257 4.773 174.436 0.194 0.00000 -1 ACTUAL_TF
+2.2121 0.0462092 -1.7105996 0.6760718 -0.43562146 0.63377766 -0.52823691 -0.35989662 0.003467 1789373540.674604654 4.942 174.267 0.196 0.00000 -1 ACTUAL_TF
+2.2725 0.0462170 -1.7103804 0.6760777 -0.43562512 0.63377324 -0.52824061 -0.35989455 0.003609 1789373540.730314732 5.161 174.048 0.197 0.00000 -1 ACTUAL_TF
+2.3252 0.0462167 -1.7101900 0.6760734 -0.43562882 0.63377757 -0.52823615 -0.35988899 0.003546 1789373540.786345720 5.351 173.858 0.189 0.00000 -1 ACTUAL_TF
+2.3859 0.0462147 -1.7099685 0.6760848 -0.43562889 0.63377090 -0.52824166 -0.35989258 0.003666 1789373540.842576742 5.573 173.637 0.197 0.00000 -1 ACTUAL_TF
+2.4449 0.0462196 -1.7097680 0.6760830 -0.43563792 0.63376963 -0.52823919 -0.35988751 0.003642 1789373540.898475409 5.773 173.436 0.192 0.00000 -1 ACTUAL_TF
+2.4968 0.0462210 -1.7095494 0.6760940 -0.43563405 0.63376580 -0.52824697 -0.35988751 0.003726 1789373540.954308271 5.992 173.218 0.200 0.00000 -1 ACTUAL_TF
+2.5498 0.0462311 -1.7093735 0.6761072 -0.43563065 0.63375904 -0.52825843 -0.35988672 0.003553 1789373541.010404110 6.167 173.042 0.212 0.00000 -1 ACTUAL_TF
+2.6084 0.0462399 -1.7091610 0.6761261 -0.43562659 0.63374815 -0.52827316 -0.35988918 0.003631 1789373541.066375971 6.380 172.830 0.230 0.00000 -1 ACTUAL_TF

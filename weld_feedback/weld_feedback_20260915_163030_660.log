@@ -1,0 +1,2288 @@
+WELD FEEDBACK LOG
+result=completed
+started=2026-09-15 16:29:50
+ended=2026-09-15 16:30:30
+elapsed_seconds=39.773
+
+================ OPERATOR OVERVIEW ================
+REQUESTED : 190 A / 24.5 V · FE-SOLID 1.2 mm · LSM · CO2 100%
+RX ECHO   : 160 A / 25.0 V · MATCH=NO
+CURRENT FB: no positive feedback A
+VOLTAGE FB: no positive feedback V
+WIRE FEED : no positive feedback m/min
+ARC ON    : 0.000 s
+NET WELD  : 0.000 s
+WIRE USED : 0.000 mm (base 0.000 + alpha 0.000)
+WCR       : NOT DETECTED
+SAMPLES   : RX 993 / welding 0 / TCP 711
+===================================================
+
+[commanded]
+current_a=190
+voltage_tenths=245
+voltage=24.5
+material=FE-SOLID
+diameter_mm=1.2
+mode=LSM
+gas=CO2 100%
+synergic=False
+correction=0.0
+hot_start_enabled=True
+hot_start_percent=20.0
+hot_start_hold_adjustment=0
+crater_enabled=False
+crater_percent=31.57894736842105
+crater_current_a=60.0
+crater_voltage_v=25.0
+crater_seconds=1.0
+wire_consumable_alpha_mm=0.0
+hot_start_current_a=228
+
+[rx_setting_echo]
+current_a=160
+voltage_v=25.0
+hot_start_current_a=0
+hot_start_hold_adjustment=-15
+
+[rx_welding_setting_echo]
+
+[execution_conditions]
+mode=sequence_execute
+run_all=True
+touch_io_backend=fastech_ethernet
+touch_input_port=4
+touch_sensing_output_port=0
+fastech_ip=192.168.0.3
+fastech_poll_target_hz=100.0
+hicomm_source_ip=192.168.1.2
+hicomm_welder_ip=192.168.1.10
+hicomm_port=60000
+gui_velocity_percent=36.95263157894737
+gui_speed_mode=scale
+gui_tcp_speed_mm_s=10.0
+gui_interpolation_step_mm=5.0
+seam_orientation_mode=Keep reference orientation
+weld_fixed_tilt_x_deg=0.0
+weld_fixed_tilt_y_deg=0.0
+weld_fixed_tilt_z_deg=-0.0
+weld_weave_enabled=False
+weld_weave_pattern=circle
+weld_weave_amplitude_mm=2.7
+weld_weave_cycles=4
+weld_weave_samples_per_cycle=8
+weld_weave_axis=tool_y
+weld_lead_in_mm=1.0
+weld_lead_out_mm=6.0
+weld_safe_approach_mm=30.0
+weld_approach_mode=taught_wait
+weld_pre_start_lead_mm=0.0
+weld_tcp_speed_mm_s=5.0
+weld_arc_off_delay_ms=500.0
+tcp_tracking.parent_frame=World
+tcp_tracking.child_frame=right_manipulator_ee_point
+tcp_tracking.timestamp_source=TF_header_stamp
+initial_fastech_di0=False
+initial_fastech_do0=True
+robot_connected.left=True
+robot_connected.right=True
+robot_connected.head=True
+hicomm_connected=True
+execution_allowed=True
+steps[0].sequence_number=1
+steps[0].type=named_pose
+steps[0].parallel_slot=1
+steps[0].duration=0.0
+steps[0].planning_group=right_manipulator
+steps[0].velocity_scale=0.3695263157894737
+steps[0].tcp_speed_m_s=0.0
+steps[0].pose_name=weld_start_wait
+steps[0].pose_label=3 · Weld start wait pose
+steps[0].touch_guard=False
+steps[0].continue_after_touch=False
+steps[0].weld_scenario_id=weld-26365724278304
+steps[0].weld_scenario_stage=start_wait
+steps[0].target_tcp.position_m.x=0.045316445920052795
+steps[0].target_tcp.position_m.y=-1.7377484208672989
+steps[0].target_tcp.position_m.z=0.6708393484462141
+steps[0].target_tcp.orientation_xyzw.x=-0.4562184773925645
+steps[0].target_tcp.orientation_xyzw.y=0.6620306512086954
+steps[0].target_tcp.orientation_xyzw.z=-0.49164372876190976
+steps[0].target_tcp.orientation_xyzw.w=-0.3344645896277911
+steps[0].joint_names[0]=right_manipulator_joint1
+steps[0].joint_names[1]=right_manipulator_joint2
+steps[0].joint_names[2]=right_manipulator_joint3
+steps[0].joint_names[3]=right_manipulator_joint4
+steps[0].joint_names[4]=right_manipulator_joint5
+steps[0].joint_names[5]=right_manipulator_joint6
+steps[0].joint_positions_rad[0]=5.1385165927183065
+steps[0].joint_positions_rad[1]=1.2777110546158779
+steps[0].joint_positions_rad[2]=1.8116883021402699
+steps[0].joint_positions_rad[3]=3.5688366630523713
+steps[0].joint_positions_rad[4]=1.2260189646993853
+steps[0].joint_positions_rad[5]=1.3946163696193041
+steps[1].sequence_number=2
+steps[1].type=motion
+steps[1].parallel_slot=2
+steps[1].duration=0.0
+steps[1].planning_group=right_manipulator
+steps[1].velocity_scale=0.3695263157894737
+steps[1].tcp_speed_m_s=0.0
+steps[1].interpolation_step=0.005
+steps[1].path_kind=taught_wait_align_weld_attitude
+steps[1].touch_guard=False
+steps[1].continue_after_touch=False
+steps[1].accept_initial_touch=False
+steps[1].weld_scenario_id=weld-26365724278304
+steps[1].weld_scenario_stage=start_safe
+steps[1].waypoint_count=1
+steps[1].waypoints[0].position_m.x=0.045316445920052795
+steps[1].waypoints[0].position_m.y=-1.7377484208672989
+steps[1].waypoints[0].position_m.z=0.6708393484462141
+steps[1].waypoints[0].orientation_xyzw.x=-0.45624706171627377
+steps[1].waypoints[0].orientation_xyzw.y=0.6620029819462941
+steps[1].waypoints[0].orientation_xyzw.z=-0.4916394720518402
+steps[1].waypoints[0].orientation_xyzw.w=-0.3344866216907176
+steps[2].sequence_number=3
+steps[2].type=motion
+steps[2].parallel_slot=3
+steps[2].duration=0.0
+steps[2].planning_group=right_manipulator
+steps[2].velocity_scale=0.3695263157894737
+steps[2].tcp_speed_m_s=0.0
+steps[2].interpolation_step=0.005
+steps[2].path_kind=taught_wait_to_weld_start
+steps[2].touch_guard=False
+steps[2].continue_after_touch=True
+steps[2].accept_initial_touch=False
+steps[2].weld_scenario_id=weld-26365724278304
+steps[2].weld_scenario_stage=start_contact
+steps[2].waypoint_count=1
+steps[2].waypoints[0].position_m.x=0.04538998103320078
+steps[2].waypoints[0].position_m.y=-1.7388800593657079
+steps[2].waypoints[0].position_m.z=0.6669907849910177
+steps[2].waypoints[0].orientation_xyzw.x=-0.45624706171627377
+steps[2].waypoints[0].orientation_xyzw.y=0.6620029819462941
+steps[2].waypoints[0].orientation_xyzw.z=-0.4916394720518402
+steps[2].waypoints[0].orientation_xyzw.w=-0.3344866216907176
+steps[3].sequence_number=4
+steps[3].type=digital_weld
+steps[3].parallel_slot=5
+steps[3].duration=0.0
+steps[3].command=on
+steps[3].weld_scenario_id=weld-26365724278304
+steps[3].weld_scenario_stage=arc_on
+steps[3].settings.current_a=190
+steps[3].settings.voltage_tenths=245
+steps[3].settings.voltage=24.5
+steps[3].settings.material=FE-SOLID
+steps[3].settings.diameter_mm=1.2
+steps[3].settings.mode=LSM
+steps[3].settings.gas=CO2 100%
+steps[3].settings.synergic=False
+steps[3].settings.correction=0.0
+steps[3].settings.hot_start_enabled=True
+steps[3].settings.hot_start_percent=20.0
+steps[3].settings.hot_start_hold_adjustment=0
+steps[3].settings.crater_enabled=False
+steps[3].settings.crater_percent=31.57894736842105
+steps[3].settings.crater_current_a=60.0
+steps[3].settings.crater_voltage_v=25.0
+steps[3].settings.crater_seconds=1.0
+steps[3].settings.wire_consumable_alpha_mm=0.0
+steps[3].settings.hot_start_current_a=228
+steps[4].sequence_number=5
+steps[4].type=motion
+steps[4].parallel_slot=5
+steps[4].duration=0.0
+steps[4].planning_group=right_manipulator
+steps[4].velocity_scale=0.3695263157894737
+steps[4].tcp_speed_m_s=0.005
+steps[4].interpolation_step=0.005
+steps[4].path_kind=continuous_lead_to_lead_over_taught_goal_fastech_di0_ignored
+steps[4].touch_guard=False
+steps[4].weld_scenario_id=weld-26365724278304
+steps[4].weld_scenario_stage=weld_motion
+steps[4].lead_in_mm=1.0
+steps[4].lead_out_mm=6.0
+steps[4].linear_motion_profile=True
+steps[4].waypoint_count=2
+steps[4].waypoints[0].position_m.x=0.04538998103320078
+steps[4].waypoints[0].position_m.y=-1.7388800593657079
+steps[4].waypoints[0].position_m.z=0.6669907849910177
+steps[4].waypoints[0].orientation_xyzw.x=-0.45624706171627377
+steps[4].waypoints[0].orientation_xyzw.y=0.6620029819462941
+steps[4].waypoints[0].orientation_xyzw.z=-0.4916394720518402
+steps[4].waypoints[0].orientation_xyzw.w=-0.3344866216907176
+steps[4].waypoints[1].position_m.x=0.04026114257422305
+steps[4].waypoints[1].position_m.y=-1.5461167213224445
+steps[4].waypoints[1].position_m.z=0.6711102577568602
+steps[4].waypoints[1].orientation_xyzw.x=-0.45554110526879366
+steps[4].waypoints[1].orientation_xyzw.y=0.6622460155241352
+steps[4].waypoints[1].orientation_xyzw.z=-0.4918710963254949
+steps[4].waypoints[1].orientation_xyzw.w=-0.3346271670567837
+steps[4].lead_start.position_m.x=0.04538998103320078
+steps[4].lead_start.position_m.y=-1.7388800593657079
+steps[4].lead_start.position_m.z=0.6669907849910177
+steps[4].lead_start.orientation_xyzw.x=-0.45624706171627377
+steps[4].lead_start.orientation_xyzw.y=0.6620029819462941
+steps[4].lead_start.orientation_xyzw.z=-0.4916394720518402
+steps[4].lead_start.orientation_xyzw.w=-0.3344866216907176
+steps[4].usable_seam_start.position_m.x=0.045363389594635095
+steps[4].usable_seam_start.position_m.y=-1.7378806411734034
+steps[4].usable_seam_start.position_m.z=0.6670121431811522
+steps[4].usable_seam_start.orientation_xyzw.x=-0.45624706171627377
+steps[4].usable_seam_start.orientation_xyzw.y=0.6620029819462941
+steps[4].usable_seam_start.orientation_xyzw.z=-0.4916394720518402
+steps[4].usable_seam_start.orientation_xyzw.w=-0.3344866216907176
+steps[4].usable_seam_goal.position_m.x=0.04042069120561714
+steps[4].usable_seam_goal.position_m.y=-1.5521132304762715
+steps[4].usable_seam_goal.position_m.z=0.6709821086160532
+steps[4].usable_seam_goal.orientation_xyzw.x=-0.45554110526879366
+steps[4].usable_seam_goal.orientation_xyzw.y=0.6622460155241352
+steps[4].usable_seam_goal.orientation_xyzw.z=-0.4918710963254949
+steps[4].usable_seam_goal.orientation_xyzw.w=-0.3346271670567837
+steps[4].lead_end.position_m.x=0.04026114257422305
+steps[4].lead_end.position_m.y=-1.5461167213224445
+steps[4].lead_end.position_m.z=0.6711102577568602
+steps[4].lead_end.orientation_xyzw.x=-0.45554110526879366
+steps[4].lead_end.orientation_xyzw.y=0.6622460155241352
+steps[4].lead_end.orientation_xyzw.z=-0.4918710963254949
+steps[4].lead_end.orientation_xyzw.w=-0.3346271670567837
+steps[5].sequence_number=6
+steps[5].type=digital_weld
+steps[5].parallel_slot=5
+steps[5].duration=0.0
+steps[5].velocity_scale=0.3695263157894737
+steps[5].tcp_speed_m_s=0.005
+steps[5].command=off
+steps[5].weld_scenario_id=weld-26365724278304
+steps[5].weld_scenario_stage=arc_off
+steps[5].trigger_before_goal=True
+steps[5].arc_off_delay_s=0.5
+steps[5].settings.current_a=190
+steps[5].settings.voltage_tenths=245
+steps[5].settings.voltage=24.5
+steps[5].settings.material=FE-SOLID
+steps[5].settings.diameter_mm=1.2
+steps[5].settings.mode=LSM
+steps[5].settings.gas=CO2 100%
+steps[5].settings.synergic=False
+steps[5].settings.correction=0.0
+steps[5].settings.hot_start_enabled=True
+steps[5].settings.hot_start_percent=20.0
+steps[5].settings.hot_start_hold_adjustment=0
+steps[5].settings.crater_enabled=False
+steps[5].settings.crater_percent=31.57894736842105
+steps[5].settings.crater_current_a=60.0
+steps[5].settings.crater_voltage_v=25.0
+steps[5].settings.crater_seconds=1.0
+steps[5].settings.wire_consumable_alpha_mm=0.0
+steps[5].settings.hot_start_current_a=228
+steps[6].sequence_number=7
+steps[6].type=motion
+steps[6].parallel_slot=6
+steps[6].duration=0.0
+steps[6].planning_group=right_manipulator
+steps[6].velocity_scale=0.3695263157894737
+steps[6].tcp_speed_m_s=0.0
+steps[6].interpolation_step=0.005
+steps[6].path_kind=weld_end_to_taught_wait_fixed_attitude
+steps[6].pose_name=weld_goal_wait
+steps[6].pose_label=5 · Weld goal wait pose
+steps[6].touch_guard=False
+steps[6].continue_after_touch=False
+steps[6].weld_scenario_id=weld-26365724278304
+steps[6].weld_scenario_stage=goal_wait
+steps[6].waypoint_count=1
+steps[6].waypoints[0].position_m.x=0.04166227741233647
+steps[6].waypoints[0].position_m.y=-1.5520793520807143
+steps[6].waypoints[0].position_m.z=0.6723456875491607
+steps[6].waypoints[0].orientation_xyzw.x=-0.45554110526879366
+steps[6].waypoints[0].orientation_xyzw.y=0.6622460155241352
+steps[6].waypoints[0].orientation_xyzw.z=-0.4918710963254949
+steps[6].waypoints[0].orientation_xyzw.w=-0.3346271670567837
+steps[7].sequence_number=8
+steps[7].type=named_pose
+steps[7].parallel_slot=7
+steps[7].duration=0.0
+steps[7].planning_group=right_manipulator
+steps[7].velocity_scale=0.3695263157894737
+steps[7].tcp_speed_m_s=0.0
+steps[7].pose_name=weld_finish
+steps[7].pose_label=7 · Weld end pose
+steps[7].touch_guard=False
+steps[7].continue_after_touch=False
+steps[7].weld_scenario_id=weld-26365724278304
+steps[7].weld_scenario_stage=finish
+steps[7].target_tcp.position_m.x=0.04172286338050285
+steps[7].target_tcp.position_m.y=-1.552166809471377
+steps[7].target_tcp.position_m.z=0.720524186255542
+steps[7].target_tcp.orientation_xyzw.x=-0.4554985937127954
+steps[7].target_tcp.orientation_xyzw.y=0.6622084210048903
+steps[7].target_tcp.orientation_xyzw.z=-0.4919414392145496
+steps[7].target_tcp.orientation_xyzw.w=-0.33465603036460195
+steps[7].joint_names[0]=right_manipulator_joint1
+steps[7].joint_names[1]=right_manipulator_joint2
+steps[7].joint_names[2]=right_manipulator_joint3
+steps[7].joint_names[3]=right_manipulator_joint4
+steps[7].joint_names[4]=right_manipulator_joint5
+steps[7].joint_names[5]=right_manipulator_joint6
+steps[7].joint_positions_rad[0]=5.240625384705252
+steps[7].joint_positions_rad[1]=1.2261973964924207
+steps[7].joint_positions_rad[2]=2.043611683040638
+steps[7].joint_positions_rad[3]=3.6491389594015304
+steps[7].joint_positions_rad[4]=1.3860845335930718
+steps[7].joint_positions_rad[5]=1.4831278600286326
+steps[8].sequence_number=9
+steps[8].type=digital_output
+steps[8].parallel_slot=8
+steps[8].duration=0.0
+steps[8].port=0
+steps[8].value=True
+steps[8].weld_scenario_id=weld-26365724278304
+steps[8].weld_scenario_stage=touch_output_on
+hicomm_cyclic_period_ms=40.0
+arc_wait_recognition=True
+arc_wait_main_welding=True
+arc_wait_established=True
+arc_establishment_timeout_s=5.0
+
+[summary]
+rx_samples=993
+welding_samples=0
+wcr_seen=0
+current_a.min=None
+current_a.average=None
+current_a.max=None
+voltage_v.min=None
+voltage_v.average=None
+voltage_v.max=None
+wire_feed_m_min.min=None
+wire_feed_m_min.average=None
+wire_feed_m_min.max=None
+
+[production_metrics]
+arc_started_elapsed_s=None
+arc_completed_elapsed_s=None
+arc_on_time_s=0.0
+main_weld_arc_time_s=0.0
+crater_arc_time_s=0.0
+weld_motion_start_elapsed_s=0.04975743099930696
+weld_motion_complete_elapsed_s=39.76656246799757
+weld_motion_duration_s=39.71680503699827
+net_weld_arc_time_s=0.0
+wire_feed_average_m_min=0.0
+wire_consumable_base_mm=0.0
+wire_consumable_alpha_mm=0.0
+wire_consumable_mm=0.0
+wire_consumable_formula=integral(WFS*1000/60*dt)+alpha
+weld_motion_start_unix_time=1789457390.940758
+weld_motion_start_wall_time=2026-09-15 16:29:50.940
+weld_motion_complete_unix_time=1789457430.657564
+weld_motion_complete_wall_time=2026-09-15 16:30:30.657
+
+[arc_off_control]
+
+[teaching_snapshot_yaml]
+robot_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.27240967968313
+    - 1.0710261184710546
+    - 2.180025851451385
+    - 3.6894743983235436
+    - 1.4802383302458966
+    - 1.475784459638848
+  tcp_pose_world:
+    position_m:
+      x: 0.0409882833240674
+      y: -1.5365128539727777
+      z: 0.8899872668309907
+    orientation_xyzw:
+      x: -0.4355837586611503
+      y: 0.6337556876271521
+      z: -0.5283180348228105
+      w: -0.3598618786031996
+weld_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1385165927183065
+    - 1.2058836026456232
+    - 1.8601604971408021
+    - 3.57242873473067
+    - 1.2048849172368434
+    - 1.3842847693283962
+  tcp_pose_world:
+    position_m:
+      x: 0.04536460232437045
+      y: -1.7378648075743524
+      z: 0.7323497374508234
+    orientation_xyzw:
+      x: -0.45619338479242244
+      y: 0.6620087785166984
+      z: -0.4916868199541877
+      w: -0.33447876453042547
+weld_start_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1385165927183065
+    - 1.2777110546158779
+    - 1.8116883021402699
+    - 3.5688366630523713
+    - 1.2260189646993853
+    - 1.3946163696193041
+  tcp_pose_world:
+    position_m:
+      x: 0.045316445920052795
+      y: -1.7377484208672989
+      z: 0.6708393484462141
+    orientation_xyzw:
+      x: -0.4562184773925645
+      y: 0.6620306512086954
+      z: -0.49164372876190976
+      w: -0.3344645896277911
+weld_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.138512864292781
+    - 1.2821801052411397
+    - 1.8083506955041282
+    - 3.5686505080921744
+    - 1.2270669185883314
+    - 1.3950302248527024
+  tcp_pose_world:
+    position_m:
+      x: 0.045363389594635095
+      y: -1.7378806411734034
+      z: 0.6670121431811522
+    orientation_xyzw:
+      x: -0.45624706171627377
+      y: 0.6620029819462941
+      z: -0.4916394720518402
+      w: -0.3344866216907176
+weld_goal_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.240606209945404
+    - 1.2861061373201346
+    - 2.0024942068645233
+    - 3.647502446911677
+    - 1.4023849436771199
+    - 1.4923430631905794
+  tcp_pose_world:
+    position_m:
+      x: 0.04166227741233647
+      y: -1.5520793520807143
+      z: 0.6723456875491607
+    orientation_xyzw:
+      x: -0.45552948772901103
+      y: 0.6622340863107999
+      z: -0.4918873375519317
+      w: -0.3346427167794285
+weld_end:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.239075957583045
+    - 1.2878451815119563
+    - 2.0017993881361216
+    - 3.645922926069151
+    - 1.4033532690494726
+    - 1.4926619767311162
+  tcp_pose_world:
+    position_m:
+      x: 0.04042069120561714
+      y: -1.5521132304762715
+      z: 0.6709821086160532
+    orientation_xyzw:
+      x: -0.45554110526879366
+      y: 0.6622460155241352
+      z: -0.4918710963254949
+      w: -0.3346271670567837
+weld_finish:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.240625384705252
+    - 1.2261973964924207
+    - 2.043611683040638
+    - 3.6491389594015304
+    - 1.3860845335930718
+    - 1.4831278600286326
+  tcp_pose_world:
+    position_m:
+      x: 0.04172286338050285
+      y: -1.552166809471377
+      z: 0.720524186255542
+    orientation_xyzw:
+      x: -0.4554985937127954
+      y: 0.6622084210048903
+      z: -0.4919414392145496
+      w: -0.33465603036460195
+
+[touch_snapshot_yaml]
+{}
+
+[samples]
+elapsed_s raw0 state arc gas fwd wcr current_a voltage_v wire_feed_m_min set_current_a set_voltage_v error db collision
+0.019 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.058 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.109 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.138 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.176 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.218 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.260 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.297 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.337 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.378 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.422 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.458 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.495 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.537 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.577 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.618 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.655 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.701 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.816 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.855 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.896 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.938 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+0.980 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.016 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.055 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.094 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.135 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.176 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.219 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.259 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.299 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.335 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.377 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.455 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.501 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.540 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.577 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.617 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.657 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.696 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.736 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.775 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.829 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.856 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.898 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.936 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+1.977 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.014 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.058 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.097 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.135 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.177 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.216 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.254 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.294 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.336 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.379 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.457 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.494 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.536 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.576 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.616 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.657 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.696 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.736 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.776 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.817 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.857 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.900 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+2.977 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.016 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.056 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.098 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.137 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.177 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.216 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.255 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.296 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.337 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.379 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.500 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.539 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.577 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.619 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.655 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.696 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.738 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.777 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.815 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.859 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.896 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.936 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+3.975 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.017 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.095 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.140 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.182 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.215 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.257 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.346 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.378 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.456 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.497 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.536 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.578 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.620 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.657 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.698 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.738 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.777 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.815 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.857 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.935 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+4.974 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.016 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.055 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.095 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.136 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.177 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.216 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.258 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.295 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.338 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.375 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.417 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.457 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.496 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.536 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.577 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.615 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.656 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.698 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.738 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.778 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.818 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.856 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.898 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.937 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+5.980 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.020 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.056 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.098 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.137 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.178 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.222 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.300 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.335 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.377 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.418 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.458 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.505 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.540 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.578 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.617 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.655 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.694 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.738 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.775 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.819 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.859 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.901 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.938 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+6.984 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.015 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.055 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.099 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.137 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.175 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.215 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.256 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.296 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.337 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.378 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.417 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.457 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.496 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.535 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.576 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.617 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.659 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.699 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.736 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.780 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.820 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.856 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.897 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.945 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+7.984 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.016 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.058 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.099 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.135 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.176 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.223 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.262 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.299 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.336 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.377 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.414 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.463 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.496 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.541 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.576 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.619 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.658 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.699 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.739 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.786 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.823 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.862 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.898 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.935 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+8.976 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.017 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.057 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.095 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.137 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.176 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.217 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.256 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.296 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.337 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.379 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.455 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.496 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.535 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.578 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.616 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.660 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.698 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.740 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.778 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.815 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.855 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.897 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.940 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+9.976 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.057 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.097 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.139 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.177 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.218 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.261 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.299 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.342 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.379 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.418 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.459 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.495 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.537 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.579 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.616 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.655 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.696 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.740 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.777 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.818 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.857 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.900 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.934 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+10.977 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.019 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.054 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.095 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.143 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.176 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.215 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.256 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.295 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.341 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.379 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.416 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.457 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.499 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.574 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.663 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.702 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.740 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.821 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.864 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+11.985 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.021 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.067 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.107 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.185 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.228 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.262 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.306 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.347 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.387 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.427 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.705 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.782 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.823 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.862 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.908 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.941 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+12.982 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.021 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.062 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.102 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.187 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.229 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.341 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.384 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.425 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.466 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.501 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.542 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.583 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+13.985 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.034 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.065 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.106 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.151 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.187 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.227 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.308 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.350 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.386 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.427 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.467 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.503 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.589 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.704 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.744 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.943 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+14.982 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.030 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.063 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.102 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.186 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.226 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.262 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.301 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.343 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.386 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.428 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.463 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.505 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.546 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.623 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.667 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.707 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.782 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.823 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.863 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+15.979 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.190 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.229 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.266 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.344 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.386 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.426 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.466 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.508 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.661 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.703 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.830 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.864 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.946 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+16.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.029 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.066 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.113 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.224 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.344 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.384 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.424 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.462 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.503 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.540 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.581 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.622 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.666 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.703 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.780 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.823 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.862 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+17.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.022 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.061 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.143 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.185 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.228 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.350 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.382 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.423 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.505 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.543 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.701 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.862 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.910 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+18.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.021 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.069 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.101 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.141 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.180 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.230 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.302 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.342 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.384 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.424 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.464 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.503 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.543 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.583 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.622 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.664 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.701 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.943 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+19.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.027 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.063 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.104 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.143 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.181 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.229 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.273 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.343 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.382 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.422 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.543 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.588 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.663 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.708 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.751 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.781 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.832 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.864 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+20.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.030 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.103 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.143 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.221 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.268 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.307 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.387 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.430 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.469 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.503 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.543 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.622 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.746 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.841 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.873 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.943 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+21.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.073 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.183 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.226 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.343 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.383 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.425 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.464 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.500 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.543 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.583 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.629 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.667 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.711 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.783 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.825 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.863 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+22.992 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.025 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.070 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.104 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.142 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.182 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.222 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.266 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.301 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.346 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.382 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.425 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.463 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.506 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.546 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.579 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.668 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.744 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.786 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.830 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.868 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+23.984 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.065 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.109 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.188 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.230 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.350 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.394 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.430 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.467 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.632 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.666 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.705 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.786 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.827 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.866 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.905 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.948 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+24.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.023 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.102 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.222 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.263 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.345 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.386 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.423 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.464 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.507 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.542 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.700 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.789 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.907 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.945 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+25.985 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.025 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.076 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.102 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.141 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.225 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.386 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.423 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.467 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.505 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.587 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.623 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.702 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.759 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.827 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.863 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.945 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+26.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.067 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.108 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.142 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.188 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.223 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.343 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.387 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.424 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.502 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.547 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.584 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.627 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.761 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.784 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.827 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.862 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+27.988 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.028 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.063 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.185 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.234 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.347 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.390 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.429 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.500 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.591 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.625 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.756 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.781 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.834 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.860 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.945 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+28.982 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.028 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.067 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.108 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.155 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.224 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.346 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.388 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.426 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.466 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.714 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.743 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.785 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.824 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.867 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.905 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.953 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+29.985 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.025 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.107 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.185 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.228 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.382 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.422 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.468 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.506 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.581 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.663 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.708 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.744 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.791 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.824 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.863 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+30.984 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.025 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.107 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.221 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.303 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.390 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.425 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.463 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.542 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.590 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.624 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.667 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.790 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.827 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+31.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.022 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.103 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.229 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.260 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.301 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.344 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.385 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.422 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.464 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.508 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.542 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.580 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.631 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.705 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.744 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.788 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.827 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.865 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.910 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.947 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+32.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.026 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.104 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.150 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.192 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.224 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.276 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.302 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.382 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.421 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.464 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.502 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.583 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.622 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.705 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.748 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.783 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.828 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.864 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.903 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.943 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+33.982 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.023 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.063 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.101 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.142 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.180 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.226 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.301 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.345 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.387 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.427 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.465 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.502 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.666 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.748 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.790 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.825 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.864 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.906 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.953 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+34.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.021 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.064 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.106 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.148 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.225 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.269 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.311 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.340 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.389 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.426 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.467 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.504 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.544 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.587 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.627 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.662 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.705 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.750 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.786 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.828 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.869 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.904 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.947 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+35.986 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.030 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.065 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.108 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.146 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.229 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.268 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.306 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.343 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.384 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.426 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.462 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.510 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.547 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.625 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.663 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.706 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.785 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.824 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.871 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.942 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+36.985 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.023 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.060 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.106 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.145 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.183 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.226 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.264 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.304 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.344 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.383 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.428 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.463 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.507 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.545 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.583 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.628 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.666 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.703 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.740 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.783 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.826 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.869 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.908 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.944 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+37.983 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.025 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.066 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.237 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.265 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.302 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.345 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.392 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.422 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.462 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.502 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.548 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.585 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.622 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.666 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.703 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.791 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.822 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.863 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.902 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.945 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+38.987 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.023 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.066 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.105 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.144 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.184 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.224 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.266 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.307 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.348 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.384 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.426 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.466 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.507 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.542 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.586 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.626 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.665 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.701 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+39.745 0x00 idle 0 0 0 0 0 0.0 0.0 160 25.0 0 0 0
+
+[tcp_trajectory]
+elapsed_s x_m y_m z_m qx qy qz qw speed_m_s tf_stamp_s along_mm remaining_mm cross_track_mm progress waypoint phase
+0.0015 0.0453472 -1.7386222 0.6674143 -0.45629332 0.66202201 -0.49157300 -0.33448355 0.000000 1789457390.853093863 -0.732 186.608 0.419 0.00000 -1 ACTUAL_TF
+0.0247 0.0453557 -1.7386850 0.6672256 -0.45629028 0.66201974 -0.49157977 -0.33448224 0.003553 1789457390.909095764 -0.799 186.675 0.232 0.00000 -1 ACTUAL_TF
+0.0834 0.0453840 -1.7387806 0.6671543 -0.45626998 0.66200655 -0.49161196 -0.33448874 0.003145 1789457390.965017080 -0.897 186.773 0.161 0.00000 -1 ACTUAL_TF
+0.1369 0.0453918 -1.7388249 0.6671020 -0.45626087 0.66199944 -0.49162726 -0.33449274 0.002572 1789457391.020932913 -0.943 186.818 0.110 0.00000 -1 ACTUAL_TF
+0.2020 0.0453946 -1.7388322 0.6670856 -0.45625831 0.66199846 -0.49163037 -0.33449360 0.001897 1789457391.077050447 -0.950 186.826 0.094 0.00000 -1 ACTUAL_TF
+0.2535 0.0453711 -1.7387803 0.6670658 -0.45627082 0.66200609 -0.49161087 -0.33449010 0.001651 1789457391.133045435 -0.898 186.774 0.075 0.00000 -1 ACTUAL_TF
+0.3134 0.0453463 -1.7387320 0.6670474 -0.45627980 0.66201502 -0.49159154 -0.33448859 0.001462 1789457391.189189911 -0.850 186.725 0.067 0.00000 -1 ACTUAL_TF
+0.3622 0.0453217 -1.7386839 0.6670290 -0.45628883 0.66202387 -0.49157230 -0.33448703 0.001330 1789457391.245017052 -0.801 186.677 0.072 0.00000 -1 ACTUAL_TF
+0.4282 0.0452988 -1.7386399 0.6670122 -0.45629680 0.66203218 -0.49155455 -0.33448580 0.001211 1789457391.301208735 -0.757 186.633 0.086 0.00000 -1 ACTUAL_TF
+0.4767 0.0452708 -1.7385888 0.6669982 -0.45630311 0.66203858 -0.49153909 -0.33448725 0.001168 1789457391.357242584 -0.706 186.581 0.111 0.00000 -1 ACTUAL_TF
+0.5351 0.0452262 -1.7385180 0.6669856 -0.45630580 0.66204529 -0.49152193 -0.33449552 0.001272 1789457391.413143635 -0.634 186.509 0.155 0.00000 -1 ACTUAL_TF
+0.5842 0.0451970 -1.7384488 0.6669847 -0.45630496 0.66204341 -0.49151880 -0.33450496 0.001293 1789457391.469127417 -0.564 186.440 0.182 0.00000 -1 ACTUAL_TF
+0.6498 0.0451769 -1.7383399 0.6669743 -0.45630925 0.66204520 -0.49151036 -0.33450798 0.001501 1789457391.525122881 -0.455 186.330 0.201 0.00000 -1 ACTUAL_TF
+0.7014 0.0451828 -1.7382343 0.6669668 -0.45627475 0.66206973 -0.49152562 -0.33448407 0.001620 1789457391.581020832 -0.350 186.225 0.194 0.00000 -1 ACTUAL_TF
+0.7565 0.0451718 -1.7380825 0.6669592 -0.45628895 0.66206063 -0.49151796 -0.33449395 0.001949 1789457391.637110233 -0.198 186.073 0.203 0.00000 -1 ACTUAL_TF
+0.8176 0.0451685 -1.7379583 0.6669619 -0.45628651 0.66205409 -0.49152543 -0.33449925 0.002031 1789457391.693058014 -0.073 185.949 0.203 0.00000 -1 ACTUAL_TF
+0.8652 0.0451588 -1.7377749 0.6669561 -0.45627846 0.66205647 -0.49152978 -0.33449913 0.002406 1789457391.749029160 0.110 185.766 0.210 0.00000 -1 ACTUAL_TF
+0.9268 0.0451705 -1.7375785 0.6669434 -0.45629405 0.66204919 -0.49152753 -0.33449557 0.002739 1789457391.805086136 0.306 185.570 0.200 0.00000 -1 ACTUAL_TF
+0.9855 0.0451444 -1.7373612 0.6669286 -0.45629512 0.66205250 -0.49151954 -0.33449933 0.003087 1789457391.861341238 0.523 185.352 0.226 0.00000 -1 ACTUAL_TF
+1.0347 0.0451493 -1.7371422 0.6669166 -0.45629817 0.66205186 -0.49151983 -0.33449601 0.003342 1789457391.917092085 0.742 185.134 0.224 0.00000 -1 ACTUAL_TF
+1.0912 0.0451556 -1.7369678 0.6669158 -0.45629851 0.66204471 -0.49152673 -0.33449954 0.003274 1789457391.973109484 0.916 184.960 0.217 0.00000 -1 ACTUAL_TF
+1.1513 0.0451422 -1.7367388 0.6669040 -0.45629647 0.66204999 -0.49152145 -0.33449964 0.003523 1789457392.029083252 1.145 184.731 0.232 0.00000 -1 ACTUAL_TF
+1.2086 0.0451367 -1.7365467 0.6668969 -0.45629319 0.66205017 -0.49152454 -0.33449921 0.003496 1789457392.085087538 1.337 184.539 0.239 0.00000 -1 ACTUAL_TF
+1.2585 0.0451367 -1.7362865 0.6668924 -0.45628800 0.66205247 -0.49152887 -0.33449538 0.003845 1789457392.140968561 1.597 184.279 0.240 0.00000 -1 ACTUAL_TF
+1.3100 0.0451355 -1.7360789 0.6668901 -0.45628685 0.66204941 -0.49153298 -0.33449697 0.003801 1789457392.197104454 1.804 184.071 0.241 0.00000 -1 ACTUAL_TF
+1.3705 0.0451341 -1.7358249 0.6668888 -0.45628005 0.66205011 -0.49154008 -0.33449441 0.004012 1789457392.253492594 2.058 183.818 0.242 0.00000 -1 ACTUAL_TF
+1.4250 0.0451317 -1.7356245 0.6668972 -0.45627013 0.66204643 -0.49155061 -0.33449977 0.003891 1789457392.309065580 2.259 183.617 0.237 0.00000 -1 ACTUAL_TF
+1.4886 0.0451154 -1.7353457 0.6668796 -0.45627164 0.66205877 -0.49153851 -0.33449105 0.004226 1789457392.364942074 2.537 183.338 0.260 0.00000 -1 ACTUAL_TF
+1.5362 0.0451109 -1.7350757 0.6668848 -0.45627029 0.66205243 -0.49154559 -0.33449505 0.004404 1789457392.421007395 2.807 183.068 0.258 0.00000 -1 ACTUAL_TF
+1.5952 0.0451022 -1.7348292 0.6668931 -0.45626171 0.66204904 -0.49155467 -0.33450010 0.004402 1789457392.477120638 3.054 182.822 0.258 0.00000 -1 ACTUAL_TF
+1.6531 0.0450853 -1.7345281 0.6668892 -0.45625910 0.66205085 -0.49155357 -0.33450171 0.004697 1789457392.533103943 3.355 182.520 0.271 0.00000 -1 ACTUAL_TF
+1.7134 0.0450925 -1.7342642 0.6668919 -0.45626278 0.66204695 -0.49155723 -0.33449902 0.004703 1789457392.589073658 3.619 182.257 0.264 0.00000 -1 ACTUAL_TF
+1.7666 0.0451054 -1.7339749 0.6669004 -0.45626116 0.66204032 -0.49156777 -0.33449888 0.004848 1789457392.644952536 3.908 181.968 0.249 0.00000 -1 ACTUAL_TF
+1.8170 0.0450889 -1.7336989 0.6668939 -0.45626254 0.66204309 -0.49156229 -0.33449958 0.004875 1789457392.700942039 4.184 181.691 0.264 0.00000 -1 ACTUAL_TF
+1.8786 0.0450872 -1.7333683 0.6668771 -0.45627296 0.66205337 -0.49154729 -0.33448705 0.005182 1789457392.757076502 4.514 181.361 0.279 0.00000 -1 ACTUAL_TF
+1.9382 0.0450991 -1.7330185 0.6668814 -0.45627553 0.66205166 -0.49155165 -0.33448051 0.005503 1789457392.813061714 4.864 181.012 0.271 0.00000 -1 ACTUAL_TF
+1.9851 0.0451062 -1.7327537 0.6668982 -0.45626880 0.66204797 -0.49156270 -0.33448075 0.005276 1789457392.868996382 5.128 180.747 0.254 0.00000 -1 ACTUAL_TF
+2.0442 0.0451180 -1.7324261 0.6669062 -0.45627306 0.66204597 -0.49156436 -0.33447649 0.005413 1789457392.926178455 5.456 180.420 0.244 0.00000 -1 ACTUAL_TF
+2.1019 0.0451365 -1.7321702 0.6669158 -0.45627833 0.66203855 -0.49157068 -0.33447467 0.005190 1789457392.981152534 5.711 180.164 0.231 0.00000 -1 ACTUAL_TF
+2.1588 0.0451359 -1.7318449 0.6669223 -0.45627571 0.66204266 -0.49157108 -0.33446954 0.005379 1789457393.037055492 6.036 179.839 0.229 0.00000 -1 ACTUAL_TF
+2.2149 0.0451170 -1.7315584 0.6669096 -0.45629085 0.66204522 -0.49155479 -0.33446774 0.005305 1789457393.093039274 6.323 179.553 0.250 0.00000 -1 ACTUAL_TF
+2.2731 0.0451108 -1.7312555 0.6669281 -0.45627829 0.66204279 -0.49156596 -0.33447327 0.005340 1789457393.149054050 6.626 179.249 0.238 0.00000 -1 ACTUAL_TF
+2.3232 0.0451025 -1.7309800 0.6669350 -0.45627836 0.66204085 -0.49156743 -0.33447485 0.005216 1789457393.205019951 6.902 178.974 0.238 0.00000 -1 ACTUAL_TF
+2.3811 0.0450931 -1.7306825 0.6669599 -0.45626701 0.66203204 -0.49158292 -0.33448502 0.005251 1789457393.261016846 7.200 178.676 0.221 0.00000 -1 ACTUAL_TF
+2.4362 0.0450896 -1.7303837 0.6669761 -0.45626660 0.66202414 -0.49158897 -0.33449234 0.005279 1789457393.317009449 7.499 178.376 0.210 0.00000 -1 ACTUAL_TF
+2.4930 0.0450964 -1.7301505 0.6669938 -0.45625838 0.66202245 -0.49160026 -0.33449029 0.004945 1789457393.373161077 7.732 178.143 0.193 0.00000 -1 ACTUAL_TF
+2.5504 0.0450934 -1.7298507 0.6670129 -0.45625064 0.66201677 -0.49161164 -0.33449537 0.005074 1789457393.429049015 8.032 177.843 0.180 0.00000 -1 ACTUAL_TF
+2.6097 0.0450876 -1.7295724 0.6670220 -0.45625143 0.66201561 -0.49161195 -0.33449613 0.005043 1789457393.485071659 8.311 177.565 0.176 0.00000 -1 ACTUAL_TF
+2.6586 0.0450897 -1.7292806 0.6670441 -0.45623805 0.66201129 -0.49162824 -0.33449899 0.005100 1789457393.541004181 8.603 177.273 0.158 0.00000 -1 ACTUAL_TF
+2.7177 0.0450909 -1.7290434 0.6670651 -0.45622556 0.66200953 -0.49164108 -0.33450064 0.004846 1789457393.597001791 8.841 177.035 0.141 0.00000 -1 ACTUAL_TF
+2.7782 0.0450852 -1.7287528 0.6670818 -0.45621816 0.66200948 -0.49164672 -0.33450252 0.004950 1789457393.653052330 9.131 176.744 0.130 0.00000 -1 ACTUAL_TF
+2.8288 0.0451000 -1.7284990 0.6670774 -0.45622283 0.66201928 -0.49164046 -0.33448598 0.004826 1789457393.709095478 9.385 176.491 0.136 0.00000 -1 ACTUAL_TF
+2.8865 0.0450847 -1.7281821 0.6670731 -0.45622466 0.66202873 -0.49162969 -0.33448060 0.005077 1789457393.765115976 9.702 176.174 0.148 0.00000 -1 ACTUAL_TF
+2.9410 0.0450707 -1.7278657 0.6670841 -0.45621829 0.66203260 -0.49163049 -0.33448044 0.005252 1789457393.821116447 10.018 175.857 0.144 0.00000 -1 ACTUAL_TF
+3.0020 0.0450716 -1.7276064 0.6670923 -0.45622159 0.66203461 -0.49162878 -0.33447450 0.005066 1789457393.877127409 10.278 175.598 0.141 0.00000 -1 ACTUAL_TF
+3.0512 0.0450558 -1.7272982 0.6671008 -0.45622298 0.66203619 -0.49162389 -0.33447665 0.005189 1789457393.933513165 10.586 175.289 0.140 0.00000 -1 ACTUAL_TF
+3.1138 0.0450427 -1.7270532 0.6671164 -0.45621392 0.66203729 -0.49162869 -0.33447976 0.004958 1789457393.989120007 10.832 175.044 0.131 0.00000 -1 ACTUAL_TF
+3.1625 0.0450271 -1.7267581 0.6671296 -0.45621245 0.66203706 -0.49162709 -0.33448459 0.005058 1789457394.045036554 11.128 174.748 0.127 0.00000 -1 ACTUAL_TF
+3.2202 0.0450410 -1.7265188 0.6671425 -0.45621470 0.66203350 -0.49163229 -0.33448094 0.004826 1789457394.101071358 11.367 174.509 0.114 0.00000 -1 ACTUAL_TF
+3.2762 0.0450196 -1.7262052 0.6671420 -0.45621817 0.66203900 -0.49162162 -0.33448098 0.005061 1789457394.157090187 11.681 174.195 0.124 0.00000 -1 ACTUAL_TF
+3.3394 0.0450149 -1.7259176 0.6671399 -0.45622715 0.66204027 -0.49161345 -0.33447824 0.005084 1789457394.213083029 11.968 173.907 0.131 0.00000 -1 ACTUAL_TF
+3.3873 0.0450105 -1.7256142 0.6671546 -0.45622362 0.66203695 -0.49161938 -0.33448089 0.005181 1789457394.269272566 12.272 173.604 0.123 0.00000 -1 ACTUAL_TF
+3.4462 0.0450062 -1.7253126 0.6671680 -0.45622432 0.66203224 -0.49162236 -0.33448490 0.005251 1789457394.325044870 12.574 173.302 0.115 0.00000 -1 ACTUAL_TF
+3.4989 0.0450005 -1.7250778 0.6671868 -0.45621309 0.66202954 -0.49163317 -0.33448966 0.004939 1789457394.380992889 12.809 173.067 0.101 0.00000 -1 ACTUAL_TF
+3.5552 0.0449927 -1.7247855 0.6672021 -0.45620976 0.66202924 -0.49163515 -0.33449188 0.005027 1789457394.436928988 13.101 172.774 0.093 0.00000 -1 ACTUAL_TF
+3.6169 0.0450017 -1.7245496 0.6672226 -0.45620317 0.66202188 -0.49165109 -0.33449202 0.004780 1789457394.493334770 13.337 172.538 0.075 0.00000 -1 ACTUAL_TF
+3.6669 0.0449805 -1.7242539 0.6672546 -0.45619149 0.66201174 -0.49166408 -0.33450891 0.004954 1789457394.548957825 13.634 172.241 0.053 0.00000 -1 ACTUAL_TF
+3.7311 0.0449761 -1.7239940 0.6672623 -0.45619742 0.66200745 -0.49166375 -0.33450980 0.004858 1789457394.605065584 13.894 171.981 0.050 0.00000 -1 ACTUAL_TF
+3.7767 0.0449589 -1.7236880 0.6672750 -0.45620079 0.66200190 -0.49166312 -0.33451711 0.005040 1789457394.661196232 14.201 171.675 0.049 0.00000 -1 ACTUAL_TF
+3.8347 0.0449545 -1.7234209 0.6672992 -0.45619063 0.66199601 -0.49167495 -0.33452525 0.004970 1789457394.717015505 14.468 171.407 0.033 0.00000 -1 ACTUAL_TF
+3.8947 0.0449352 -1.7231546 0.6672842 -0.45619976 0.66200749 -0.49165487 -0.33451960 0.004912 1789457394.773002386 14.735 171.141 0.056 0.00000 -1 ACTUAL_TF
+3.9491 0.0449297 -1.7228449 0.6672803 -0.45620692 0.66201476 -0.49164380 -0.33451170 0.005097 1789457394.829033613 15.044 170.831 0.063 0.00000 -1 ACTUAL_TF
+4.0094 0.0449277 -1.7225806 0.6672880 -0.45620031 0.66202189 -0.49164418 -0.33450605 0.004984 1789457394.885035276 15.309 170.567 0.059 0.00000 -1 ACTUAL_TF
+4.0619 0.0449161 -1.7222733 0.6672916 -0.45619825 0.66202568 -0.49164128 -0.33450561 0.005134 1789457394.941109657 15.616 170.259 0.063 0.00000 -1 ACTUAL_TF
+4.1265 0.0449125 -1.7220030 0.6672845 -0.45620830 0.66203223 -0.49162972 -0.33449592 0.005044 1789457394.997070789 15.886 169.989 0.073 0.00000 -1 ACTUAL_TF
+4.1726 0.0449225 -1.7217233 0.6673000 -0.45620139 0.66203214 -0.49163830 -0.33449293 0.005032 1789457395.053076744 16.166 169.710 0.058 0.00000 -1 ACTUAL_TF
+4.2412 0.0449042 -1.7214574 0.6672961 -0.45620668 0.66203635 -0.49162780 -0.33449282 0.004952 1789457395.109020710 16.432 169.444 0.071 0.00000 -1 ACTUAL_TF
+4.2843 0.0449065 -1.7211437 0.6672941 -0.45621382 0.66203922 -0.49162309 -0.33448431 0.005144 1789457395.165119886 16.745 169.130 0.077 0.00000 -1 ACTUAL_TF
+4.3405 0.0449059 -1.7208162 0.6673013 -0.45621352 0.66204114 -0.49162404 -0.33447954 0.005356 1789457395.221109152 17.073 168.803 0.076 0.00000 -1 ACTUAL_TF
+4.3955 0.0449027 -1.7205763 0.6673154 -0.45620693 0.66203768 -0.49163232 -0.33448320 0.005037 1789457395.277090788 17.313 168.563 0.067 0.00000 -1 ACTUAL_TF
+4.4546 0.0449000 -1.7202871 0.6673284 -0.45619979 0.66203715 -0.49163921 -0.33448385 0.005074 1789457395.333192825 17.602 168.273 0.060 0.00000 -1 ACTUAL_TF
+4.5127 0.0449094 -1.7200358 0.6673352 -0.45620452 0.66203261 -0.49164225 -0.33448192 0.004903 1789457395.389068604 17.853 168.022 0.062 0.00000 -1 ACTUAL_TF
+4.5623 0.0448975 -1.7197338 0.6673472 -0.45620319 0.66202895 -0.49164501 -0.33448692 0.005050 1789457395.445142984 18.156 167.720 0.055 0.00000 -1 ACTUAL_TF
+4.6264 0.0448900 -1.7194797 0.6673556 -0.45619894 0.66202904 -0.49164682 -0.33448988 0.004898 1789457395.501117468 18.410 167.465 0.052 0.00000 -1 ACTUAL_TF
+4.6814 0.0448695 -1.7191586 0.6673619 -0.45619692 0.66203072 -0.49164464 -0.33449251 0.005153 1789457395.557116270 18.732 167.144 0.050 0.00000 -1 ACTUAL_TF
+4.7351 0.0448530 -1.7188627 0.6673726 -0.45619338 0.66202731 -0.49164701 -0.33450062 0.005195 1789457395.613148451 19.028 166.847 0.046 0.00000 -1 ACTUAL_TF
+4.7961 0.0448507 -1.7186411 0.6673989 -0.45617827 0.66201907 -0.49166607 -0.33450952 0.004834 1789457395.669046640 19.250 166.625 0.024 0.00000 -1 ACTUAL_TF
+4.8436 0.0448444 -1.7183438 0.6674112 -0.45617554 0.66201373 -0.49167163 -0.33451563 0.004975 1789457395.725147009 19.548 166.328 0.018 0.00000 -1 ACTUAL_TF
+4.9036 0.0448543 -1.7181009 0.6674245 -0.45617065 0.66201322 -0.49168025 -0.33451064 0.004788 1789457395.781090260 19.791 166.085 0.020 0.00000 -1 ACTUAL_TF
+4.9616 0.0448396 -1.7177674 0.6674146 -0.45617858 0.66202311 -0.49166553 -0.33450188 0.005139 1789457395.837129831 20.124 165.752 0.030 0.00000 -1 ACTUAL_TF
+5.0199 0.0448321 -1.7175380 0.6674277 -0.45616785 0.66202413 -0.49167265 -0.33450403 0.004831 1789457395.893053770 20.354 165.522 0.022 0.00000 -1 ACTUAL_TF
+5.0705 0.0448307 -1.7172116 0.6674271 -0.45617277 0.66202792 -0.49166887 -0.33449538 0.005130 1789457395.949079990 20.680 165.195 0.032 0.00000 -1 ACTUAL_TF
+5.1296 0.0448191 -1.7169729 0.6674360 -0.45616234 0.66203257 -0.49167186 -0.33449600 0.004872 1789457396.005054474 20.919 164.956 0.026 0.00000 -1 ACTUAL_TF
+5.1764 0.0448040 -1.7166617 0.6674398 -0.45615965 0.66203498 -0.49167052 -0.33449687 0.005080 1789457396.061027765 21.231 164.645 0.026 0.00000 -1 ACTUAL_TF
+5.2397 0.0447980 -1.7163576 0.6674467 -0.45616084 0.66203511 -0.49166971 -0.33449617 0.005183 1789457396.117118597 21.535 164.341 0.026 0.00000 -1 ACTUAL_TF
+5.2984 0.0447971 -1.7161025 0.6674408 -0.45616389 0.66204120 -0.49166341 -0.33448924 0.004995 1789457396.173137188 21.790 164.086 0.039 0.00000 -1 ACTUAL_TF
+5.3484 0.0447771 -1.7157774 0.6674378 -0.45616766 0.66204849 -0.49165210 -0.33448627 0.005244 1789457396.229077816 22.115 163.760 0.047 0.00000 -1 ACTUAL_TF
+5.4049 0.0447612 -1.7155075 0.6674308 -0.45616912 0.66205639 -0.49164267 -0.33448252 0.005117 1789457396.285145283 22.385 163.491 0.060 0.00000 -1 ACTUAL_TF
+5.4614 0.0447515 -1.7151976 0.6674385 -0.45617249 0.66205469 -0.49164093 -0.33448386 0.005247 1789457396.341033220 22.695 163.180 0.059 0.00000 -1 ACTUAL_TF
+5.5182 0.0447428 -1.7149561 0.6674509 -0.45616634 0.66205069 -0.49164758 -0.33449038 0.004968 1789457396.397112370 22.937 162.938 0.052 0.00000 -1 ACTUAL_TF
+5.5789 0.0447419 -1.7146623 0.6674707 -0.45616730 0.66203999 -0.49165602 -0.33449785 0.005056 1789457396.453052998 23.231 162.644 0.038 0.00000 -1 ACTUAL_TF
+5.6291 0.0447552 -1.7144233 0.6674880 -0.45616878 0.66203246 -0.49166486 -0.33449774 0.004825 1789457396.509071112 23.470 162.406 0.030 0.00000 -1 ACTUAL_TF
+5.6878 0.0447426 -1.7141007 0.6674918 -0.45617353 0.66203343 -0.49165921 -0.33449763 0.005107 1789457396.565068007 23.793 162.083 0.031 0.00000 -1 ACTUAL_TF
+5.7372 0.0447485 -1.7138176 0.6675188 -0.45615809 0.66202749 -0.49167939 -0.33450079 0.005101 1789457396.620969534 24.076 161.799 0.026 0.00000 -1 ACTUAL_TF
+5.8073 0.0447440 -1.7135480 0.6675157 -0.45616818 0.66202947 -0.49167084 -0.33449567 0.005013 1789457396.677065134 24.346 161.530 0.032 0.00000 -1 ACTUAL_TF
+5.8583 0.0447486 -1.7132660 0.6675397 -0.45615662 0.66202083 -0.49168919 -0.33450158 0.005026 1789457396.733067989 24.628 161.248 0.040 0.00000 -1 ACTUAL_TF
+5.9081 0.0447295 -1.7130188 0.6675562 -0.45615014 0.66201671 -0.49169363 -0.33451204 0.004849 1789457396.789083004 24.876 161.000 0.030 0.00000 -1 ACTUAL_TF
+5.9683 0.0447236 -1.7127188 0.6675612 -0.45615138 0.66201676 -0.49169203 -0.33451259 0.005004 1789457396.845020294 25.176 160.700 0.032 0.00000 -1 ACTUAL_TF
+6.0180 0.0447014 -1.7124421 0.6675479 -0.45616302 0.66202431 -0.49167415 -0.33450807 0.004992 1789457396.900995970 25.453 160.423 0.017 0.00000 -1 ACTUAL_TF
+6.0772 0.0446780 -1.7121445 0.6675560 -0.45615321 0.66202912 -0.49167350 -0.33451288 0.005093 1789457396.957043886 25.751 160.125 0.006 0.00000 -1 ACTUAL_TF
+6.1391 0.0446679 -1.7118418 0.6675602 -0.45615770 0.66203098 -0.49166754 -0.33451184 0.005187 1789457397.013073444 26.054 159.822 0.009 0.00000 -1 ACTUAL_TF
+6.1881 0.0446526 -1.7115691 0.6675559 -0.45616290 0.66203474 -0.49165840 -0.33451072 0.005095 1789457397.069045544 26.327 159.549 0.021 0.00000 -1 ACTUAL_TF
+6.2487 0.0446532 -1.7112863 0.6675688 -0.45615961 0.66203149 -0.49166406 -0.33451332 0.005078 1789457397.125223160 26.610 159.266 0.012 0.00000 -1 ACTUAL_TF
+6.2996 0.0446325 -1.7110209 0.6675631 -0.45616256 0.66203546 -0.49165590 -0.33451344 0.004986 1789457397.181024790 26.875 159.000 0.028 0.00000 -1 ACTUAL_TF
+6.3626 0.0446342 -1.7107190 0.6675823 -0.45615512 0.66203165 -0.49166760 -0.33451394 0.005106 1789457397.237198591 27.177 158.698 0.012 0.00000 -1 ACTUAL_TF
+6.4117 0.0446109 -1.7104549 0.6675830 -0.45615682 0.66203373 -0.49166070 -0.33451764 0.004993 1789457397.293255329 27.442 158.434 0.027 0.00000 -1 ACTUAL_TF
+6.4686 0.0446016 -1.7101541 0.6675901 -0.45614648 0.66204019 -0.49166446 -0.33451343 0.005109 1789457397.349207878 27.743 158.133 0.028 0.00000 -1 ACTUAL_TF
+6.5309 0.0446057 -1.7098814 0.6675884 -0.45616696 0.66203491 -0.49165348 -0.33451209 0.005036 1789457397.405277491 28.015 157.860 0.025 0.00000 -1 ACTUAL_TF
+6.5785 0.0446249 -1.7095830 0.6675984 -0.45615728 0.66203836 -0.49166541 -0.33450092 0.005134 1789457397.461064339 28.313 157.562 0.023 0.00000 -1 ACTUAL_TF
+6.6372 0.0446159 -1.7092880 0.6676073 -0.45615750 0.66203361 -0.49166686 -0.33450788 0.005173 1789457397.517157793 28.609 157.267 0.021 0.00000 -1 ACTUAL_TF
+6.6989 0.0446021 -1.7090440 0.6676245 -0.45614598 0.66203296 -0.49167546 -0.33451226 0.004937 1789457397.573020697 28.853 157.022 0.007 0.00000 -1 ACTUAL_TF
+6.7475 0.0445914 -1.7087165 0.6676286 -0.45614880 0.66203346 -0.49167322 -0.33451073 0.005209 1789457397.629106760 29.181 156.695 0.008 0.00000 -1 ACTUAL_TF
+6.8048 0.0445777 -1.7084700 0.6676337 -0.45614082 0.66203869 -0.49167324 -0.33451121 0.004968 1789457397.685141087 29.428 156.448 0.008 0.00000 -1 ACTUAL_TF
+6.8639 0.0445719 -1.7081838 0.6676550 -0.45613068 0.66202998 -0.49168854 -0.33451980 0.005017 1789457397.741102934 29.714 156.161 0.008 0.00000 -1 ACTUAL_TF
+6.9241 0.0445680 -1.7079367 0.6676757 -0.45612297 0.66202669 -0.49169896 -0.33452149 0.004842 1789457397.797004223 29.962 155.914 0.024 0.00000 -1 ACTUAL_TF
+6.9699 0.0445622 -1.7076493 0.6676896 -0.45611466 0.66202359 -0.49170906 -0.33452412 0.004926 1789457397.853185415 30.250 155.626 0.032 0.00000 -1 ACTUAL_TF
+7.0287 0.0445507 -1.7073949 0.6676996 -0.45610574 0.66202498 -0.49171335 -0.33452722 0.004817 1789457397.909080267 30.504 155.371 0.036 0.00000 -1 ACTUAL_TF
+7.0923 0.0445331 -1.7070934 0.6676987 -0.45609808 0.66203782 -0.49170804 -0.33452006 0.004990 1789457397.965067148 30.806 155.069 0.031 0.00000 -1 ACTUAL_TF
+7.1385 0.0445329 -1.7067552 0.6676867 -0.45611177 0.66204602 -0.49169292 -0.33450739 0.005308 1789457398.020997524 31.144 154.732 0.010 0.00000 -1 ACTUAL_TF
+7.1970 0.0445381 -1.7065184 0.6676979 -0.45609906 0.66204937 -0.49170188 -0.33450492 0.004986 1789457398.076976061 31.381 154.495 0.018 0.00000 -1 ACTUAL_TF
+7.2546 0.0445259 -1.7062151 0.6677038 -0.45610154 0.66204955 -0.49169754 -0.33450756 0.005112 1789457398.133138657 31.684 154.191 0.016 0.00000 -1 ACTUAL_TF
+7.3123 0.0445363 -1.7059662 0.6677080 -0.45609913 0.66205238 -0.49170166 -0.33449920 0.004913 1789457398.189126492 31.933 153.943 0.026 0.00000 -1 ACTUAL_TF
+7.3699 0.0445099 -1.7056449 0.6677081 -0.45609619 0.66205830 -0.49169518 -0.33450101 0.005167 1789457398.245112181 32.255 153.621 0.008 0.00000 -1 ACTUAL_TF
+7.4179 0.0445086 -1.7054140 0.6677246 -0.45609171 0.66205177 -0.49170541 -0.33450499 0.004858 1789457398.301068544 32.486 153.390 0.021 0.00000 -1 ACTUAL_TF
+7.4744 0.0444974 -1.7050765 0.6677210 -0.45610026 0.66205632 -0.49169478 -0.33449997 0.005209 1789457398.357082605 32.823 153.052 0.010 0.00000 -1 ACTUAL_TF
+7.5339 0.0444881 -1.7047690 0.6677273 -0.45610493 0.66205197 -0.49169372 -0.33450375 0.005295 1789457398.413087368 33.131 152.745 0.009 0.00000 -1 ACTUAL_TF
+7.5905 0.0444831 -1.7045368 0.6677423 -0.45609480 0.66205073 -0.49170207 -0.33450775 0.004953 1789457398.469106674 33.363 152.512 0.019 0.00000 -1 ACTUAL_TF
+7.6503 0.0444857 -1.7042322 0.6677517 -0.45609793 0.66204482 -0.49170635 -0.33450891 0.005085 1789457398.525602341 33.668 152.208 0.027 0.00000 -1 ACTUAL_TF
+7.7012 0.0444607 -1.7039561 0.6677485 -0.45610484 0.66204551 -0.49169494 -0.33451488 0.005047 1789457398.581505299 33.945 151.931 0.011 0.00000 -1 ACTUAL_TF
+7.7607 0.0444631 -1.7036517 0.6677582 -0.45610784 0.66203961 -0.49169926 -0.33451611 0.005172 1789457398.637252331 34.249 151.627 0.018 0.00000 -1 ACTUAL_TF
+7.8180 0.0444718 -1.7033888 0.6677587 -0.45610750 0.66204178 -0.49170118 -0.33450946 0.005033 1789457398.693103790 34.511 151.364 0.028 0.00000 -1 ACTUAL_TF
+7.8666 0.0444645 -1.7030793 0.6677644 -0.45611388 0.66204043 -0.49169542 -0.33451191 0.005179 1789457398.749194860 34.821 151.055 0.028 0.00000 -1 ACTUAL_TF
+7.9283 0.0444508 -1.7028475 0.6677829 -0.45610196 0.66203463 -0.49170704 -0.33452256 0.004877 1789457398.805027008 35.053 150.822 0.029 0.00000 -1 ACTUAL_TF
+7.9901 0.0444487 -1.7025523 0.6677941 -0.45609880 0.66203179 -0.49171315 -0.33452349 0.004998 1789457398.860987663 35.349 150.527 0.037 0.00000 -1 ACTUAL_TF
+8.0399 0.0444522 -1.7022332 0.6677934 -0.45609710 0.66203854 -0.49171191 -0.33451427 0.005203 1789457398.917146921 35.668 150.208 0.042 0.00000 -1 ACTUAL_TF
+8.0935 0.0444380 -1.7019735 0.6677949 -0.45609940 0.66204153 -0.49170691 -0.33451260 0.005033 1789457398.973251820 35.928 149.948 0.034 0.00000 -1 ACTUAL_TF
+8.1545 0.0444258 -1.7016842 0.6678030 -0.45609462 0.66204000 -0.49170998 -0.33451761 0.005080 1789457399.029065371 36.217 149.658 0.031 0.00000 -1 ACTUAL_TF
+8.2061 0.0444106 -1.7014061 0.6677883 -0.45610459 0.66205253 -0.49169061 -0.33450771 0.005047 1789457399.085191488 36.495 149.380 0.018 0.00000 -1 ACTUAL_TF
+8.2687 0.0443851 -1.7010971 0.6677839 -0.45611471 0.66205251 -0.49167766 -0.33451297 0.005199 1789457399.141040564 36.805 149.071 0.014 0.00000 -1 ACTUAL_TF
+8.3178 0.0443760 -1.7008580 0.6677940 -0.45610647 0.66205520 -0.49168016 -0.33451522 0.004922 1789457399.197034121 37.044 148.831 0.010 0.00000 -1 ACTUAL_TF
+8.3790 0.0443800 -1.7005583 0.6678027 -0.45610350 0.66205500 -0.49168434 -0.33451350 0.005050 1789457399.253073931 37.344 148.532 0.012 0.00000 -1 ACTUAL_TF
+8.4360 0.0443601 -1.7002854 0.6677957 -0.45610685 0.66206232 -0.49167231 -0.33451214 0.004997 1789457399.309269667 37.617 148.259 0.020 0.00000 -1 ACTUAL_TF
+8.4892 0.0443486 -1.6999841 0.6678017 -0.45610212 0.66206305 -0.49167475 -0.33451355 0.005107 1789457399.365496874 37.918 147.957 0.021 0.00000 -1 ACTUAL_TF
+8.5396 0.0443445 -1.6996973 0.6678152 -0.45609640 0.66206074 -0.49168199 -0.33451529 0.005125 1789457399.421071291 38.205 147.670 0.013 0.00000 -1 ACTUAL_TF
+8.5931 0.0443352 -1.6994210 0.6678071 -0.45610943 0.66206283 -0.49166925 -0.33451211 0.005070 1789457399.477044821 38.482 147.394 0.027 0.00000 -1 ACTUAL_TF
+8.6539 0.0443288 -1.6991048 0.6678078 -0.45611042 0.66206745 -0.49166565 -0.33450689 0.005242 1789457399.533062220 38.798 147.078 0.033 0.00000 -1 ACTUAL_TF
+8.7161 0.0443381 -1.6988678 0.6678275 -0.45610589 0.66205930 -0.49167818 -0.33451079 0.004945 1789457399.589077473 39.035 146.841 0.022 0.00000 -1 ACTUAL_TF
+8.7660 0.0443280 -1.6985769 0.6678445 -0.45610156 0.66205025 -0.49168842 -0.33451956 0.005022 1789457399.645113230 39.326 146.549 0.013 0.00000 -1 ACTUAL_TF
+8.8207 0.0443137 -1.6983083 0.6678504 -0.45610236 0.66205102 -0.49168585 -0.33452072 0.004956 1789457399.701131582 39.595 146.280 0.008 0.00000 -1 ACTUAL_TF
+8.8711 0.0443055 -1.6980052 0.6678556 -0.45610093 0.66205075 -0.49168706 -0.33452143 0.005097 1789457399.757041931 39.898 145.977 0.009 0.00000 -1 ACTUAL_TF
+8.9310 0.0442949 -1.6977094 0.6678762 -0.45609436 0.66204304 -0.49169710 -0.33453088 0.005155 1789457399.813115597 40.195 145.681 0.006 0.00000 -1 ACTUAL_TF
+8.9906 0.0442930 -1.6974687 0.6678918 -0.45609000 0.66203585 -0.49170725 -0.33453614 0.004903 1789457399.869045258 40.436 145.440 0.017 0.00000 -1 ACTUAL_TF
+9.0480 0.0442757 -1.6971489 0.6678967 -0.45609211 0.66203376 -0.49170418 -0.33454190 0.005147 1789457399.925082684 40.756 145.120 0.015 0.00000 -1 ACTUAL_TF
+9.1051 0.0442766 -1.6969057 0.6679001 -0.45608979 0.66203637 -0.49170478 -0.33453901 0.004908 1789457399.980969667 40.999 144.877 0.013 0.00000 -1 ACTUAL_TF
+9.1551 0.0442578 -1.6966093 0.6679103 -0.45607850 0.66204152 -0.49170820 -0.33453919 0.005025 1789457400.037060261 41.296 144.580 0.018 0.00000 -1 ACTUAL_TF
+9.2178 0.0442462 -1.6963312 0.6679045 -0.45608136 0.66204895 -0.49169914 -0.33453391 0.005006 1789457400.093176126 41.574 144.302 0.012 0.00000 -1 ACTUAL_TF
+9.2668 0.0442465 -1.6960309 0.6679053 -0.45607847 0.66205686 -0.49169799 -0.33452388 0.005112 1789457400.149195433 41.874 144.001 0.004 0.00000 -1 ACTUAL_TF
+9.3224 0.0442517 -1.6957545 0.6678917 -0.45608839 0.66206671 -0.49168572 -0.33450891 0.005065 1789457400.205069542 42.150 143.726 0.023 0.00000 -1 ACTUAL_TF
+9.3791 0.0442447 -1.6954516 0.6679038 -0.45607856 0.66206647 -0.49169375 -0.33451099 0.005171 1789457400.261047840 42.453 143.422 0.018 0.00000 -1 ACTUAL_TF
+9.4400 0.0442429 -1.6951435 0.6679040 -0.45607951 0.66207274 -0.49168966 -0.33450328 0.005265 1789457400.317203760 42.761 143.114 0.027 0.00000 -1 ACTUAL_TF
+9.4981 0.0442499 -1.6949175 0.6679177 -0.45606299 0.66207584 -0.49170430 -0.33449814 0.004901 1789457400.373102903 42.987 142.888 0.032 0.00000 -1 ACTUAL_TF
+9.5492 0.0442427 -1.6945757 0.6679133 -0.45607235 0.66207778 -0.49169703 -0.33449222 0.005262 1789457400.429132938 43.329 142.547 0.040 0.00000 -1 ACTUAL_TF
+9.6077 0.0442378 -1.6943402 0.6679312 -0.45606062 0.66207714 -0.49170659 -0.33449546 0.004951 1789457400.485044241 43.565 142.311 0.035 0.00000 -1 ACTUAL_TF
+9.6676 0.0442307 -1.6940290 0.6679317 -0.45605989 0.66208162 -0.49170380 -0.33449169 0.005132 1789457400.541069746 43.876 142.000 0.038 0.00000 -1 ACTUAL_TF
+9.7168 0.0442185 -1.6937624 0.6679344 -0.45606778 0.66207887 -0.49169714 -0.33449614 0.005021 1789457400.597122908 44.143 141.733 0.036 0.00000 -1 ACTUAL_TF
+9.7766 0.0442017 -1.6934539 0.6679354 -0.45606940 0.66208166 -0.49169181 -0.33449625 0.005173 1789457400.653018713 44.452 141.424 0.033 0.00000 -1 ACTUAL_TF
+9.8374 0.0441919 -1.6932145 0.6679461 -0.45606504 0.66207990 -0.49169603 -0.33449949 0.004894 1789457400.709519148 44.691 141.184 0.027 0.00000 -1 ACTUAL_TF
+9.8871 0.0441873 -1.6928928 0.6679525 -0.45607358 0.66207611 -0.49169328 -0.33449937 0.005164 1789457400.765083551 45.013 140.863 0.030 0.00000 -1 ACTUAL_TF
+9.9433 0.0441736 -1.6925812 0.6679572 -0.45608202 0.66207129 -0.49168775 -0.33450552 0.005292 1789457400.820885181 45.325 140.551 0.028 0.00000 -1 ACTUAL_TF
+9.9999 0.0441713 -1.6923479 0.6679846 -0.45606725 0.66206154 -0.49170869 -0.33451419 0.004959 1789457400.877043486 45.559 140.317 0.019 0.00000 -1 ACTUAL_TF
+10.0556 0.0441737 -1.6920513 0.6680010 -0.45606825 0.66205121 -0.49171721 -0.33452075 0.005065 1789457400.932978868 45.855 140.020 0.031 0.00000 -1 ACTUAL_TF
+10.1143 0.0441468 -1.6917851 0.6680042 -0.45606897 0.66205325 -0.49171024 -0.33452597 0.004974 1789457400.989133358 46.122 139.753 0.012 0.00000 -1 ACTUAL_TF
+10.1622 0.0441416 -1.6914825 0.6680130 -0.45606385 0.66205098 -0.49171765 -0.33452654 0.005103 1789457401.045184851 46.425 139.451 0.016 0.00000 -1 ACTUAL_TF
+10.2254 0.0441362 -1.6912251 0.6680204 -0.45606413 0.66204957 -0.49171898 -0.33452701 0.004954 1789457401.101079941 46.683 139.193 0.018 0.00000 -1 ACTUAL_TF
+10.2751 0.0441246 -1.6909207 0.6680252 -0.45606278 0.66205448 -0.49171434 -0.33452596 0.005102 1789457401.157039881 46.987 138.888 0.014 0.00000 -1 ACTUAL_TF
+10.3350 0.0441054 -1.6906691 0.6680215 -0.45606073 0.66206183 -0.49170730 -0.33452456 0.004924 1789457401.213006735 47.239 138.636 0.002 0.00000 -1 ACTUAL_TF
+10.3962 0.0440974 -1.6903695 0.6680249 -0.45606455 0.66206485 -0.49170057 -0.33452326 0.005050 1789457401.269106388 47.539 138.337 0.003 0.00000 -1 ACTUAL_TF
+10.4447 0.0440861 -1.6900741 0.6680280 -0.45606693 0.66206611 -0.49169628 -0.33452383 0.005116 1789457401.325168371 47.834 138.041 0.008 0.00000 -1 ACTUAL_TF
+10.4993 0.0440681 -1.6898049 0.6680179 -0.45607413 0.66207618 -0.49168169 -0.33451553 0.005032 1789457401.381031036 48.104 137.772 0.027 0.00000 -1 ACTUAL_TF
+10.5577 0.0440486 -1.6895068 0.6680308 -0.45607133 0.66207237 -0.49168303 -0.33452490 0.005119 1789457401.437195778 48.402 137.473 0.032 0.00000 -1 ACTUAL_TF
+10.6153 0.0440412 -1.6892390 0.6680235 -0.45607722 0.66207789 -0.49167399 -0.33451924 0.005023 1789457401.493026972 48.670 137.205 0.040 0.00000 -1 ACTUAL_TF
+10.6742 0.0440312 -1.6889447 0.6680391 -0.45606660 0.66207684 -0.49168261 -0.33452314 0.005093 1789457401.549136639 48.965 136.911 0.036 0.00000 -1 ACTUAL_TF
+10.7241 0.0440329 -1.6886965 0.6680469 -0.45607067 0.66207595 -0.49168184 -0.33452049 0.004896 1789457401.605095387 49.213 136.663 0.027 0.00000 -1 ACTUAL_TF
+10.7867 0.0440161 -1.6883900 0.6680493 -0.45606773 0.66207892 -0.49167853 -0.33452347 0.005072 1789457401.661111355 49.520 136.356 0.037 0.00000 -1 ACTUAL_TF
+10.8356 0.0440191 -1.6880893 0.6680610 -0.45606897 0.66207662 -0.49168052 -0.33452340 0.005164 1789457401.717041969 49.821 136.055 0.025 0.00000 -1 ACTUAL_TF
+10.8999 0.0440044 -1.6878200 0.6680651 -0.45606523 0.66207876 -0.49168024 -0.33452468 0.005057 1789457401.773142338 50.090 135.785 0.032 0.00000 -1 ACTUAL_TF
+10.9477 0.0440002 -1.6875208 0.6680816 -0.45606374 0.66207122 -0.49168790 -0.33453038 0.005149 1789457401.829022646 50.390 135.486 0.024 0.00000 -1 ACTUAL_TF
+11.0072 0.0440034 -1.6872522 0.6680766 -0.45607302 0.66207290 -0.49168223 -0.33452273 0.005041 1789457401.885109663 50.658 135.218 0.022 0.00000 -1 ACTUAL_TF
+11.0638 0.0439838 -1.6869463 0.6680890 -0.45606656 0.66207263 -0.49168428 -0.33452906 0.005174 1789457401.941051483 50.964 134.911 0.027 0.00000 -1 ACTUAL_TF
+11.1246 0.0439911 -1.6867040 0.6681029 -0.45606747 0.66206280 -0.49169536 -0.33453100 0.004925 1789457401.996962309 51.207 134.669 0.011 0.00000 -1 ACTUAL_TF
+11.1690 0.0439911 -1.6864166 0.6681236 -0.45605689 0.66205778 -0.49170821 -0.33453646 0.004990 1789457402.053000212 51.494 134.381 0.012 0.00000 -1 ACTUAL_TF
+11.2274 0.0439726 -1.6861418 0.6681181 -0.45606769 0.66205937 -0.49169663 -0.33453561 0.004970 1789457402.108969450 51.769 134.106 0.014 0.00000 -1 ACTUAL_TF
+11.2888 0.0439643 -1.6858455 0.6681331 -0.45605447 0.66205849 -0.49170749 -0.33453940 0.005066 1789457402.165055752 52.066 133.810 0.017 0.00000 -1 ACTUAL_TF
+11.3392 0.0439638 -1.6855441 0.6681332 -0.45605825 0.66205977 -0.49170443 -0.33453622 0.005160 1789457402.221100569 52.367 133.508 0.008 0.00000 -1 ACTUAL_TF
+11.3972 0.0439657 -1.6852763 0.6681362 -0.45605438 0.66206639 -0.49170310 -0.33453037 0.005047 1789457402.277096748 52.635 133.241 0.002 0.00000 -1 ACTUAL_TF
+11.4520 0.0439677 -1.6849690 0.6681384 -0.45605944 0.66206515 -0.49170269 -0.33452652 0.005180 1789457402.333064318 52.942 132.934 0.013 0.00000 -1 ACTUAL_TF
+11.5583 0.0439785 -1.6847161 0.6681390 -0.45605867 0.66206880 -0.49170485 -0.33451716 0.004982 1789457402.389061689 53.194 132.681 0.031 0.00000 -1 ACTUAL_TF
+11.5706 0.0439567 -1.6843981 0.6681389 -0.45605530 0.66207559 -0.49169904 -0.33451686 0.005194 1789457402.445087910 53.513 132.363 0.023 0.00000 -1 ACTUAL_TF
+11.6164 0.0439542 -1.6841698 0.6681511 -0.45604421 0.66207586 -0.49170788 -0.33451845 0.004862 1789457402.501043558 53.741 132.134 0.022 0.00000 -1 ACTUAL_TF
+11.6765 0.0439444 -1.6838547 0.6681477 -0.45604253 0.66208443 -0.49170319 -0.33451068 0.005093 1789457402.557032585 54.057 131.819 0.026 0.00000 -1 ACTUAL_TF
+11.7339 0.0439449 -1.6835335 0.6681493 -0.45604569 0.66208822 -0.49170072 -0.33450250 0.005279 1789457402.613242626 54.378 131.498 0.037 0.00000 -1 ACTUAL_TF
+11.7902 0.0439330 -1.6832934 0.6681580 -0.45603669 0.66208783 -0.49170608 -0.33450767 0.004987 1789457402.669113398 54.618 131.258 0.030 0.00000 -1 ACTUAL_TF
+11.8392 0.0439188 -1.6829682 0.6681448 -0.45604457 0.66210212 -0.49168687 -0.33449687 0.005237 1789457402.725082874 54.943 130.932 0.044 0.00000 -1 ACTUAL_TF
+11.8976 0.0439126 -1.6827423 0.6681651 -0.45602984 0.66209501 -0.49170404 -0.33450578 0.004882 1789457402.781039953 55.169 130.706 0.030 0.00000 -1 ACTUAL_TF
+11.9564 0.0439047 -1.6824182 0.6681674 -0.45603370 0.66209525 -0.49170043 -0.33450536 0.005155 1789457402.837026119 55.494 130.382 0.034 0.00000 -1 ACTUAL_TF
+12.0115 0.0439013 -1.6821733 0.6681814 -0.45602830 0.66209077 -0.49170887 -0.33450918 0.004923 1789457402.893014431 55.739 130.137 0.029 0.00000 -1 ACTUAL_TF
+12.0670 0.0439025 -1.6818401 0.6681782 -0.45604137 0.66209003 -0.49170184 -0.33450314 0.005231 1789457402.949022770 56.072 129.804 0.044 0.00000 -1 ACTUAL_TF
+12.1289 0.0438990 -1.6816101 0.6682008 -0.45602993 0.66208191 -0.49171537 -0.33451494 0.004898 1789457403.005142927 56.302 129.573 0.036 0.00000 -1 ACTUAL_TF
+12.1868 0.0438867 -1.6813031 0.6682057 -0.45602878 0.66208339 -0.49171399 -0.33451559 0.005076 1789457403.061064720 56.609 129.266 0.033 0.00000 -1 ACTUAL_TF
+12.2393 0.0438870 -1.6810634 0.6682227 -0.45602050 0.66207830 -0.49172703 -0.33451780 0.004844 1789457403.116940498 56.849 129.026 0.035 0.00000 -1 ACTUAL_TF
+12.2980 0.0438699 -1.6807468 0.6682269 -0.45601851 0.66208124 -0.49172500 -0.33451767 0.005090 1789457403.172914982 57.166 128.709 0.027 0.00000 -1 ACTUAL_TF
+12.3485 0.0438627 -1.6804500 0.6682333 -0.45601706 0.66208181 -0.49172516 -0.33451829 0.005150 1789457403.229039431 57.463 128.412 0.028 0.00000 -1 ACTUAL_TF
+12.4089 0.0438441 -1.6801804 0.6682320 -0.45601433 0.66208701 -0.49172187 -0.33451655 0.005055 1789457403.284975052 57.733 128.142 0.021 0.00000 -1 ACTUAL_TF
+12.4593 0.0438255 -1.6798935 0.6682350 -0.45601333 0.66209049 -0.49171509 -0.33452101 0.005077 1789457403.341042757 58.020 127.855 0.017 0.00000 -1 ACTUAL_TF
+12.5211 0.0437990 -1.6796370 0.6682322 -0.45601575 0.66209687 -0.49170159 -0.33452492 0.004935 1789457403.397037029 58.277 127.598 0.029 0.00000 -1 ACTUAL_TF
+12.5694 0.0437921 -1.6793336 0.6682378 -0.45602450 0.66209156 -0.49170058 -0.33452497 0.005082 1789457403.453009844 58.581 127.295 0.029 0.00000 -1 ACTUAL_TF
+12.6314 0.0437768 -1.6790646 0.6682370 -0.45602807 0.66209254 -0.49169313 -0.33452912 0.005001 1789457403.509015322 58.850 127.025 0.039 0.00000 -1 ACTUAL_TF
+12.6876 0.0437735 -1.6787699 0.6682485 -0.45602595 0.66208942 -0.49169768 -0.33453150 0.005078 1789457403.565082788 59.145 126.730 0.032 0.00000 -1 ACTUAL_TF
+12.7438 0.0437604 -1.6784712 0.6682616 -0.45601653 0.66208972 -0.49170296 -0.33453599 0.005160 1789457403.621015549 59.444 126.431 0.030 0.00000 -1 ACTUAL_TF
+12.7976 0.0437708 -1.6782302 0.6682716 -0.45601710 0.66208558 -0.49170945 -0.33453386 0.004906 1789457403.676973343 59.685 126.191 0.016 0.00000 -1 ACTUAL_TF
+12.8550 0.0437670 -1.6779245 0.6682716 -0.45602352 0.66208445 -0.49170673 -0.33453134 0.005072 1789457403.732974052 59.991 125.885 0.022 0.00000 -1 ACTUAL_TF
+12.9065 0.0437570 -1.6776646 0.6682751 -0.45602280 0.66208739 -0.49170246 -0.33453278 0.004942 1789457403.789053202 60.251 125.625 0.024 0.00000 -1 ACTUAL_TF
+12.9615 0.0437651 -1.6773607 0.6682873 -0.45602170 0.66208323 -0.49171045 -0.33453076 0.005088 1789457403.845093489 60.554 125.321 0.022 0.00000 -1 ACTUAL_TF
+13.0217 0.0437641 -1.6770860 0.6682857 -0.45603203 0.66208360 -0.49170424 -0.33452508 0.005035 1789457403.901020288 60.829 125.047 0.031 0.00000 -1 ACTUAL_TF
+13.0768 0.0437569 -1.6767983 0.6683034 -0.45601640 0.66208149 -0.49171638 -0.33453272 0.005071 1789457403.956953764 61.117 124.758 0.023 0.00000 -1 ACTUAL_TF
+13.1356 0.0437631 -1.6765474 0.6683083 -0.45602169 0.66207920 -0.49171686 -0.33452933 0.004892 1789457404.013058424 61.368 124.508 0.035 0.00000 -1 ACTUAL_TF
+13.1874 0.0437532 -1.6762328 0.6683108 -0.45602318 0.66208258 -0.49171154 -0.33452843 0.005110 1789457404.069095612 61.683 124.193 0.035 0.00000 -1 ACTUAL_TF
+13.2452 0.0437450 -1.6759407 0.6683294 -0.45601826 0.66207279 -0.49172455 -0.33453541 0.005148 1789457404.124980688 61.975 123.900 0.030 0.00000 -1 ACTUAL_TF
+13.3091 0.0437295 -1.6756898 0.6683491 -0.45601288 0.66206494 -0.49173219 -0.33454704 0.004953 1789457404.181067228 62.227 123.649 0.022 0.00000 -1 ACTUAL_TF
+13.3523 0.0437188 -1.6753855 0.6683544 -0.45601032 0.66206571 -0.49173420 -0.33454607 0.005098 1789457404.237075090 62.531 123.344 0.019 0.00000 -1 ACTUAL_TF
+13.4121 0.0437130 -1.6751230 0.6683651 -0.45601055 0.66206216 -0.49173714 -0.33454846 0.004976 1789457404.293089390 62.794 123.082 0.023 0.00000 -1 ACTUAL_TF
+13.4690 0.0437089 -1.6748092 0.6683618 -0.45601552 0.66206591 -0.49172959 -0.33454535 0.005167 1789457404.349020481 63.108 122.768 0.024 0.00000 -1 ACTUAL_TF
+13.5252 0.0437220 -1.6745691 0.6683694 -0.45601490 0.66206533 -0.49173520 -0.33453908 0.004903 1789457404.405100822 63.347 122.528 0.043 0.00000 -1 ACTUAL_TF
+13.5829 0.0437166 -1.6742534 0.6683662 -0.45601626 0.66207433 -0.49172767 -0.33453048 0.005124 1789457404.461082697 63.663 122.213 0.046 0.00000 -1 ACTUAL_TF
+13.6386 0.0436979 -1.6739572 0.6683716 -0.45600649 0.66208308 -0.49172540 -0.33452982 0.005178 1789457404.517071009 63.960 121.916 0.036 0.00000 -1 ACTUAL_TF
+13.6895 0.0436838 -1.6736969 0.6683734 -0.45600384 0.66208698 -0.49172229 -0.33453029 0.005023 1789457404.572977781 64.220 121.655 0.030 0.00000 -1 ACTUAL_TF
+13.7478 0.0436784 -1.6733677 0.6683764 -0.45601147 0.66208682 -0.49171809 -0.33452639 0.005276 1789457404.629115820 64.549 121.326 0.035 0.00000 -1 ACTUAL_TF
+13.8097 0.0436701 -1.6731313 0.6683892 -0.45599954 0.66208681 -0.49172635 -0.33453053 0.004964 1789457404.685061693 64.786 121.089 0.030 0.00000 -1 ACTUAL_TF
+13.8605 0.0436577 -1.6728320 0.6683936 -0.45599838 0.66208815 -0.49172437 -0.33453237 0.005074 1789457404.741234303 65.086 120.790 0.026 0.00000 -1 ACTUAL_TF
+13.9212 0.0436592 -1.6725848 0.6684071 -0.45599717 0.66208328 -0.49173275 -0.33453133 0.004885 1789457404.796954155 65.333 120.543 0.033 0.00000 -1 ACTUAL_TF
+13.9688 0.0436345 -1.6722869 0.6684088 -0.45599615 0.66208725 -0.49172642 -0.33453417 0.005017 1789457404.853107214 65.631 120.244 0.017 0.00000 -1 ACTUAL_TF
+14.0293 0.0436254 -1.6720328 0.6684217 -0.45599258 0.66208503 -0.49172989 -0.33453834 0.004872 1789457404.909227610 65.886 119.990 0.014 0.00000 -1 ACTUAL_TF
+14.0917 0.0436185 -1.6717060 0.6684284 -0.45600192 0.66207796 -0.49172993 -0.33453954 0.005168 1789457404.965048313 66.213 119.663 0.016 0.00000 -1 ACTUAL_TF
+14.1439 0.0436086 -1.6714040 0.6684414 -0.45600052 0.66207510 -0.49173094 -0.33454561 0.005236 1789457405.021111488 66.515 119.360 0.016 0.00000 -1 ACTUAL_TF
+14.1957 0.0436019 -1.6711595 0.6684444 -0.45599946 0.66207715 -0.49172840 -0.33454675 0.004979 1789457405.076964617 66.760 119.116 0.015 0.00000 -1 ACTUAL_TF
+14.2524 0.0435910 -1.6708636 0.6684540 -0.45599613 0.66207864 -0.49172865 -0.33454797 0.005072 1789457405.132986546 67.056 118.820 0.014 0.00000 -1 ACTUAL_TF
+14.3060 0.0435951 -1.6706241 0.6684659 -0.45598895 0.66207668 -0.49173892 -0.33454653 0.004834 1789457405.189017057 67.296 118.580 0.027 0.00000 -1 ACTUAL_TF
+14.3668 0.0435724 -1.6702956 0.6684701 -0.45598614 0.66208054 -0.49173678 -0.33454587 0.005147 1789457405.245050669 67.624 118.251 0.015 0.00000 -1 ACTUAL_TF
+14.4252 0.0435641 -1.6700347 0.6684776 -0.45598337 0.66208018 -0.49174041 -0.33454503 0.005001 1789457405.301079750 67.886 117.990 0.017 0.00000 -1 ACTUAL_TF
+14.4762 0.0435501 -1.6697387 0.6684858 -0.45597589 0.66208586 -0.49174069 -0.33454357 0.005089 1789457405.357060671 68.182 117.694 0.017 0.00000 -1 ACTUAL_TF
+14.5370 0.0435281 -1.6694908 0.6684882 -0.45597253 0.66209056 -0.49173579 -0.33454605 0.004893 1789457405.413178682 68.430 117.445 0.021 0.00000 -1 ACTUAL_TF
+14.5884 0.0435133 -1.6691819 0.6684836 -0.45597520 0.66209853 -0.49172546 -0.33454182 0.005076 1789457405.469379902 68.739 117.136 0.022 0.00000 -1 ACTUAL_TF
+14.6497 0.0435020 -1.6688710 0.6684825 -0.45598434 0.66209917 -0.49171736 -0.33454001 0.005218 1789457405.525433779 69.050 116.825 0.026 0.00000 -1 ACTUAL_TF
+14.6963 0.0434945 -1.6686062 0.6684908 -0.45598318 0.66210032 -0.49171740 -0.33453926 0.005084 1789457405.580998659 69.315 116.560 0.026 0.00000 -1 ACTUAL_TF
+14.7562 0.0434866 -1.6683111 0.6685057 -0.45597353 0.66209908 -0.49172429 -0.33454473 0.005140 1789457405.637076855 69.611 116.265 0.027 0.00000 -1 ACTUAL_TF
+14.8135 0.0434888 -1.6680420 0.6685002 -0.45598244 0.66210306 -0.49171745 -0.33453475 0.005040 1789457405.693091393 69.880 115.996 0.017 0.00000 -1 ACTUAL_TF
+14.8731 0.0434911 -1.6677577 0.6685129 -0.45597724 0.66210062 -0.49172424 -0.33453670 0.005050 1789457405.749193192 70.164 115.712 0.007 0.00000 -1 ACTUAL_TF
+14.9330 0.0434797 -1.6674918 0.6685154 -0.45597975 0.66210196 -0.49171902 -0.33453828 0.004963 1789457405.805112123 70.430 115.445 0.011 0.00000 -1 ACTUAL_TF
+14.9815 0.0434906 -1.6671775 0.6685115 -0.45599383 0.66210202 -0.49171317 -0.33452757 0.005153 1789457405.861292124 70.744 115.132 0.014 0.00000 -1 ACTUAL_TF
+15.0386 0.0434898 -1.6668513 0.6685148 -0.45599476 0.66210491 -0.49171114 -0.33452358 0.005358 1789457405.917185545 71.070 114.806 0.022 0.00000 -1 ACTUAL_TF
+15.0992 0.0434833 -1.6666123 0.6685265 -0.45598829 0.66210368 -0.49171627 -0.33452729 0.005034 1789457405.973156691 71.309 114.566 0.018 0.00000 -1 ACTUAL_TF
+15.1469 0.0434719 -1.6663312 0.6685541 -0.45597712 0.66209248 -0.49173315 -0.33453985 0.005038 1789457406.029130936 71.591 114.285 0.018 0.00000 -1 ACTUAL_TF
+15.2051 0.0434797 -1.6660950 0.6685640 -0.45597811 0.66208776 -0.49173880 -0.33453956 0.004793 1789457406.085191011 71.827 114.048 0.032 0.00000 -1 ACTUAL_TF
+15.2562 0.0434725 -1.6657924 0.6685774 -0.45597966 0.66208121 -0.49174350 -0.33454350 0.004982 1789457406.141050816 72.130 113.746 0.037 0.00000 -1 ACTUAL_TF
+15.3169 0.0434495 -1.6655219 0.6685748 -0.45597890 0.66209001 -0.49173245 -0.33454336 0.004944 1789457406.196968317 72.401 113.475 0.020 0.00000 -1 ACTUAL_TF
+15.3736 0.0434397 -1.6652358 0.6686015 -0.45597132 0.66207759 -0.49174778 -0.33455573 0.004998 1789457406.253086805 72.688 113.188 0.038 0.00000 -1 ACTUAL_TF
+15.4290 0.0434318 -1.6649914 0.6686251 -0.45595963 0.66206972 -0.49176351 -0.33456411 0.004814 1789457406.309122801 72.933 112.943 0.056 0.00000 -1 ACTUAL_TF
+15.4814 0.0434270 -1.6646837 0.6686328 -0.45595723 0.66207125 -0.49176498 -0.33456220 0.005021 1789457406.365045786 73.240 112.635 0.057 0.00000 -1 ACTUAL_TF
+15.5439 0.0434237 -1.6643742 0.6686438 -0.45596118 0.66206844 -0.49176447 -0.33456313 0.005175 1789457406.421029091 73.550 112.325 0.063 0.00000 -1 ACTUAL_TF
+15.5961 0.0434348 -1.6641248 0.6686455 -0.45596188 0.66207178 -0.49176595 -0.33455340 0.004959 1789457406.477070332 73.799 112.076 0.066 0.00000 -1 ACTUAL_TF
+15.6508 0.0434281 -1.6638132 0.6686413 -0.45596544 0.66208024 -0.49175691 -0.33454509 0.005139 1789457406.533129930 74.111 111.765 0.058 0.00000 -1 ACTUAL_TF
+15.7098 0.0434033 -1.6635449 0.6686344 -0.45597014 0.66208953 -0.49174295 -0.33454081 0.005040 1789457406.589150906 74.379 111.496 0.038 0.00000 -1 ACTUAL_TF
+15.7638 0.0433904 -1.6632265 0.6686404 -0.45596667 0.66209402 -0.49174064 -0.33454005 0.005240 1789457406.645036697 74.698 111.178 0.035 0.00000 -1 ACTUAL_TF
+15.8246 0.0433814 -1.6629856 0.6686500 -0.45595538 0.66209868 -0.49174389 -0.33454143 0.004960 1789457406.701035500 74.939 110.936 0.039 0.00000 -1 ACTUAL_TF
+15.8756 0.0433659 -1.6626755 0.6686557 -0.45595614 0.66210056 -0.49174075 -0.33454130 0.005136 1789457406.757028580 75.250 110.626 0.037 0.00000 -1 ACTUAL_TF
+15.9339 0.0433673 -1.6624456 0.6686676 -0.45594631 0.66210193 -0.49174920 -0.33453958 0.004830 1789457406.812988281 75.480 110.396 0.045 0.00000 -1 ACTUAL_TF
+15.9891 0.0433582 -1.6621381 0.6686700 -0.45594895 0.66210544 -0.49174346 -0.33453746 0.005027 1789457406.869043112 75.787 110.088 0.040 0.00000 -1 ACTUAL_TF
+16.0480 0.0433389 -1.6618390 0.6686753 -0.45594747 0.66210924 -0.49173917 -0.33453826 0.005124 1789457406.925073624 76.087 109.789 0.038 0.00000 -1 ACTUAL_TF
+16.1025 0.0433427 -1.6615485 0.6686734 -0.45596156 0.66210853 -0.49173224 -0.33453063 0.005131 1789457406.981528997 76.377 109.499 0.032 0.00000 -1 ACTUAL_TF
+16.1608 0.0433386 -1.6612583 0.6686875 -0.45596300 0.66210236 -0.49173601 -0.33453535 0.005155 1789457407.037293673 76.667 109.208 0.040 0.00000 -1 ACTUAL_TF
+16.2242 0.0433376 -1.6610287 0.6687063 -0.45595367 0.66209763 -0.49174683 -0.33454153 0.004838 1789457407.093491077 76.897 108.978 0.055 0.00000 -1 ACTUAL_TF
+16.2721 0.0433311 -1.6607225 0.6687171 -0.45595875 0.66209250 -0.49174719 -0.33454424 0.005043 1789457407.149010181 77.204 108.672 0.060 0.00000 -1 ACTUAL_TF
+16.3283 0.0433375 -1.6604939 0.6687345 -0.45595716 0.66208393 -0.49175698 -0.33454896 0.004759 1789457407.205003023 77.432 108.443 0.076 0.00000 -1 ACTUAL_TF
+16.3806 0.0433181 -1.6601948 0.6687463 -0.45594112 0.66209199 -0.49176009 -0.33455030 0.004932 1789457407.261198997 77.732 108.144 0.077 0.00000 -1 ACTUAL_TF
+16.4396 0.0433077 -1.6598822 0.6687674 -0.45593623 0.66208481 -0.49176967 -0.33455708 0.005134 1789457407.317140102 78.045 107.830 0.091 0.00000 -1 ACTUAL_TF
+16.4911 0.0433026 -1.6596302 0.6687823 -0.45593418 0.66207969 -0.49177655 -0.33455991 0.004948 1789457407.373072863 78.298 107.578 0.100 0.00000 -1 ACTUAL_TF
+16.5436 0.0432905 -1.6593372 0.6688004 -0.45592925 0.66207481 -0.49178311 -0.33456664 0.005041 1789457407.428947449 78.591 107.284 0.111 0.00000 -1 ACTUAL_TF
+16.6036 0.0432782 -1.6591083 0.6688264 -0.45591702 0.66206626 -0.49179797 -0.33457840 0.004763 1789457407.485013247 78.821 107.055 0.131 0.00000 -1 ACTUAL_TF
+16.6587 0.0432674 -1.6587925 0.6688277 -0.45592419 0.66206895 -0.49178918 -0.33457621 0.005024 1789457407.541122198 79.137 106.739 0.126 0.00000 -1 ACTUAL_TF
+16.7213 0.0432644 -1.6585488 0.6688309 -0.45592481 0.66207229 -0.49178570 -0.33457387 0.004822 1789457407.597143412 79.380 106.495 0.124 0.00000 -1 ACTUAL_TF
+16.7704 0.0432633 -1.6582204 0.6688282 -0.45592856 0.66208113 -0.49177710 -0.33456392 0.005135 1789457407.653128862 79.708 106.167 0.115 0.00000 -1 ACTUAL_TF
+16.8298 0.0432567 -1.6579440 0.6688187 -0.45594314 0.66208751 -0.49176067 -0.33455555 0.005079 1789457407.709046364 79.985 105.891 0.100 0.00000 -1 ACTUAL_TF
+16.8896 0.0432482 -1.6576420 0.6688252 -0.45593805 0.66209357 -0.49175952 -0.33455220 0.005174 1789457407.765042067 80.287 105.589 0.100 0.00000 -1 ACTUAL_TF
+16.9402 0.0432651 -1.6573650 0.6688419 -0.45592944 0.66209204 -0.49177096 -0.33455013 0.005109 1789457407.821101665 80.564 105.312 0.118 0.00000 -1 ACTUAL_TF
+17.0025 0.0432551 -1.6570898 0.6688342 -0.45593952 0.66210006 -0.49175507 -0.33454390 0.005055 1789457407.877002239 80.839 105.037 0.104 0.00000 -1 ACTUAL_TF
+17.0578 0.0432519 -1.6567891 0.6688490 -0.45594191 0.66209402 -0.49176014 -0.33454514 0.005149 1789457407.933088303 81.140 104.736 0.114 0.00000 -1 ACTUAL_TF
+17.1078 0.0432537 -1.6565347 0.6688579 -0.45592586 0.66210397 -0.49176790 -0.33453592 0.004969 1789457407.989030123 81.394 104.481 0.120 0.00000 -1 ACTUAL_TF
+17.1679 0.0432505 -1.6562434 0.6688625 -0.45592656 0.66210788 -0.49176342 -0.33453379 0.005040 1789457408.045035601 81.685 104.190 0.121 0.00000 -1 ACTUAL_TF
+17.2182 0.0432465 -1.6559794 0.6688668 -0.45593634 0.66210536 -0.49175924 -0.33453162 0.004942 1789457408.101033688 81.949 103.926 0.122 0.00000 -1 ACTUAL_TF
+17.2764 0.0432509 -1.6557023 0.6688893 -0.45592796 0.66209920 -0.49177220 -0.33453617 0.004950 1789457408.157002687 82.227 103.649 0.142 0.00000 -1 ACTUAL_TF
+17.3364 0.0432367 -1.6554577 0.6689098 -0.45592142 0.66209299 -0.49177932 -0.33454691 0.004782 1789457408.213015079 82.472 103.404 0.152 0.00000 -1 ACTUAL_TF
+17.3853 0.0432197 -1.6551582 0.6689191 -0.45591853 0.66209595 -0.49177580 -0.33455017 0.004953 1789457408.269071817 82.772 103.104 0.150 0.00000 -1 ACTUAL_TF
+17.4439 0.0432178 -1.6548448 0.6689387 -0.45591883 0.66208788 -0.49178377 -0.33455401 0.005154 1789457408.324922800 83.086 102.790 0.165 0.00000 -1 ACTUAL_TF
+17.4990 0.0432238 -1.6546194 0.6689619 -0.45590597 0.66208277 -0.49180006 -0.33455769 0.004820 1789457408.381032467 83.311 102.564 0.186 0.00000 -1 ACTUAL_TF
+17.5568 0.0432167 -1.6543230 0.6689789 -0.45590364 0.66207850 -0.49180474 -0.33456243 0.004963 1789457408.437087059 83.608 102.267 0.197 0.00000 -1 ACTUAL_TF
+17.6156 0.0432225 -1.6540849 0.6689988 -0.45590130 0.66206984 -0.49181655 -0.33456541 0.004750 1789457408.493271112 83.846 102.029 0.215 0.00000 -1 ACTUAL_TF
+17.6735 0.0432144 -1.6537896 0.6690157 -0.45589033 0.66207149 -0.49182448 -0.33456544 0.004915 1789457408.549118996 84.142 101.733 0.225 0.00000 -1 ACTUAL_TF
+17.7270 0.0431924 -1.6535440 0.6690274 -0.45588617 0.66207192 -0.49182238 -0.33457333 0.004752 1789457408.605575323 84.388 101.487 0.225 0.00000 -1 ACTUAL_TF
+17.7762 0.0431867 -1.6532207 0.6690357 -0.45588308 0.66207688 -0.49182314 -0.33456662 0.005073 1789457408.661126614 84.712 101.164 0.227 0.00000 -1 ACTUAL_TF
+17.8330 0.0431715 -1.6529033 0.6690343 -0.45588265 0.66208868 -0.49181309 -0.33455863 0.005255 1789457408.717069149 85.029 100.846 0.217 0.00000 -1 ACTUAL_TF
+17.8889 0.0431662 -1.6526772 0.6690535 -0.45586797 0.66208881 -0.49182362 -0.33456288 0.004896 1789457408.772986889 85.256 100.620 0.231 0.00000 -1 ACTUAL_TF
+17.9462 0.0431565 -1.6523727 0.6690575 -0.45586202 0.66209641 -0.49182247 -0.33455764 0.005060 1789457408.829000950 85.561 100.315 0.228 0.00000 -1 ACTUAL_TF
+18.0064 0.0431592 -1.6521285 0.6690642 -0.45586359 0.66209739 -0.49182106 -0.33455564 0.004850 1789457408.885001421 85.805 100.071 0.233 0.00000 -1 ACTUAL_TF
+18.0657 0.0431586 -1.6518219 0.6690747 -0.45586296 0.66209571 -0.49182467 -0.33455451 0.005037 1789457408.941053391 86.111 99.764 0.239 0.00000 -1 ACTUAL_TF
+18.1136 0.0431655 -1.6515657 0.6690826 -0.45586377 0.66209383 -0.49182683 -0.33455396 0.004899 1789457408.997107029 86.367 99.508 0.246 0.00000 -1 ACTUAL_TF
+18.1780 0.0431634 -1.6512352 0.6690781 -0.45587616 0.66210054 -0.49181383 -0.33454290 0.005171 1789457409.054039001 86.698 99.178 0.239 0.00000 -1 ACTUAL_TF
+18.2371 0.0431586 -1.6509952 0.6690896 -0.45587266 0.66209801 -0.49181725 -0.33454765 0.004928 1789457409.109119892 86.938 98.938 0.245 0.00000 -1 ACTUAL_TF
+18.2854 0.0431511 -1.6506908 0.6690959 -0.45587123 0.66210102 -0.49181614 -0.33454527 0.005077 1789457409.165250301 87.242 98.633 0.245 0.00000 -1 ACTUAL_TF
+18.3458 0.0431455 -1.6504074 0.6691103 -0.45588036 0.66208929 -0.49181543 -0.33455709 0.005078 1789457409.221118212 87.526 98.349 0.254 0.00000 -1 ACTUAL_TF
+18.3970 0.0431585 -1.6501683 0.6691261 -0.45586758 0.66208899 -0.49183178 -0.33455107 0.004841 1789457409.277086973 87.765 98.110 0.272 0.00000 -1 ACTUAL_TF
+18.4564 0.0431257 -1.6498440 0.6691319 -0.45586736 0.66209288 -0.49182380 -0.33455542 0.005100 1789457409.334230900 88.090 97.785 0.260 0.00000 -1 ACTUAL_TF
+18.5062 0.0431181 -1.6495975 0.6691475 -0.45585624 0.66209231 -0.49183295 -0.33455822 0.004923 1789457409.389026642 88.337 97.539 0.269 0.00000 -1 ACTUAL_TF
+18.5654 0.0430991 -1.6492968 0.6691559 -0.45585204 0.66209293 -0.49183348 -0.33456195 0.005059 1789457409.445121527 88.638 97.237 0.267 0.00000 -1 ACTUAL_TF
+18.6207 0.0430920 -1.6490680 0.6691720 -0.45584408 0.66208672 -0.49184432 -0.33456917 0.004772 1789457409.501057386 88.868 97.008 0.277 0.00000 -1 ACTUAL_TF
+18.6770 0.0430803 -1.6487744 0.6691897 -0.45584580 0.66207511 -0.49185024 -0.33458108 0.004916 1789457409.557081223 89.162 96.714 0.287 0.00000 -1 ACTUAL_TF
+18.7343 0.0430954 -1.6485392 0.6692025 -0.45584111 0.66207227 -0.49186188 -0.33457598 0.004708 1789457409.612997293 89.397 96.479 0.302 0.00000 -1 ACTUAL_TF
+18.7913 0.0430650 -1.6482017 0.6691948 -0.45585601 0.66207068 -0.49184495 -0.33458371 0.005112 1789457409.668972254 89.734 96.141 0.280 0.00000 -1 ACTUAL_TF
+18.8497 0.0430621 -1.6478903 0.6691899 -0.45585541 0.66207541 -0.49184272 -0.33457844 0.005245 1789457409.725062370 90.046 95.830 0.271 0.00000 -1 ACTUAL_TF
+18.9030 0.0430610 -1.6476113 0.6691745 -0.45587044 0.66207512 -0.49183264 -0.33457335 0.005151 1789457409.781702757 90.324 95.551 0.254 0.00000 -1 ACTUAL_TF
+18.9641 0.0430509 -1.6472732 0.6691332 -0.45588532 0.66208618 -0.49181108 -0.33456290 0.005454 1789457409.837013483 90.662 95.214 0.209 0.00000 -1 ACTUAL_TF
+19.0123 0.0430327 -1.6470194 0.6691239 -0.45588197 0.66208945 -0.49180700 -0.33456697 0.005181 1789457409.893044949 90.915 94.960 0.191 0.00000 -1 ACTUAL_TF
+19.0697 0.0430189 -1.6467143 0.6691194 -0.45588620 0.66209100 -0.49180128 -0.33456657 0.005263 1789457409.949042797 91.221 94.655 0.179 0.00000 -1 ACTUAL_TF
+19.1277 0.0430186 -1.6464540 0.6691230 -0.45588533 0.66209258 -0.49180366 -0.33456111 0.005078 1789457410.005069733 91.481 94.395 0.180 0.00000 -1 ACTUAL_TF
+19.1835 0.0430052 -1.6461509 0.6691323 -0.45587533 0.66209700 -0.49180612 -0.33456237 0.005168 1789457410.061486244 91.784 94.091 0.180 0.00000 -1 ACTUAL_TF
+19.2380 0.0429951 -1.6458810 0.6691294 -0.45588454 0.66209824 -0.49179841 -0.33455872 0.005078 1789457410.116991043 92.054 93.821 0.171 0.00000 -1 ACTUAL_TF
+19.2965 0.0429844 -1.6455740 0.6691331 -0.45588456 0.66210129 -0.49179579 -0.33455649 0.005199 1789457410.173040390 92.361 93.514 0.167 0.00000 -1 ACTUAL_TF
+19.3546 0.0429822 -1.6453027 0.6691443 -0.45587083 0.66210257 -0.49180658 -0.33455681 0.005093 1789457410.229075670 92.633 93.243 0.174 0.00000 -1 ACTUAL_TF
+19.4021 0.0429599 -1.6450298 0.6691405 -0.45587367 0.66210928 -0.49179479 -0.33455699 0.005033 1789457410.285021782 92.906 92.969 0.159 0.00000 -1 ACTUAL_TF
+19.4618 0.0429738 -1.6447286 0.6691514 -0.45586893 0.66210599 -0.49180653 -0.33455271 0.005139 1789457410.341035604 93.207 92.668 0.173 0.00000 -1 ACTUAL_TF
+19.5176 0.0429571 -1.6444745 0.6691602 -0.45586163 0.66210782 -0.49180897 -0.33455545 0.004962 1789457410.397065163 93.462 92.414 0.171 0.00000 -1 ACTUAL_TF
+19.5761 0.0429474 -1.6441639 0.6691600 -0.45585654 0.66211256 -0.49180968 -0.33455194 0.005139 1789457410.453038931 93.772 92.103 0.164 0.00000 -1 ACTUAL_TF
+19.6350 0.0429393 -1.6438995 0.6691569 -0.45586078 0.66211456 -0.49180546 -0.33454843 0.005006 1789457410.509384632 94.037 91.839 0.156 0.00000 -1 ACTUAL_TF
+19.6882 0.0429451 -1.6436305 0.6691794 -0.45584198 0.66210958 -0.49182809 -0.33455064 0.004957 1789457410.565123558 94.306 91.570 0.177 0.00000 -1 ACTUAL_TF
+19.7417 0.0429301 -1.6433213 0.6691927 -0.45583929 0.66210132 -0.49183424 -0.33456161 0.005132 1789457410.621052980 94.616 91.260 0.180 0.00000 -1 ACTUAL_TF
+19.7951 0.0429298 -1.6430677 0.6691918 -0.45583288 0.66210538 -0.49183952 -0.33455454 0.004949 1789457410.677110672 94.869 91.007 0.177 0.00000 -1 ACTUAL_TF
+19.8519 0.0429089 -1.6427457 0.6691937 -0.45583539 0.66210713 -0.49183315 -0.33455702 0.005195 1789457410.733070612 95.191 90.684 0.167 0.00000 -1 ACTUAL_TF
+19.9100 0.0429079 -1.6425123 0.6692088 -0.45582232 0.66210101 -0.49184872 -0.33456405 0.004889 1789457410.789099932 95.425 90.450 0.179 0.00000 -1 ACTUAL_TF
+19.9697 0.0428974 -1.6421863 0.6691933 -0.45582739 0.66211357 -0.49183399 -0.33455394 0.005172 1789457410.845079422 95.751 90.125 0.158 0.00000 -1 ACTUAL_TF
+20.0209 0.0429020 -1.6419099 0.6691840 -0.45584394 0.66211369 -0.49182376 -0.33454619 0.005104 1789457410.901010275 96.027 89.849 0.152 0.00000 -1 ACTUAL_TF
+20.0777 0.0429078 -1.6416178 0.6691921 -0.45584212 0.66211147 -0.49182851 -0.33454608 0.005138 1789457410.957050323 96.319 89.557 0.162 0.00000 -1 ACTUAL_TF
+20.1375 0.0429104 -1.6413661 0.6691867 -0.45584635 0.66211541 -0.49182351 -0.33453987 0.004945 1789457411.013033628 96.570 89.306 0.161 0.00000 -1 ACTUAL_TF
+20.1886 0.0428836 -1.6410653 0.6691906 -0.45584220 0.66211960 -0.49181916 -0.33454362 0.005078 1789457411.069100857 96.871 89.004 0.146 0.00000 -1 ACTUAL_TF
+20.2538 0.0428635 -1.6407254 0.6691839 -0.45585714 0.66211905 -0.49180547 -0.33454447 0.005382 1789457411.125002861 97.212 88.664 0.128 0.00000 -1 ACTUAL_TF
+20.3053 0.0428521 -1.6404905 0.6691983 -0.45584814 0.66211707 -0.49181169 -0.33455153 0.005026 1789457411.181160212 97.447 88.429 0.132 0.00000 -1 ACTUAL_TF
+20.3558 0.0428385 -1.6401921 0.6692020 -0.45585132 0.66211365 -0.49180944 -0.33455726 0.005122 1789457411.237044573 97.746 88.130 0.126 0.00000 -1 ACTUAL_TF
+20.4136 0.0428122 -1.6399230 0.6692029 -0.45584500 0.66212078 -0.49180524 -0.33455793 0.005028 1789457411.293278217 98.015 87.860 0.112 0.00000 -1 ACTUAL_TF
+20.4697 0.0427947 -1.6396175 0.6691992 -0.45584380 0.66212990 -0.49179597 -0.33455516 0.005164 1789457411.349089622 98.321 87.555 0.098 0.00000 -1 ACTUAL_TF
+20.5236 0.0427831 -1.6393888 0.6692166 -0.45582739 0.66212751 -0.49180987 -0.33456180 0.004847 1789457411.405036688 98.550 87.325 0.107 0.00000 -1 ACTUAL_TF
+20.5969 0.0427743 -1.6390531 0.6692150 -0.45584518 0.66212087 -0.49180171 -0.33456270 0.005190 1789457411.461082458 98.886 86.990 0.099 0.00000 -1 ACTUAL_TF
+20.6317 0.0427634 -1.6388192 0.6692266 -0.45583497 0.66211964 -0.49180854 -0.33456900 0.004890 1789457411.517044783 99.120 86.755 0.104 0.00000 -1 ACTUAL_TF
+20.7024 0.0427526 -1.6385199 0.6692308 -0.45583706 0.66211687 -0.49180695 -0.33457398 0.005025 1789457411.573119640 99.420 86.456 0.101 0.00000 -1 ACTUAL_TF
+20.7493 0.0427566 -1.6382173 0.6692351 -0.45584292 0.66211152 -0.49180854 -0.33457425 0.005139 1789457411.629128695 99.722 86.153 0.103 0.00000 -1 ACTUAL_TF
+20.8094 0.0427358 -1.6379431 0.6692324 -0.45585112 0.66211276 -0.49179789 -0.33457627 0.005071 1789457411.685089827 99.997 85.879 0.090 0.00000 -1 ACTUAL_TF
+20.8569 0.0427419 -1.6376509 0.6692454 -0.45585155 0.66210308 -0.49180940 -0.33457793 0.005120 1789457411.740988016 100.289 85.587 0.102 0.00000 -1 ACTUAL_TF
+20.9174 0.0427372 -1.6373932 0.6692519 -0.45584906 0.66210252 -0.49181129 -0.33457963 0.004963 1789457411.797078609 100.547 85.329 0.104 0.00000 -1 ACTUAL_TF
+20.9772 0.0427185 -1.6370822 0.6692467 -0.45585116 0.66210894 -0.49180149 -0.33457848 0.005142 1789457411.853135824 100.858 85.018 0.089 0.00000 -1 ACTUAL_TF
+21.0277 0.0426993 -1.6368435 0.6692549 -0.45584231 0.66211064 -0.49180246 -0.33458576 0.004887 1789457411.908963680 101.097 84.778 0.087 0.00000 -1 ACTUAL_TF
+21.0868 0.0427062 -1.6365306 0.6692443 -0.45584569 0.66212061 -0.49179568 -0.33457138 0.005092 1789457411.965157747 101.409 84.466 0.077 0.00000 -1 ACTUAL_TF
+21.1436 0.0426919 -1.6362711 0.6692386 -0.45585230 0.66212786 -0.49178201 -0.33456814 0.004960 1789457412.021059275 101.669 84.207 0.064 0.00000 -1 ACTUAL_TF
+21.1996 0.0426777 -1.6359624 0.6692368 -0.45585694 0.66212983 -0.49177674 -0.33456565 0.005124 1789457412.077161789 101.978 83.898 0.053 0.00000 -1 ACTUAL_TF
+21.2504 0.0426613 -1.6356538 0.6692415 -0.45585353 0.66213157 -0.49177579 -0.33456826 0.005247 1789457412.133031368 102.287 83.589 0.048 0.00000 -1 ACTUAL_TF
+21.3135 0.0426578 -1.6353902 0.6692398 -0.45586482 0.66212977 -0.49176879 -0.33456673 0.005082 1789457412.189136505 102.550 83.325 0.043 0.00000 -1 ACTUAL_TF
+21.3664 0.0426625 -1.6350819 0.6692424 -0.45586999 0.66212729 -0.49176885 -0.33456450 0.005206 1789457412.245233774 102.858 83.017 0.048 0.00000 -1 ACTUAL_TF
+21.4282 0.0426644 -1.6348270 0.6692459 -0.45586729 0.66212696 -0.49177223 -0.33456385 0.005011 1789457412.301204443 103.113 82.762 0.053 0.00000 -1 ACTUAL_TF
+21.4798 0.0426646 -1.6345259 0.6692513 -0.45586805 0.66212774 -0.49177226 -0.33456123 0.005119 1789457412.357281208 103.414 82.461 0.060 0.00000 -1 ACTUAL_TF
+21.5371 0.0426426 -1.6342637 0.6692450 -0.45586745 0.66213819 -0.49176062 -0.33455850 0.004997 1789457412.413138866 103.677 82.199 0.041 0.00000 -1 ACTUAL_TF
+21.5834 0.0426350 -1.6339603 0.6692591 -0.45585996 0.66213730 -0.49176829 -0.33455918 0.005126 1789457412.469100952 103.980 81.895 0.045 0.00000 -1 ACTUAL_TF
+21.6403 0.0426330 -1.6336577 0.6692716 -0.45585573 0.66213289 -0.49177783 -0.33455964 0.005213 1789457412.525040388 104.283 81.592 0.053 0.00000 -1 ACTUAL_TF
+21.7021 0.0426287 -1.6333995 0.6692758 -0.45585327 0.66213503 -0.49178032 -0.33455510 0.005033 1789457412.581041813 104.541 81.334 0.055 0.00000 -1 ACTUAL_TF
+21.7558 0.0426185 -1.6331051 0.6692926 -0.45584310 0.66213066 -0.49179206 -0.33456035 0.005103 1789457412.637046814 104.836 81.039 0.060 0.00000 -1 ACTUAL_TF
+21.8175 0.0426180 -1.6328598 0.6693004 -0.45583638 0.66213207 -0.49179978 -0.33455537 0.004882 1789457412.693252563 105.082 80.794 0.066 0.00000 -1 ACTUAL_TF
+21.8802 0.0426179 -1.6325659 0.6693121 -0.45582986 0.66212955 -0.49180809 -0.33455702 0.004993 1789457412.749250412 105.376 80.500 0.075 0.00000 -1 ACTUAL_TF
+21.9339 0.0426023 -1.6323079 0.6693141 -0.45582936 0.66213015 -0.49180730 -0.33455768 0.004886 1789457412.805015087 105.634 80.242 0.066 0.00000 -1 ACTUAL_TF
+21.9868 0.0425996 -1.6320024 0.6693288 -0.45581218 0.66213568 -0.49181754 -0.33455508 0.005052 1789457412.861236095 105.940 79.936 0.076 0.00000 -1 ACTUAL_TF
+22.0387 0.0425953 -1.6317384 0.6693332 -0.45582858 0.66212602 -0.49181223 -0.33455968 0.004953 1789457412.917168856 106.204 79.672 0.077 0.00000 -1 ACTUAL_TF
+22.0916 0.0425860 -1.6314458 0.6693390 -0.45582026 0.66213022 -0.49181370 -0.33456053 0.005038 1789457412.973077536 106.496 79.379 0.076 0.00000 -1 ACTUAL_TF
+22.1522 0.0425819 -1.6311461 0.6693410 -0.45583278 0.66212713 -0.49180628 -0.33456048 0.005132 1789457413.029084444 106.796 79.079 0.076 0.00000 -1 ACTUAL_TF
+22.2036 0.0425811 -1.6308926 0.6693391 -0.45583699 0.66213047 -0.49180195 -0.33455452 0.004951 1789457413.085073471 107.049 78.826 0.076 0.00000 -1 ACTUAL_TF
+22.2621 0.0425477 -1.6305917 0.6693343 -0.45583497 0.66213822 -0.49179194 -0.33455663 0.005087 1789457413.141104460 107.351 78.525 0.049 0.00000 -1 ACTUAL_TF
+22.3141 0.0425267 -1.6303361 0.6693399 -0.45583289 0.66213986 -0.49178810 -0.33456188 0.004934 1789457413.197134018 107.607 78.268 0.039 0.00000 -1 ACTUAL_TF
+22.3753 0.0425125 -1.6300389 0.6693469 -0.45582550 0.66214317 -0.49179040 -0.33456201 0.005046 1789457413.253206253 107.905 77.971 0.035 0.00000 -1 ACTUAL_TF
+22.4365 0.0424984 -1.6297770 0.6693470 -0.45582393 0.66214693 -0.49178581 -0.33456345 0.004941 1789457413.309090376 108.167 77.709 0.027 0.00000 -1 ACTUAL_TF
+22.4874 0.0424866 -1.6294769 0.6693561 -0.45582744 0.66214415 -0.49178439 -0.33456626 0.005066 1789457413.365166664 108.467 77.408 0.028 0.00000 -1 ACTUAL_TF
+22.5450 0.0424889 -1.6292363 0.6693596 -0.45582440 0.66214729 -0.49178525 -0.33456292 0.004838 1789457413.421059132 108.708 77.168 0.030 0.00000 -1 ACTUAL_TF
+22.5956 0.0424707 -1.6289236 0.6693594 -0.45582700 0.66215140 -0.49177797 -0.33456196 0.005064 1789457413.477079868 109.021 76.855 0.020 0.00000 -1 ACTUAL_TF
+22.6536 0.0424449 -1.6285963 0.6693583 -0.45583877 0.66215126 -0.49176409 -0.33456660 0.005303 1789457413.533086061 109.349 76.527 0.015 0.00000 -1 ACTUAL_TF
+22.7105 0.0424496 -1.6283649 0.6693771 -0.45583102 0.66214392 -0.49177711 -0.33457254 0.004952 1789457413.589258909 109.580 76.296 0.025 0.00000 -1 ACTUAL_TF
+22.7719 0.0424572 -1.6280556 0.6693874 -0.45583661 0.66213650 -0.49178155 -0.33457308 0.005129 1789457413.645116329 109.889 75.986 0.032 0.00000 -1 ACTUAL_TF
+22.8196 0.0424412 -1.6277972 0.6693958 -0.45583452 0.66213653 -0.49178147 -0.33457599 0.004976 1789457413.701180220 110.148 75.728 0.032 0.00000 -1 ACTUAL_TF
+22.8804 0.0424196 -1.6274923 0.6693921 -0.45583272 0.66214380 -0.49177276 -0.33457686 0.005121 1789457413.757180929 110.453 75.422 0.022 0.00000 -1 ACTUAL_TF
+22.9387 0.0424159 -1.6272676 0.6694155 -0.45581808 0.66213714 -0.49179090 -0.33458331 0.004795 1789457413.813189268 110.678 75.197 0.040 0.00000 -1 ACTUAL_TF
+22.9887 0.0424060 -1.6269372 0.6694215 -0.45582719 0.66213023 -0.49178944 -0.33458672 0.005131 1789457413.869085073 111.009 74.867 0.039 0.00000 -1 ACTUAL_TF
+23.0489 0.0423980 -1.6266469 0.6694484 -0.45581188 0.66212206 -0.49180766 -0.33459698 0.005154 1789457413.925094366 111.300 74.576 0.059 0.00000 -1 ACTUAL_TF
+23.1007 0.0424029 -1.6263896 0.6694450 -0.45581927 0.66212290 -0.49180436 -0.33459008 0.004985 1789457413.981156826 111.557 74.319 0.051 0.00000 -1 ACTUAL_TF
+23.1656 0.0424087 -1.6261111 0.6694574 -0.45581690 0.66211510 -0.49181443 -0.33459396 0.004983 1789457414.037160158 111.835 74.040 0.060 0.00000 -1 ACTUAL_TF
+23.2134 0.0423988 -1.6258444 0.6694527 -0.45582511 0.66212036 -0.49180175 -0.33459101 0.004920 1789457414.093095779 112.102 73.774 0.049 0.00000 -1 ACTUAL_TF
+23.2653 0.0423998 -1.6255311 0.6694435 -0.45584050 0.66212427 -0.49178880 -0.33458132 0.005120 1789457414.149184942 112.415 73.461 0.040 0.00000 -1 ACTUAL_TF
+23.3238 0.0424011 -1.6252662 0.6694445 -0.45584255 0.66212831 -0.49178564 -0.33457519 0.005007 1789457414.205039501 112.680 73.196 0.043 0.00000 -1 ACTUAL_TF
+23.3838 0.0423887 -1.6249793 0.6694602 -0.45582703 0.66213021 -0.49179374 -0.33458067 0.005046 1789457414.261025190 112.967 72.909 0.046 0.00000 -1 ACTUAL_TF
+23.4332 0.0423769 -1.6246988 0.6694445 -0.45584012 0.66213995 -0.49177520 -0.33457080 0.005032 1789457414.317271471 113.247 72.628 0.028 0.00000 -1 ACTUAL_TF
+23.4944 0.0423766 -1.6244225 0.6694524 -0.45583280 0.66213970 -0.49178221 -0.33457096 0.005005 1789457414.373192072 113.524 72.352 0.036 0.00000 -1 ACTUAL_TF
+23.5459 0.0423667 -1.6241156 0.6694498 -0.45583012 0.66214749 -0.49177803 -0.33456536 0.005153 1789457414.429039955 113.831 72.045 0.031 0.00000 -1 ACTUAL_TF
+23.6117 0.0423452 -1.6238469 0.6694464 -0.45583696 0.66215057 -0.49176921 -0.33456288 0.005048 1789457414.485163689 114.100 71.776 0.016 0.00000 -1 ACTUAL_TF
+23.6653 0.0423303 -1.6235514 0.6694588 -0.45582413 0.66215442 -0.49177426 -0.33456534 0.005123 1789457414.541053295 114.396 71.480 0.010 0.00000 -1 ACTUAL_TF
+23.7183 0.0423237 -1.6232808 0.6694503 -0.45582770 0.66216115 -0.49176616 -0.33455906 0.005035 1789457414.597131014 114.666 71.209 0.014 0.00000 -1 ACTUAL_TF
+23.7825 0.0423242 -1.6229781 0.6694569 -0.45582345 0.66216458 -0.49176932 -0.33455341 0.005147 1789457414.653119802 114.969 70.907 0.021 0.00000 -1 ACTUAL_TF
+23.8300 0.0423331 -1.6227282 0.6694618 -0.45582768 0.66216068 -0.49177277 -0.33455030 0.004940 1789457414.709213734 115.218 70.657 0.035 0.00000 -1 ACTUAL_TF
+23.8894 0.0423247 -1.6224368 0.6694773 -0.45581834 0.66215948 -0.49178073 -0.33455371 0.005027 1789457414.765029430 115.510 70.365 0.033 0.00000 -1 ACTUAL_TF
+23.9368 0.0423032 -1.6221760 0.6694783 -0.45581781 0.66216356 -0.49177359 -0.33455684 0.004919 1789457414.821104288 115.771 70.104 0.019 0.00000 -1 ACTUAL_TF
+23.9968 0.0422925 -1.6218771 0.6694966 -0.45581023 0.66215945 -0.49178402 -0.33455998 0.005046 1789457414.877192497 116.071 69.805 0.017 0.00000 -1 ACTUAL_TF
+24.0513 0.0422769 -1.6215543 0.6695021 -0.45580959 0.66216059 -0.49178301 -0.33456007 0.005263 1789457414.933202505 116.394 69.482 0.010 0.00000 -1 ACTUAL_TF
+24.1139 0.0422590 -1.6213335 0.6695245 -0.45579910 0.66215074 -0.49179562 -0.33457533 0.004880 1789457414.989089012 116.616 69.260 0.022 0.00000 -1 ACTUAL_TF
+24.1680 0.0422377 -1.6210465 0.6695372 -0.45579437 0.66214927 -0.49179669 -0.33458310 0.004959 1789457415.045073986 116.903 68.972 0.033 0.00000 -1 ACTUAL_TF
+24.2200 0.0422329 -1.6208029 0.6695406 -0.45579024 0.66215258 -0.49179850 -0.33457951 0.004775 1789457415.101140261 117.147 68.729 0.031 0.00000 -1 ACTUAL_TF
+24.2864 0.0422248 -1.6204986 0.6695439 -0.45578608 0.66215701 -0.49179827 -0.33457675 0.004973 1789457415.157172203 117.451 68.424 0.028 0.00000 -1 ACTUAL_TF
+24.3381 0.0422044 -1.6202367 0.6695373 -0.45578699 0.66216712 -0.49178684 -0.33457231 0.004892 1789457415.213041544 117.713 68.162 0.031 0.00000 -1 ACTUAL_TF
+24.3894 0.0421985 -1.6199124 0.6695352 -0.45578772 0.66217427 -0.49178061 -0.33456633 0.005164 1789457415.268975258 118.038 67.838 0.026 0.00000 -1 ACTUAL_TF
+24.4440 0.0421904 -1.6196744 0.6695467 -0.45578172 0.66217190 -0.49178686 -0.33457000 0.004893 1789457415.324944973 118.276 67.600 0.029 0.00000 -1 ACTUAL_TF
+24.5015 0.0421842 -1.6193770 0.6695512 -0.45578502 0.66217014 -0.49178519 -0.33457146 0.005017 1789457415.381006002 118.573 67.302 0.027 0.00000 -1 ACTUAL_TF
+24.5661 0.0421905 -1.6190747 0.6695597 -0.45579748 0.66215911 -0.49178587 -0.33457529 0.005129 1789457415.437129736 118.876 67.000 0.015 0.00000 -1 ACTUAL_TF
+24.6158 0.0422137 -1.6188245 0.6695604 -0.45580572 0.66215667 -0.49178726 -0.33456684 0.004938 1789457415.493073702 119.125 66.750 0.018 0.00000 -1 ACTUAL_TF
+24.6655 0.0421916 -1.6184899 0.6695496 -0.45581926 0.66216146 -0.49176931 -0.33456532 0.005253 1789457415.549088478 119.460 66.416 0.015 0.00000 -1 ACTUAL_TF
+24.7393 0.0421947 -1.6182357 0.6695534 -0.45582173 0.66216106 -0.49176941 -0.33456258 0.005037 1789457415.605180264 119.714 66.162 0.021 0.00000 -1 ACTUAL_TF
+24.7853 0.0421895 -1.6179325 0.6695560 -0.45582420 0.66216229 -0.49176620 -0.33456151 0.005157 1789457415.660935640 120.017 65.859 0.026 0.00000 -1 ACTUAL_TF
+24.8363 0.0421795 -1.6176946 0.6695679 -0.45581218 0.66216388 -0.49177313 -0.33456455 0.004883 1789457415.717117310 120.255 65.620 0.019 0.00000 -1 ACTUAL_TF
+24.8984 0.0421698 -1.6173977 0.6695781 -0.45581180 0.66216026 -0.49177512 -0.33456931 0.005011 1789457415.773098469 120.553 65.323 0.015 0.00000 -1 ACTUAL_TF
+24.9477 0.0421630 -1.6170969 0.6695825 -0.45581619 0.66215882 -0.49177332 -0.33456883 0.005118 1789457415.829179049 120.853 65.022 0.017 0.00000 -1 ACTUAL_TF
+25.0115 0.0421616 -1.6168353 0.6695896 -0.45581595 0.66215557 -0.49177895 -0.33456732 0.004967 1789457415.885890007 121.115 64.760 0.021 0.00000 -1 ACTUAL_TF
+25.0589 0.0421521 -1.6165376 0.6696051 -0.45580550 0.66215435 -0.49178652 -0.33457285 0.005100 1789457415.941017866 121.413 64.462 0.017 0.00000 -1 ACTUAL_TF
+25.1191 0.0421560 -1.6162826 0.6696080 -0.45581492 0.66215056 -0.49178468 -0.33457019 0.004936 1789457415.997045517 121.668 64.208 0.028 0.00000 -1 ACTUAL_TF
+25.1785 0.0421483 -1.6159920 0.6696230 -0.45581282 0.66214123 -0.49179383 -0.33457810 0.005011 1789457416.053158760 121.959 63.917 0.029 0.00000 -1 ACTUAL_TF
+25.2331 0.0421358 -1.6157665 0.6696537 -0.45579596 0.66213242 -0.49181082 -0.33459350 0.004732 1789457416.108992100 122.185 63.690 0.039 0.00000 -1 ACTUAL_TF
+25.2815 0.0421209 -1.6154540 0.6696505 -0.45580113 0.66213825 -0.49180005 -0.33459076 0.004986 1789457416.165087223 122.498 63.378 0.027 0.00000 -1 ACTUAL_TF
+25.3448 0.0421135 -1.6151825 0.6696484 -0.45580462 0.66214161 -0.49179463 -0.33458732 0.004943 1789457416.221154213 122.769 63.106 0.020 0.00000 -1 ACTUAL_TF
+25.3958 0.0421109 -1.6149016 0.6696617 -0.45578961 0.66214442 -0.49180583 -0.33458576 0.004968 1789457416.277143002 123.051 62.825 0.029 0.00000 -1 ACTUAL_TF
+25.4545 0.0420952 -1.6145880 0.6696576 -0.45579350 0.66214952 -0.49179683 -0.33458359 0.005160 1789457416.333101273 123.364 62.511 0.016 0.00000 -1 ACTUAL_TF
+25.5058 0.0420898 -1.6143173 0.6696454 -0.45580425 0.66215941 -0.49178105 -0.33457255 0.005065 1789457416.389075518 123.635 62.241 0.016 0.00000 -1 ACTUAL_TF
+25.5693 0.0420928 -1.6140396 0.6696521 -0.45578868 0.66216550 -0.49178953 -0.33456926 0.005029 1789457416.445246935 123.912 61.963 0.025 0.00000 -1 ACTUAL_TF
+25.6194 0.0420775 -1.6137785 0.6696574 -0.45579203 0.66216511 -0.49178457 -0.33457275 0.004916 1789457416.501456738 124.174 61.702 0.018 0.00000 -1 ACTUAL_TF
+25.6747 0.0420747 -1.6134881 0.6696746 -0.45577834 0.66216213 -0.49179953 -0.33457532 0.005009 1789457416.557146788 124.464 61.411 0.021 0.00000 -1 ACTUAL_TF
+25.7385 0.0420640 -1.6132288 0.6696796 -0.45577678 0.66216234 -0.49179895 -0.33457787 0.004899 1789457416.613069057 124.724 61.151 0.018 0.00000 -1 ACTUAL_TF
+25.7872 0.0420558 -1.6129413 0.6696886 -0.45577098 0.66216397 -0.49180169 -0.33457853 0.004972 1789457416.669039726 125.012 60.864 0.018 0.00000 -1 ACTUAL_TF
+25.8464 0.0420530 -1.6126698 0.6696820 -0.45578085 0.66216735 -0.49179377 -0.33457003 0.004931 1789457416.725198746 125.283 60.593 0.022 0.00000 -1 ACTUAL_TF
+25.9074 0.0420485 -1.6123918 0.6696913 -0.45577980 0.66216480 -0.49179536 -0.33457418 0.004944 1789457416.781116009 125.561 60.314 0.024 0.00000 -1 ACTUAL_TF
+25.9596 0.0420258 -1.6120946 0.6696882 -0.45577843 0.66216968 -0.49178851 -0.33457645 0.005052 1789457416.837337255 125.859 60.017 0.015 0.00000 -1 ACTUAL_TF
+26.0121 0.0420053 -1.6118343 0.6696993 -0.45577713 0.66216521 -0.49178950 -0.33458561 0.004942 1789457416.893092155 126.120 59.756 0.008 0.00000 -1 ACTUAL_TF
+26.0849 0.0419727 -1.6115100 0.6696972 -0.45578280 0.66216675 -0.49177826 -0.33459137 0.005204 1789457416.949136019 126.445 59.431 0.032 0.00000 -1 ACTUAL_TF
+26.1220 0.0419696 -1.6112853 0.6697174 -0.45576516 0.66216260 -0.49179545 -0.33459833 0.004852 1789457417.005125523 126.670 59.206 0.025 0.00000 -1 ACTUAL_TF
+26.1850 0.0419631 -1.6109826 0.6697128 -0.45576417 0.66217134 -0.49178813 -0.33459314 0.005015 1789457417.061245203 126.972 58.903 0.026 0.00000 -1 ACTUAL_TF
+26.2366 0.0419644 -1.6107245 0.6697166 -0.45576446 0.66216899 -0.49179405 -0.33458870 0.004893 1789457417.117251873 127.230 58.645 0.020 0.00000 -1 ACTUAL_TF
+26.2947 0.0419753 -1.6104360 0.6697327 -0.45575830 0.66216230 -0.49180824 -0.33458947 0.004980 1789457417.173053741 127.519 58.357 0.004 0.00000 -1 ACTUAL_TF
+26.3525 0.0419890 -1.6101744 0.6697429 -0.45576237 0.66215736 -0.49181374 -0.33458562 0.004891 1789457417.229015827 127.780 58.096 0.023 0.00000 -1 ACTUAL_TF
+26.4047 0.0419877 -1.6098566 0.6697440 -0.45577330 0.66215452 -0.49180976 -0.33458221 0.005129 1789457417.284950495 128.098 57.778 0.031 0.00000 -1 ACTUAL_TF
+26.4652 0.0419844 -1.6095586 0.6697526 -0.45577662 0.66214916 -0.49181200 -0.33458498 0.005188 1789457417.340909481 128.396 57.480 0.035 0.00000 -1 ACTUAL_TF
+26.5173 0.0419729 -1.6093073 0.6697527 -0.45576725 0.66215916 -0.49181018 -0.33458063 0.004977 1789457417.396999836 128.647 57.228 0.031 0.00000 -1 ACTUAL_TF
+26.5864 0.0419548 -1.6090091 0.6697520 -0.45576908 0.66216321 -0.49180097 -0.33458368 0.005082 1789457417.453079462 128.946 56.930 0.025 0.00000 -1 ACTUAL_TF
+26.6316 0.0419619 -1.6087633 0.6697557 -0.45576576 0.66216531 -0.49180545 -0.33457745 0.004872 1789457417.509211540 129.191 56.684 0.037 0.00000 -1 ACTUAL_TF
+26.6857 0.0419242 -1.6084339 0.6697507 -0.45577085 0.66217372 -0.49178708 -0.33458087 0.005185 1789457417.565257072 129.521 56.354 0.028 0.00000 -1 ACTUAL_TF
+26.7506 0.0419185 -1.6082084 0.6697623 -0.45575776 0.66217480 -0.49179756 -0.33458116 0.004840 1789457417.621225357 129.747 56.128 0.022 0.00000 -1 ACTUAL_TF
+26.8020 0.0419221 -1.6078916 0.6697622 -0.45577156 0.66217137 -0.49179255 -0.33457651 0.005085 1789457417.677219629 130.064 55.812 0.033 0.00000 -1 ACTUAL_TF
+26.8503 0.0419174 -1.6075878 0.6697670 -0.45577313 0.66217397 -0.49178957 -0.33457362 0.005192 1789457417.733087540 130.368 55.508 0.036 0.00000 -1 ACTUAL_TF
+26.9091 0.0419104 -1.6073467 0.6697794 -0.45576877 0.66216974 -0.49179581 -0.33457875 0.004928 1789457417.789070129 130.609 55.267 0.030 0.00000 -1 ACTUAL_TF
+26.9676 0.0419009 -1.6070482 0.6697878 -0.45577549 0.66216318 -0.49179294 -0.33458680 0.005043 1789457417.845346212 130.908 54.968 0.028 0.00000 -1 ACTUAL_TF
+27.0271 0.0418900 -1.6067983 0.6697921 -0.45576893 0.66216825 -0.49179199 -0.33458710 0.004824 1789457417.903334141 131.158 54.718 0.026 0.00000 -1 ACTUAL_TF
+27.0828 0.0418728 -1.6064961 0.6698011 -0.45576774 0.66216693 -0.49179180 -0.33459162 0.005068 1789457417.957052231 131.461 54.415 0.019 0.00000 -1 ACTUAL_TF
+27.1330 0.0418722 -1.6062436 0.6698137 -0.45576760 0.66216069 -0.49180004 -0.33459206 0.004901 1789457418.013095856 131.713 54.162 0.016 0.00000 -1 ACTUAL_TF
+27.1940 0.0418625 -1.6059499 0.6698213 -0.45576144 0.66216319 -0.49180248 -0.33459191 0.005007 1789457418.069034815 132.007 53.868 0.014 0.00000 -1 ACTUAL_TF
+27.2437 0.0418568 -1.6057256 0.6698348 -0.45574181 0.66216729 -0.49181612 -0.33459048 0.004706 1789457418.125198126 132.232 53.644 0.010 0.00000 -1 ACTUAL_TF
+27.3023 0.0418402 -1.6054256 0.6698423 -0.45574202 0.66216641 -0.49181428 -0.33459464 0.004904 1789457418.181215286 132.532 53.343 0.001 0.00000 -1 ACTUAL_TF
+27.3559 0.0418487 -1.6051218 0.6698526 -0.45573999 0.66216436 -0.49182205 -0.33459003 0.005064 1789457418.237113237 132.836 53.040 0.018 0.00000 -1 ACTUAL_TF
+27.4163 0.0418332 -1.6048656 0.6698554 -0.45573926 0.66216791 -0.49181879 -0.33458879 0.004920 1789457418.293111086 133.092 52.783 0.009 0.00000 -1 ACTUAL_TF
+27.4649 0.0418290 -1.6045714 0.6698766 -0.45572556 0.66216408 -0.49183302 -0.33459412 0.005025 1789457418.349080801 133.387 52.489 0.020 0.00000 -1 ACTUAL_TF
+27.5242 0.0418242 -1.6043121 0.6698843 -0.45573049 0.66216241 -0.49183162 -0.33459278 0.004906 1789457418.405129671 133.646 52.229 0.023 0.00000 -1 ACTUAL_TF
+27.5903 0.0418139 -1.6039958 0.6698763 -0.45573457 0.66217080 -0.49182150 -0.33458548 0.005128 1789457418.461215019 133.962 51.913 0.013 0.00000 -1 ACTUAL_TF
+27.6382 0.0418042 -1.6037547 0.6698738 -0.45573199 0.66217629 -0.49181672 -0.33458515 0.004884 1789457418.517132044 134.204 51.672 0.011 0.00000 -1 ACTUAL_TF
+27.7048 0.0418055 -1.6034390 0.6698655 -0.45573948 0.66218257 -0.49180871 -0.33457429 0.005109 1789457418.573190928 134.519 51.357 0.028 0.00000 -1 ACTUAL_TF
+27.7496 0.0417728 -1.6031415 0.6698706 -0.45573689 0.66218916 -0.49179936 -0.33457852 0.005180 1789457418.629205465 134.817 51.058 0.022 0.00000 -1 ACTUAL_TF
+27.8101 0.0417678 -1.6028953 0.6698865 -0.45573583 0.66218644 -0.49180255 -0.33458066 0.004948 1789457418.685188055 135.064 50.812 0.011 0.00000 -1 ACTUAL_TF
+27.8638 0.0417585 -1.6025984 0.6699022 -0.45573638 0.66218402 -0.49180186 -0.33458573 0.005058 1789457418.741169930 135.361 50.514 0.006 0.00000 -1 ACTUAL_TF
+27.9140 0.0417486 -1.6023315 0.6699037 -0.45574976 0.66218309 -0.49179123 -0.33458497 0.004972 1789457418.797133684 135.628 50.247 0.010 0.00000 -1 ACTUAL_TF
+27.9744 0.0417581 -1.6020593 0.6699233 -0.45574139 0.66217833 -0.49180481 -0.33458580 0.004940 1789457418.853261471 135.900 49.975 0.012 0.00000 -1 ACTUAL_TF
+28.0327 0.0417557 -1.6018079 0.6699291 -0.45573886 0.66218044 -0.49180584 -0.33458358 0.004811 1789457418.909029245 136.152 49.724 0.016 0.00000 -1 ACTUAL_TF
+28.0931 0.0417484 -1.6015058 0.6699312 -0.45573768 0.66218602 -0.49180354 -0.33457753 0.004983 1789457418.965141535 136.454 49.422 0.014 0.00000 -1 ACTUAL_TF
+28.1430 0.0417365 -1.6012420 0.6699331 -0.45574177 0.66218569 -0.49179917 -0.33457904 0.004901 1789457419.021229506 136.718 49.158 0.009 0.00000 -1 ACTUAL_TF
+28.2021 0.0417378 -1.6009429 0.6699403 -0.45574325 0.66217959 -0.49180514 -0.33458032 0.005036 1789457419.077139854 137.017 48.859 0.018 0.00000 -1 ACTUAL_TF
+28.2523 0.0417316 -1.6006528 0.6699529 -0.45574150 0.66217321 -0.49181096 -0.33458676 0.005082 1789457419.133109570 137.307 48.568 0.021 0.00000 -1 ACTUAL_TF
+28.3129 0.0417354 -1.6004102 0.6699597 -0.45574771 0.66216552 -0.49181314 -0.33459032 0.004854 1789457419.189254761 137.550 48.326 0.031 0.00000 -1 ACTUAL_TF
+28.3691 0.0417090 -1.6001005 0.6699745 -0.45574659 0.66216177 -0.49181177 -0.33460129 0.005068 1789457419.245172501 137.860 48.015 0.021 0.00000 -1 ACTUAL_TF
+28.4188 0.0417168 -1.5998629 0.6699864 -0.45573995 0.66216039 -0.49182255 -0.33459722 0.004823 1789457419.301160812 138.098 47.778 0.036 0.00000 -1 ACTUAL_TF
+28.4771 0.0417008 -1.5995559 0.6699959 -0.45574009 0.66215745 -0.49182467 -0.33459973 0.005028 1789457419.356988430 138.405 47.470 0.033 0.00000 -1 ACTUAL_TF
+28.5344 0.0416902 -1.5993260 0.6700191 -0.45572570 0.66215436 -0.49183685 -0.33460753 0.004756 1789457419.413117647 138.636 47.240 0.048 0.00000 -1 ACTUAL_TF
+28.5933 0.0416862 -1.5990302 0.6700279 -0.45571993 0.66215464 -0.49184307 -0.33460569 0.004916 1789457419.469076872 138.932 46.944 0.051 0.00000 -1 ACTUAL_TF
+28.6430 0.0416837 -1.5987644 0.6700285 -0.45573050 0.66215424 -0.49183758 -0.33460017 0.004861 1789457419.525231361 139.198 46.678 0.049 0.00000 -1 ACTUAL_TF
+28.6998 0.0416730 -1.5984685 0.6700378 -0.45572602 0.66215629 -0.49183633 -0.33460404 0.004991 1789457419.581194401 139.494 46.382 0.050 0.00000 -1 ACTUAL_TF
+28.7604 0.0416546 -1.5981521 0.6700226 -0.45572868 0.66217365 -0.49181878 -0.33459186 0.005198 1789457419.637040377 139.810 46.065 0.026 0.00000 -1 ACTUAL_TF
+28.8109 0.0416371 -1.5979081 0.6700243 -0.45572665 0.66217687 -0.49181498 -0.33459383 0.004952 1789457419.692932129 140.054 45.821 0.021 0.00000 -1 ACTUAL_TF
+28.8671 0.0416337 -1.5975906 0.6700206 -0.45573703 0.66217914 -0.49180559 -0.33458901 0.005151 1789457419.749467611 140.372 45.504 0.011 0.00000 -1 ACTUAL_TF
+28.9254 0.0416207 -1.5973597 0.6700383 -0.45572902 0.66217431 -0.49181267 -0.33459908 0.004856 1789457419.805099010 140.603 45.272 0.023 0.00000 -1 ACTUAL_TF
+28.9873 0.0416070 -1.5970567 0.6700444 -0.45573064 0.66217609 -0.49180902 -0.33459871 0.005026 1789457419.861077309 140.907 44.969 0.025 0.00000 -1 ACTUAL_TF
+29.0367 0.0415935 -1.5968031 0.6700512 -0.45572757 0.66217663 -0.49180906 -0.33460177 0.004874 1789457419.917287827 141.161 44.715 0.029 0.00000 -1 ACTUAL_TF
+29.0932 0.0415888 -1.5965002 0.6700456 -0.45573008 0.66218495 -0.49180124 -0.33459336 0.005040 1789457419.973109722 141.463 44.412 0.018 0.00000 -1 ACTUAL_TF
+29.1460 0.0415973 -1.5962539 0.6700538 -0.45573089 0.66218062 -0.49180781 -0.33459118 0.004831 1789457420.029894114 141.709 44.166 0.015 0.00000 -1 ACTUAL_TF
+29.2066 0.0415883 -1.5959262 0.6700492 -0.45574132 0.66218501 -0.49179647 -0.33458496 0.005162 1789457420.085139513 142.037 43.838 0.004 0.00000 -1 ACTUAL_TF
+29.2585 0.0415913 -1.5956354 0.6700599 -0.45573709 0.66218293 -0.49180315 -0.33458502 0.005174 1789457420.141089678 142.328 43.548 0.015 0.00000 -1 ACTUAL_TF
+29.3194 0.0415900 -1.5954012 0.6700715 -0.45572364 0.66218727 -0.49181040 -0.33458409 0.004878 1789457420.197081804 142.562 43.313 0.023 0.00000 -1 ACTUAL_TF
+29.3789 0.0416033 -1.5950995 0.6700807 -0.45572197 0.66218293 -0.49182099 -0.33457940 0.005036 1789457420.252988338 142.864 43.012 0.043 0.00000 -1 ACTUAL_TF
+29.4395 0.0415779 -1.5948427 0.6700888 -0.45571941 0.66218563 -0.49181626 -0.33458449 0.004902 1789457420.309255362 143.121 42.754 0.028 0.00000 -1 ACTUAL_TF
+29.4894 0.0415712 -1.5945614 0.6701022 -0.45571233 0.66218302 -0.49182530 -0.33458601 0.004942 1789457420.365180254 143.403 42.473 0.034 0.00000 -1 ACTUAL_TF
+29.5413 0.0415539 -1.5943093 0.6701050 -0.45570613 0.66218688 -0.49182470 -0.33458769 0.004819 1789457420.420954943 143.655 42.220 0.027 0.00000 -1 ACTUAL_TF
+29.6116 0.0415378 -1.5940187 0.6701210 -0.45569961 0.66218026 -0.49183285 -0.33459768 0.004931 1789457420.477066517 143.946 41.929 0.035 0.00000 -1 ACTUAL_TF
+29.6517 0.0415278 -1.5937340 0.6701490 -0.45568841 0.66216861 -0.49184849 -0.33461302 0.004982 1789457420.533206224 144.232 41.644 0.056 0.00000 -1 ACTUAL_TF
+29.7162 0.0415307 -1.5934988 0.6701566 -0.45569056 0.66216375 -0.49185185 -0.33461476 0.004751 1789457420.589060545 144.467 41.409 0.060 0.00000 -1 ACTUAL_TF
+29.7641 0.0415186 -1.5932089 0.6701689 -0.45568825 0.66216009 -0.49185523 -0.33462017 0.004882 1789457420.645038366 144.757 41.118 0.065 0.00000 -1 ACTUAL_TF
+29.8270 0.0415011 -1.5929361 0.6701573 -0.45569984 0.66216643 -0.49183978 -0.33461456 0.004880 1789457420.701166391 145.030 40.845 0.048 0.00000 -1 ACTUAL_TF
+29.8745 0.0415007 -1.5926358 0.6701612 -0.45569671 0.66216838 -0.49184093 -0.33461329 0.005026 1789457420.757123947 145.330 40.545 0.045 0.00000 -1 ACTUAL_TF
+29.9384 0.0415161 -1.5923576 0.6701420 -0.45570745 0.66218111 -0.49182956 -0.33459017 0.005014 1789457420.813134432 145.607 40.268 0.032 0.00000 -1 ACTUAL_TF
+29.9879 0.0415094 -1.5920537 0.6701435 -0.45571299 0.66218260 -0.49182233 -0.33459031 0.005141 1789457420.869050741 145.912 39.964 0.030 0.00000 -1 ACTUAL_TF
+30.0425 0.0415027 -1.5918039 0.6701399 -0.45571370 0.66218472 -0.49181891 -0.33459017 0.004936 1789457420.925127983 146.161 39.714 0.027 0.00000 -1 ACTUAL_TF
+30.1026 0.0414907 -1.5915181 0.6701491 -0.45571440 0.66218181 -0.49181773 -0.33459671 0.004988 1789457420.981134653 146.447 39.428 0.023 0.00000 -1 ACTUAL_TF
+30.1556 0.0414692 -1.5912234 0.6701516 -0.45571392 0.66218634 -0.49181081 -0.33459858 0.005075 1789457421.037113667 146.743 39.133 0.010 0.00000 -1 ACTUAL_TF
+30.2140 0.0414484 -1.5909611 0.6701558 -0.45571377 0.66218681 -0.49180771 -0.33460241 0.004963 1789457421.093094349 147.005 38.870 0.007 0.00000 -1 ACTUAL_TF
+30.2780 0.0414355 -1.5906533 0.6701488 -0.45571957 0.66219352 -0.49179635 -0.33459793 0.005123 1789457421.149144888 147.313 38.562 0.014 0.00000 -1 ACTUAL_TF
+30.3236 0.0414303 -1.5904006 0.6701604 -0.45571451 0.66219231 -0.49180233 -0.33459842 0.004944 1789457421.205051661 147.566 38.309 0.010 0.00000 -1 ACTUAL_TF
+30.3858 0.0414250 -1.5901054 0.6701598 -0.45571862 0.66219370 -0.49179684 -0.33459812 0.005039 1789457421.261167765 147.861 38.014 0.012 0.00000 -1 ACTUAL_TF
+30.4364 0.0414432 -1.5898573 0.6701601 -0.45572181 0.66219306 -0.49180106 -0.33458886 0.004862 1789457421.317095280 148.109 37.767 0.024 0.00000 -1 ACTUAL_TF
+30.4981 0.0414308 -1.5895562 0.6701692 -0.45571858 0.66219193 -0.49180318 -0.33459237 0.005018 1789457421.373106480 148.410 37.465 0.019 0.00000 -1 ACTUAL_TF
+30.5469 0.0414118 -1.5893086 0.6701794 -0.45571258 0.66219279 -0.49180362 -0.33459819 0.004843 1789457421.429137945 148.658 37.217 0.008 0.00000 -1 ACTUAL_TF
+30.6086 0.0414095 -1.5890198 0.6701879 -0.45570705 0.66219250 -0.49180924 -0.33459804 0.004940 1789457421.485065222 148.947 36.928 0.009 0.00000 -1 ACTUAL_TF
+30.6606 0.0414087 -1.5887076 0.6701953 -0.45570722 0.66219146 -0.49181284 -0.33459459 0.005126 1789457421.541231394 149.259 36.616 0.015 0.00000 -1 ACTUAL_TF
+30.7283 0.0413951 -1.5884760 0.6702148 -0.45570346 0.66218170 -0.49182059 -0.33460761 0.004836 1789457421.597202063 149.492 36.384 0.012 0.00000 -1 ACTUAL_TF
+30.7903 0.0413934 -1.5881866 0.6702270 -0.45569590 0.66217993 -0.49183054 -0.33460680 0.004938 1789457421.653186083 149.781 36.094 0.020 0.00000 -1 ACTUAL_TF
+30.8390 0.0414168 -1.5879503 0.6702354 -0.45568738 0.66217934 -0.49184558 -0.33459747 0.004733 1789457421.709022045 150.017 35.859 0.047 0.00000 -1 ACTUAL_TF
+30.8874 0.0414018 -1.5876524 0.6702433 -0.45568329 0.66218019 -0.49184604 -0.33460067 0.004902 1789457421.765349150 150.315 35.560 0.041 0.00000 -1 ACTUAL_TF
+30.9358 0.0414021 -1.5873938 0.6702503 -0.45567750 0.66218182 -0.49185175 -0.33459694 0.004823 1789457421.821137428 150.574 35.302 0.048 0.00000 -1 ACTUAL_TF
+30.9953 0.0413976 -1.5870726 0.6702450 -0.45568310 0.66218915 -0.49184236 -0.33458860 0.005103 1789457421.876944065 150.895 34.981 0.048 0.00000 -1 ACTUAL_TF
+31.0585 0.0413911 -1.5868326 0.6702493 -0.45567665 0.66219211 -0.49184478 -0.33458798 0.004855 1789457421.933096647 151.135 34.741 0.048 0.00000 -1 ACTUAL_TF
+31.1084 0.0413775 -1.5865233 0.6702409 -0.45567331 0.66220466 -0.49183705 -0.33457905 0.005055 1789457421.989206314 151.444 34.431 0.042 0.00000 -1 ACTUAL_TF
+31.1653 0.0413658 -1.5862320 0.6702430 -0.45566844 0.66221056 -0.49183502 -0.33457698 0.005102 1789457422.045132160 151.736 34.140 0.039 0.00000 -1 ACTUAL_TF
+31.2266 0.0413676 -1.5859960 0.6702546 -0.45566470 0.66220784 -0.49184283 -0.33457599 0.004839 1789457422.101079464 151.972 33.904 0.046 0.00000 -1 ACTUAL_TF
+31.2774 0.0413366 -1.5856793 0.6702572 -0.45566643 0.66221194 -0.49183319 -0.33457967 0.005092 1789457422.157085896 152.289 33.586 0.024 0.00000 -1 ACTUAL_TF
+31.3350 0.0413190 -1.5854073 0.6702512 -0.45567020 0.66222021 -0.49182035 -0.33457705 0.005024 1789457422.213116646 152.561 33.314 0.023 0.00000 -1 ACTUAL_TF
+31.3881 0.0413185 -1.5851230 0.6702638 -0.45566716 0.66221533 -0.49182695 -0.33458116 0.005038 1789457422.269234419 152.846 33.030 0.023 0.00000 -1 ACTUAL_TF
+31.4461 0.0413044 -1.5848850 0.6702657 -0.45566677 0.66221689 -0.49182188 -0.33458605 0.004797 1789457422.325516224 153.084 32.792 0.020 0.00000 -1 ACTUAL_TF
+31.4988 0.0412855 -1.5845843 0.6702637 -0.45567035 0.66222206 -0.49181163 -0.33458601 0.004987 1789457422.381030083 153.385 32.490 0.024 0.00000 -1 ACTUAL_TF
+31.5566 0.0412806 -1.5843389 0.6702714 -0.45567039 0.66221889 -0.49181561 -0.33458638 0.004804 1789457422.437107086 153.631 32.245 0.022 0.00000 -1 ACTUAL_TF
+31.6157 0.0412817 -1.5840195 0.6702769 -0.45567563 0.66221789 -0.49181516 -0.33458187 0.005070 1789457422.493263483 153.950 31.926 0.026 0.00000 -1 ACTUAL_TF
+31.6678 0.0412818 -1.5837362 0.6702915 -0.45566301 0.66221524 -0.49182872 -0.33458437 0.005071 1789457422.549156904 154.233 31.642 0.025 0.00000 -1 ACTUAL_TF
+31.7266 0.0412712 -1.5834734 0.6702942 -0.45566974 0.66221639 -0.49182225 -0.33458243 0.004957 1789457422.605236769 154.496 31.379 0.024 0.00000 -1 ACTUAL_TF
+31.7878 0.0412650 -1.5831941 0.6703021 -0.45566347 0.66221522 -0.49182716 -0.33458609 0.004971 1789457422.661116123 154.776 31.100 0.023 0.00000 -1 ACTUAL_TF
+31.8363 0.0412462 -1.5829464 0.6703145 -0.45566424 0.66221108 -0.49182584 -0.33459517 0.004812 1789457422.717082262 155.024 30.851 0.010 0.00000 -1 ACTUAL_TF
+31.9004 0.0412368 -1.5826531 0.6703268 -0.45566768 0.66220402 -0.49182868 -0.33460029 0.004931 1789457422.773463964 155.318 30.558 0.004 0.00000 -1 ACTUAL_TF
+31.9491 0.0412235 -1.5823987 0.6703374 -0.45566931 0.66219888 -0.49182950 -0.33460703 0.004828 1789457422.829068184 155.573 30.303 0.004 0.00000 -1 ACTUAL_TF
+32.0079 0.0412163 -1.5821096 0.6703622 -0.45565751 0.66219093 -0.49184575 -0.33461496 0.004935 1789457422.885038137 155.862 30.013 0.021 0.00000 -1 ACTUAL_TF
+32.0578 0.0412154 -1.5818255 0.6703711 -0.45565873 0.66218720 -0.49184748 -0.33461813 0.004973 1789457422.941199303 156.146 29.729 0.024 0.00000 -1 ACTUAL_TF
+32.1283 0.0412249 -1.5815735 0.6703650 -0.45566713 0.66219080 -0.49184202 -0.33460757 0.004837 1789457422.997020006 156.398 29.478 0.024 0.00000 -1 ACTUAL_TF
+32.1779 0.0412225 -1.5812677 0.6703624 -0.45567376 0.66219784 -0.49183139 -0.33460025 0.005024 1789457423.053015947 156.704 29.172 0.026 0.00000 -1 ACTUAL_TF
+32.2307 0.0412071 -1.5810180 0.6703676 -0.45567765 0.66219574 -0.49182810 -0.33460394 0.004857 1789457423.109047890 156.954 28.922 0.018 0.00000 -1 ACTUAL_TF
+32.2791 0.0412054 -1.5807285 0.6703842 -0.45566673 0.66219421 -0.49183878 -0.33460615 0.004951 1789457423.165125847 157.243 28.632 0.027 0.00000 -1 ACTUAL_TF
+32.3389 0.0411990 -1.5804690 0.6703912 -0.45567087 0.66218847 -0.49184010 -0.33460993 0.004851 1789457423.221333742 157.503 28.373 0.028 0.00000 -1 ACTUAL_TF
+32.4042 0.0411911 -1.5801667 0.6703906 -0.45567222 0.66219497 -0.49183501 -0.33460271 0.005024 1789457423.277062893 157.805 28.070 0.025 0.00000 -1 ACTUAL_TF
+32.4504 0.0411784 -1.5799172 0.6703977 -0.45567934 0.66218919 -0.49183244 -0.33460823 0.004857 1789457423.333028555 158.055 27.820 0.020 0.00000 -1 ACTUAL_TF
+32.5105 0.0411865 -1.5796428 0.6704115 -0.45567591 0.66218638 -0.49184010 -0.33460722 0.004870 1789457423.389088631 158.329 27.546 0.038 0.00000 -1 ACTUAL_TF
+32.5679 0.0411751 -1.5793417 0.6704102 -0.45567736 0.66218828 -0.49183552 -0.33460821 0.005028 1789457423.444942713 158.631 27.245 0.032 0.00000 -1 ACTUAL_TF
+32.6242 0.0411485 -1.5790658 0.6703984 -0.45567793 0.66219789 -0.49182344 -0.33460617 0.005003 1789457423.501040459 158.907 26.969 0.013 0.00000 -1 ACTUAL_TF
+32.6740 0.0411467 -1.5787418 0.6703874 -0.45568582 0.66220570 -0.49181405 -0.33459376 0.005240 1789457423.556995630 159.230 26.645 0.031 0.00000 -1 ACTUAL_TF
+32.7363 0.0411369 -1.5785117 0.6704007 -0.45567377 0.66220830 -0.49182030 -0.33459583 0.004903 1789457423.613044500 159.461 26.415 0.022 0.00000 -1 ACTUAL_TF
+32.7860 0.0411334 -1.5782218 0.6704154 -0.45567032 0.66220441 -0.49182792 -0.33459704 0.004987 1789457423.669065952 159.751 26.124 0.020 0.00000 -1 ACTUAL_TF
+32.8425 0.0411415 -1.5779796 0.6704222 -0.45566678 0.66220505 -0.49183559 -0.33458930 0.004788 1789457423.725133419 159.993 25.882 0.033 0.00000 -1 ACTUAL_TF
+32.9050 0.0411250 -1.5776870 0.6704329 -0.45565304 0.66221207 -0.49184035 -0.33458713 0.004923 1789457423.781119585 160.286 25.589 0.024 0.00000 -1 ACTUAL_TF
+32.9556 0.0411001 -1.5774370 0.6704349 -0.45564828 0.66221678 -0.49183698 -0.33458924 0.004791 1789457423.837153435 160.537 25.339 0.008 0.00000 -1 ACTUAL_TF
+33.0168 0.0410810 -1.5771232 0.6704432 -0.45563354 0.66222599 -0.49184032 -0.33458618 0.005038 1789457423.893167973 160.851 25.024 0.007 0.00000 -1 ACTUAL_TF
+33.0768 0.0410657 -1.5768409 0.6704662 -0.45562369 0.66221938 -0.49185135 -0.33459647 0.005050 1789457423.949034452 161.134 24.742 0.018 0.00000 -1 ACTUAL_TF
+33.1274 0.0410578 -1.5766141 0.6704820 -0.45561294 0.66221395 -0.49186333 -0.33460425 0.004751 1789457424.005151272 161.361 24.514 0.028 0.00000 -1 ACTUAL_TF
+33.1916 0.0410499 -1.5763301 0.6704951 -0.45561344 0.66220882 -0.49186580 -0.33461009 0.004847 1789457424.061251402 161.646 24.230 0.034 0.00000 -1 ACTUAL_TF
+33.2403 0.0410499 -1.5760793 0.6704943 -0.45562038 0.66221016 -0.49186095 -0.33460510 0.004743 1789457424.116972208 161.896 23.979 0.026 0.00000 -1 ACTUAL_TF
+33.2964 0.0410419 -1.5757854 0.6704991 -0.45562217 0.66221210 -0.49185645 -0.33460545 0.004890 1789457424.173170567 162.190 23.685 0.024 0.00000 -1 ACTUAL_TF
+33.3594 0.0410479 -1.5755042 0.6704925 -0.45563781 0.66221282 -0.49184613 -0.33459790 0.004930 1789457424.229150295 162.471 23.405 0.011 0.00000 -1 ACTUAL_TF
+33.4002 0.0410470 -1.5752162 0.6705029 -0.45563836 0.66221023 -0.49184790 -0.33459967 0.005000 1789457424.284984112 162.759 23.116 0.019 0.00000 -1 ACTUAL_TF
+33.4597 0.0410180 -1.5749174 0.6705094 -0.45565671 0.66219593 -0.49183564 -0.33462101 0.005104 1789457424.341141462 163.059 22.817 0.017 0.00000 -1 ACTUAL_TF
+33.5226 0.0410282 -1.5746869 0.6705191 -0.45560340 0.66222654 -0.49186299 -0.33459281 0.004811 1789457424.397084475 163.289 22.587 0.021 0.00000 -1 ACTUAL_TF
+33.5738 0.0410259 -1.5743935 0.6705146 -0.45562955 0.66221752 -0.49184618 -0.33459976 0.004940 1789457424.453075647 163.582 22.293 0.015 0.00000 -1 ACTUAL_TF
+33.6343 0.0410242 -1.5741692 0.6705400 -0.45562474 0.66220543 -0.49186108 -0.33460834 0.004665 1789457424.509180069 163.807 22.069 0.034 0.00000 -1 ACTUAL_TF
+33.6818 0.0410139 -1.5738516 0.6705457 -0.45562740 0.66220370 -0.49185885 -0.33461143 0.004971 1789457424.565090895 164.125 21.751 0.032 0.00000 -1 ACTUAL_TF
+33.7461 0.0410140 -1.5735892 0.6705413 -0.45564155 0.66220500 -0.49184772 -0.33460595 0.004883 1789457424.621175528 164.387 21.489 0.028 0.00000 -1 ACTUAL_TF
+33.7928 0.0410204 -1.5732973 0.6705497 -0.45564134 0.66220264 -0.49185243 -0.33460398 0.004986 1789457424.677061796 164.679 21.197 0.041 0.00000 -1 ACTUAL_TF
+33.8532 0.0410118 -1.5730631 0.6705631 -0.45563321 0.66219888 -0.49185904 -0.33461278 0.004748 1789457424.733052015 164.913 20.962 0.044 0.00000 -1 ACTUAL_TF
+33.9117 0.0409944 -1.5727651 0.6705658 -0.45563357 0.66219975 -0.49185535 -0.33461599 0.004923 1789457424.789057732 165.212 20.664 0.035 0.00000 -1 ACTUAL_TF
+33.9609 0.0409908 -1.5724648 0.6705684 -0.45563888 0.66219741 -0.49185556 -0.33461309 0.005049 1789457424.845255136 165.512 20.364 0.036 0.00000 -1 ACTUAL_TF
+34.0175 0.0409827 -1.5722232 0.6705865 -0.45562543 0.66219679 -0.49186499 -0.33461876 0.004841 1789457424.900927544 165.754 20.122 0.043 0.00000 -1 ACTUAL_TF
+34.0779 0.0409727 -1.5719259 0.6705919 -0.45562314 0.66219964 -0.49186409 -0.33461755 0.004980 1789457424.957004786 166.051 19.824 0.042 0.00000 -1 ACTUAL_TF
+34.1339 0.0409591 -1.5716628 0.6705929 -0.45563380 0.66219720 -0.49185640 -0.33461917 0.004896 1789457425.013077974 166.315 19.561 0.034 0.00000 -1 ACTUAL_TF
+34.1889 0.0409603 -1.5713957 0.6706098 -0.45562181 0.66219114 -0.49187118 -0.33462577 0.004860 1789457425.069084883 166.582 19.294 0.048 0.00000 -1 ACTUAL_TF
+34.2505 0.0409554 -1.5711508 0.6706207 -0.45562408 0.66218394 -0.49187364 -0.33463332 0.004715 1789457425.125094414 166.827 19.048 0.053 0.00000 -1 ACTUAL_TF
+34.3029 0.0409454 -1.5708393 0.6706180 -0.45563084 0.66218676 -0.49186555 -0.33463042 0.004968 1789457425.181179047 167.139 18.737 0.045 0.00000 -1 ACTUAL_TF
+34.3612 0.0409395 -1.5705807 0.6706227 -0.45562851 0.66218916 -0.49186647 -0.33462748 0.004865 1789457425.237122297 167.397 18.478 0.045 0.00000 -1 ACTUAL_TF
+34.4102 0.0409323 -1.5702804 0.6706144 -0.45562959 0.66219930 -0.49185788 -0.33461858 0.005017 1789457425.293078661 167.698 18.178 0.035 0.00000 -1 ACTUAL_TF
+34.4742 0.0409245 -1.5699908 0.6706153 -0.45562662 0.66220861 -0.49185194 -0.33461293 0.005063 1789457425.349084139 167.987 17.888 0.032 0.00000 -1 ACTUAL_TF
+34.5220 0.0409188 -1.5697436 0.6706149 -0.45562496 0.66221397 -0.49184925 -0.33460854 0.004870 1789457425.405054092 168.234 17.641 0.031 0.00000 -1 ACTUAL_TF
+34.5859 0.0408964 -1.5694521 0.6706193 -0.45561661 0.66222217 -0.49184541 -0.33460932 0.004969 1789457425.461287737 168.526 17.349 0.016 0.00000 -1 ACTUAL_TF
+34.6354 0.0408651 -1.5691979 0.6706116 -0.45561296 0.66223660 -0.49182983 -0.33460862 0.004855 1789457425.517112255 168.781 17.094 0.011 0.00000 -1 ACTUAL_TF
+34.6956 0.0408654 -1.5688965 0.6706211 -0.45560413 0.66223629 -0.49184134 -0.33460434 0.005016 1789457425.573063374 169.083 16.793 0.003 0.00000 -1 ACTUAL_TF
+34.7476 0.0408575 -1.5686594 0.6706246 -0.45559416 0.66224058 -0.49184534 -0.33460355 0.004784 1789457425.628967762 169.320 16.556 0.005 0.00000 -1 ACTUAL_TF
+34.8157 0.0408468 -1.5683649 0.6706279 -0.45558555 0.66224750 -0.49184780 -0.33459797 0.004920 1789457425.685249329 169.614 16.261 0.009 0.00000 -1 ACTUAL_TF
+34.8655 0.0408384 -1.5680672 0.6706304 -0.45558918 0.66224733 -0.49184447 -0.33459826 0.005043 1789457425.741106033 169.912 15.963 0.013 0.00000 -1 ACTUAL_TF
+34.9171 0.0408646 -1.5678340 0.6706394 -0.45559305 0.66224165 -0.49185380 -0.33459050 0.004788 1789457425.797123194 170.145 15.731 0.026 0.00000 -1 ACTUAL_TF
+34.9797 0.0408510 -1.5675112 0.6706384 -0.45560434 0.66224464 -0.49183953 -0.33459019 0.005081 1789457425.853176832 170.468 15.408 0.025 0.00000 -1 ACTUAL_TF
+35.0252 0.0408580 -1.5672671 0.6706581 -0.45560033 0.66223473 -0.49185529 -0.33459211 0.004869 1789457425.909200907 170.712 15.164 0.034 0.00000 -1 ACTUAL_TF
+35.0874 0.0408497 -1.5669709 0.6706629 -0.45560386 0.66223030 -0.49185645 -0.33459436 0.004980 1789457425.965751648 171.008 14.867 0.034 0.00000 -1 ACTUAL_TF
+35.1410 0.0408470 -1.5667412 0.6706788 -0.45559258 0.66222731 -0.49186864 -0.33459772 0.004733 1789457426.021138906 171.238 14.637 0.038 0.00000 -1 ACTUAL_TF
+35.2018 0.0408392 -1.5664410 0.6706843 -0.45559539 0.66222317 -0.49187010 -0.33459996 0.004926 1789457426.076989174 171.539 14.337 0.038 0.00000 -1 ACTUAL_TF
+35.2521 0.0408459 -1.5662002 0.6706917 -0.45559538 0.66222073 -0.49187671 -0.33459506 0.004742 1789457426.132912397 171.779 14.096 0.051 0.00000 -1 ACTUAL_TF
+35.3069 0.0408259 -1.5658998 0.6707048 -0.45559039 0.66221861 -0.49187812 -0.33460397 0.004926 1789457426.189157963 172.080 13.795 0.042 0.00000 -1 ACTUAL_TF
+35.3696 0.0408176 -1.5656019 0.6707114 -0.45559883 0.66221514 -0.49187473 -0.33460434 0.005036 1789457426.245487690 172.378 13.497 0.042 0.00000 -1 ACTUAL_TF
+35.4190 0.0408103 -1.5653472 0.6707197 -0.45560277 0.66220867 -0.49187599 -0.33460993 0.004901 1789457426.301080942 172.633 13.242 0.043 0.00000 -1 ACTUAL_TF
+35.4825 0.0407970 -1.5650405 0.6707204 -0.45561163 0.66220839 -0.49186696 -0.33461171 0.005075 1789457426.357099056 172.940 12.935 0.035 0.00000 -1 ACTUAL_TF
+35.5357 0.0407877 -1.5648136 0.6707282 -0.45560384 0.66221009 -0.49186985 -0.33461469 0.004770 1789457426.413060904 173.167 12.708 0.034 0.00000 -1 ACTUAL_TF
+35.5864 0.0407828 -1.5645083 0.6707232 -0.45561501 0.66221257 -0.49185815 -0.33461177 0.004975 1789457426.469075918 173.473 12.403 0.033 0.00000 -1 ACTUAL_TF
+35.6444 0.0407605 -1.5642459 0.6707183 -0.45561142 0.66222627 -0.49184674 -0.33460631 0.004895 1789457426.525025845 173.735 12.140 0.018 0.00000 -1 ACTUAL_TF
+35.7042 0.0407544 -1.5639508 0.6707248 -0.45561985 0.66222292 -0.49184369 -0.33460595 0.005006 1789457426.581105471 174.031 11.845 0.019 0.00000 -1 ACTUAL_TF
+35.7573 0.0407401 -1.5637092 0.6707379 -0.45561262 0.66222174 -0.49184755 -0.33461244 0.004803 1789457426.637060642 174.273 11.603 0.011 0.00000 -1 ACTUAL_TF
+35.8104 0.0407323 -1.5634257 0.6707456 -0.45560989 0.66222355 -0.49184701 -0.33461340 0.004881 1789457426.693091631 174.556 11.319 0.012 0.00000 -1 ACTUAL_TF
+35.8768 0.0407219 -1.5631300 0.6707516 -0.45560961 0.66222421 -0.49184581 -0.33461424 0.005000 1789457426.749186039 174.852 11.023 0.009 0.00000 -1 ACTUAL_TF
+35.9409 0.0407305 -1.5628905 0.6707602 -0.45560515 0.66222151 -0.49185450 -0.33461286 0.004786 1789457426.805104017 175.092 10.784 0.025 0.00000 -1 ACTUAL_TF
+35.9813 0.0407154 -1.5625927 0.6707617 -0.45560550 0.66222591 -0.49184861 -0.33461233 0.004948 1789457426.861126423 175.390 10.486 0.016 0.00000 -1 ACTUAL_TF
+36.0442 0.0407051 -1.5623538 0.6707676 -0.45560707 0.66222478 -0.49184770 -0.33461376 0.004748 1789457426.916975260 175.629 10.247 0.013 0.00000 -1 ACTUAL_TF
+36.0951 0.0406889 -1.5620606 0.6707776 -0.45559882 0.66222497 -0.49185078 -0.33462009 0.004892 1789457426.973166943 175.923 9.953 0.009 0.00000 -1 ACTUAL_TF
+36.1455 0.0406769 -1.5618039 0.6707757 -0.45560653 0.66222570 -0.49184306 -0.33461950 0.004802 1789457427.029139519 176.179 9.696 0.002 0.00000 -1 ACTUAL_TF
+36.2017 0.0406572 -1.5615147 0.6707835 -0.45559965 0.66222667 -0.49184446 -0.33462491 0.004917 1789457427.085066557 176.469 9.406 0.014 0.00000 -1 ACTUAL_TF
+36.2655 0.0406534 -1.5612863 0.6707931 -0.45558577 0.66222645 -0.49185608 -0.33462714 0.004666 1789457427.141080141 176.698 9.178 0.013 0.00000 -1 ACTUAL_TF
+36.3173 0.0406318 -1.5609797 0.6707914 -0.45558400 0.66223142 -0.49185136 -0.33462667 0.004912 1789457427.197114468 177.005 8.871 0.025 0.00000 -1 ACTUAL_TF
+36.3700 0.0406242 -1.5606823 0.6707928 -0.45558492 0.66222814 -0.49185436 -0.33462750 0.005034 1789457427.253059864 177.302 8.573 0.025 0.00000 -1 ACTUAL_TF
+36.4322 0.0406137 -1.5604498 0.6708104 -0.45557085 0.66222483 -0.49186693 -0.33463473 0.004774 1789457427.309036493 177.535 8.341 0.030 0.00000 -1 ACTUAL_TF
+36.4888 0.0406148 -1.5601634 0.6708286 -0.45556454 0.66221872 -0.49187968 -0.33463668 0.004876 1789457427.365166903 177.822 8.054 0.027 0.00000 -1 ACTUAL_TF
+36.5425 0.0406131 -1.5599042 0.6708388 -0.45556269 0.66221854 -0.49188210 -0.33463599 0.004801 1789457427.421217680 178.081 7.795 0.028 0.00000 -1 ACTUAL_TF
+36.6026 0.0406243 -1.5596086 0.6708502 -0.45557061 0.66220932 -0.49188635 -0.33463720 0.004950 1789457427.477112532 178.376 7.499 0.029 0.00000 -1 ACTUAL_TF
+36.6529 0.0406353 -1.5593650 0.6708487 -0.45557636 0.66220931 -0.49188564 -0.33463044 0.004769 1789457427.533218622 178.619 7.256 0.031 0.00000 -1 ACTUAL_TF
+36.7052 0.0406276 -1.5590656 0.6708466 -0.45558184 0.66221415 -0.49187669 -0.33462655 0.004944 1789457427.589184761 178.919 6.957 0.025 0.00000 -1 ACTUAL_TF
+36.7668 0.0406027 -1.5588058 0.6708420 -0.45559324 0.66221611 -0.49186173 -0.33462915 0.005008 1789457427.639791965 179.179 6.697 0.005 0.00000 -1 ACTUAL_TF
+36.8152 0.0406028 -1.5585463 0.6708402 -0.45559880 0.66222375 -0.49185228 -0.33462033 0.004966 1789457427.693100691 179.438 6.437 0.012 0.00000 -1 ACTUAL_TF
+36.8693 0.0405940 -1.5582678 0.6708536 -0.45558391 0.66222469 -0.49186105 -0.33462588 0.004970 1789457427.749112368 179.717 6.158 0.010 0.00000 -1 ACTUAL_TF
+36.9313 0.0405925 -1.5580106 0.6708537 -0.45558802 0.66222919 -0.49185668 -0.33461779 0.004859 1789457427.805036068 179.974 5.901 0.015 0.00000 -1 ACTUAL_TF
+36.9809 0.0405950 -1.5577324 0.6708640 -0.45557520 0.66223341 -0.49186499 -0.33461467 0.004892 1789457427.861065865 180.252 5.623 0.025 0.00000 -1 ACTUAL_TF
+37.0408 0.0405845 -1.5574675 0.6708585 -0.45558484 0.66223762 -0.49185258 -0.33461147 0.004845 1789457427.917050123 180.517 5.358 0.023 0.00000 -1 ACTUAL_TF
+37.0882 0.0405851 -1.5571760 0.6708586 -0.45558376 0.66224173 -0.49185361 -0.33460327 0.004952 1789457427.973088741 180.809 5.067 0.033 0.00000 -1 ACTUAL_TF
+37.1494 0.0405745 -1.5568930 0.6708743 -0.45557575 0.66224210 -0.49185718 -0.33460821 0.004986 1789457428.029094696 181.092 4.783 0.027 0.00000 -1 ACTUAL_TF
+37.2085 0.0405675 -1.5566322 0.6708698 -0.45558911 0.66224268 -0.49184622 -0.33460499 0.004888 1789457428.085113049 181.353 4.523 0.031 0.00000 -1 ACTUAL_TF
+37.2596 0.0405512 -1.5563317 0.6708766 -0.45558070 0.66224785 -0.49184590 -0.33460668 0.005019 1789457428.141645432 181.654 4.222 0.024 0.00000 -1 ACTUAL_TF
+37.3187 0.0405529 -1.5560969 0.6708803 -0.45557379 0.66224936 -0.49185172 -0.33460453 0.004784 1789457428.197085142 181.889 3.987 0.031 0.00000 -1 ACTUAL_TF
+37.3672 0.0405437 -1.5558159 0.6708929 -0.45557176 0.66224588 -0.49185601 -0.33460789 0.004858 1789457428.253030300 182.170 3.706 0.026 0.00000 -1 ACTUAL_TF
+37.4300 0.0405155 -1.5555608 0.6708891 -0.45557341 0.66225148 -0.49184563 -0.33460981 0.004775 1789457428.309063196 182.425 3.450 0.020 0.00000 -1 ACTUAL_TF
+37.4806 0.0405110 -1.5552771 0.6709074 -0.45556537 0.66224750 -0.49185476 -0.33461521 0.004864 1789457428.365107536 182.710 3.166 0.009 0.00000 -1 ACTUAL_TF
+37.5432 0.0405108 -1.5549994 0.6709298 -0.45555821 0.66223622 -0.49187126 -0.33462301 0.004899 1789457428.421052694 182.988 2.888 0.016 0.00000 -1 ACTUAL_TF
+37.6042 0.0405124 -1.5547426 0.6709347 -0.45556105 0.66223557 -0.49187205 -0.33461929 0.004793 1789457428.477550983 183.244 2.631 0.023 0.00000 -1 ACTUAL_TF
+37.6559 0.0404954 -1.5544540 0.6709570 -0.45555885 0.66222578 -0.49187955 -0.33463062 0.004920 1789457428.533128977 183.534 2.342 0.028 0.00000 -1 ACTUAL_TF
+37.7174 0.0405042 -1.5542208 0.6709600 -0.45556233 0.66222341 -0.49188183 -0.33462722 0.004693 1789457428.589209318 183.767 2.109 0.036 0.00000 -1 ACTUAL_TF
+37.7711 0.0404938 -1.5539352 0.6709681 -0.45555968 0.66222258 -0.49188328 -0.33463035 0.004821 1789457428.645036697 184.052 1.823 0.035 0.00000 -1 ACTUAL_TF
+37.8183 0.0404629 -1.5536874 0.6709706 -0.45555528 0.66222660 -0.49187659 -0.33463821 0.004712 1789457428.701071978 184.301 1.575 0.022 0.00000 -1 ACTUAL_TF
+37.8801 0.0404468 -1.5533903 0.6709740 -0.45555547 0.66223192 -0.49187152 -0.33463489 0.004888 1789457428.757221460 184.598 1.277 0.021 0.00000 -1 ACTUAL_TF
+37.9413 0.0404433 -1.5531373 0.6709720 -0.45555377 0.66224001 -0.49186691 -0.33462796 0.004780 1789457428.813097477 184.851 1.024 0.013 0.00000 -1 ACTUAL_TF
+37.9869 0.0404443 -1.5528605 0.6709889 -0.45554794 0.66223790 -0.49187539 -0.33462762 0.004832 1789457428.869083643 185.128 0.747 0.023 0.00000 -1 ACTUAL_TF
+38.0479 0.0404366 -1.5525587 0.6709798 -0.45554778 0.66225153 -0.49186461 -0.33461670 0.005002 1789457428.925048590 185.430 0.446 0.008 0.00000 -1 ACTUAL_TF
+38.1036 0.0404300 -1.5523268 0.6709894 -0.45554055 0.66225179 -0.49187059 -0.33461723 0.004737 1789457428.981404305 185.662 0.213 0.012 0.00000 -1 ACTUAL_TF
+38.1563 0.0404300 -1.5520044 0.6709885 -0.45555371 0.66224951 -0.49186494 -0.33461215 0.005053 1789457429.037067890 185.984 -0.109 0.013 0.00000 -1 ACTUAL_TF
+38.2195 0.0404344 -1.5517380 0.6709878 -0.45555790 0.66225418 -0.49186036 -0.33460393 0.004962 1789457429.093188763 186.250 -0.375 0.024 0.00000 -1 ACTUAL_TF
+38.2783 0.0404380 -1.5514536 0.6710020 -0.45555374 0.66225170 -0.49186843 -0.33460263 0.004998 1789457429.149215698 186.535 -0.659 0.035 0.00000 -1 ACTUAL_TF
+38.3249 0.0404220 -1.5512162 0.6710138 -0.45555035 0.66224874 -0.49187022 -0.33461046 0.004776 1789457429.205153942 186.773 -0.897 0.028 0.00000 -1 ACTUAL_TF
+38.3918 0.0404139 -1.5509137 0.6710162 -0.45555397 0.66225096 -0.49186506 -0.33460874 0.004962 1789457429.261241198 187.075 -1.200 0.027 0.00000 -1 ACTUAL_TF
+38.4394 0.0404191 -1.5506732 0.6710158 -0.45555373 0.66225297 -0.49186508 -0.33460506 0.004767 1789457429.317040920 187.316 -1.440 0.037 0.00000 -1 ACTUAL_TF
+38.5015 0.0403897 -1.5503542 0.6710173 -0.45555971 0.66225211 -0.49185544 -0.33461280 0.005055 1789457429.372977257 187.635 -1.760 0.016 0.00000 -1 ACTUAL_TF
+38.5476 0.0403780 -1.5500698 0.6710404 -0.45554785 0.66224573 -0.49186768 -0.33462357 0.005066 1789457429.429058075 187.920 -2.045 0.019 0.00000 -1 ACTUAL_TF
+38.6076 0.0403772 -1.5498116 0.6710394 -0.45555538 0.66224563 -0.49186344 -0.33461976 0.004930 1789457429.485038996 188.178 -2.303 0.019 0.00000 -1 ACTUAL_TF
+38.6616 0.0403821 -1.5495285 0.6710514 -0.45554936 0.66224150 -0.49187592 -0.33461778 0.004966 1789457429.541174650 188.461 -2.586 0.033 0.00000 -1 ACTUAL_TF
+38.7276 0.0403692 -1.5493079 0.6710718 -0.45554281 0.66223442 -0.49188341 -0.33462969 0.004664 1789457429.597210646 188.683 -2.807 0.038 0.00000 -1 ACTUAL_TF
+38.7816 0.0403551 -1.5490269 0.6710789 -0.45553311 0.66223986 -0.49188630 -0.33462790 0.004774 1789457429.653164387 188.964 -3.088 0.035 0.00000 -1 ACTUAL_TF
+38.8346 0.0403482 -1.5487956 0.6710914 -0.45553935 0.66222937 -0.49188923 -0.33463585 0.004581 1789457429.709258556 189.196 -3.320 0.042 0.00000 -1 ACTUAL_TF
+38.8843 0.0403378 -1.5485380 0.6711076 -0.45553038 0.66222415 -0.49189876 -0.33464439 0.004590 1789457429.765294313 189.454 -3.578 0.051 0.00000 -1 ACTUAL_TF
+38.9345 0.0403283 -1.5483057 0.6711001 -0.45553381 0.66222984 -0.49189145 -0.33463919 0.004464 1789457429.821072340 189.686 -3.810 0.038 0.00000 -1 ACTUAL_TF
+38.9947 0.0403227 -1.5480664 0.6711096 -0.45552708 0.66222878 -0.49189649 -0.33464305 0.004408 1789457429.877080202 189.925 -4.050 0.042 0.00000 -1 ACTUAL_TF
+39.0552 0.0403087 -1.5478125 0.6711035 -0.45553028 0.66223870 -0.49188417 -0.33463716 0.004448 1789457429.933078289 190.179 -4.304 0.030 0.00000 -1 ACTUAL_TF
+39.1037 0.0403013 -1.5476099 0.6711038 -0.45553656 0.66224025 -0.49187693 -0.33463620 0.004199 1789457429.989120007 190.382 -4.506 0.025 0.00000 -1 ACTUAL_TF
+39.1627 0.0403109 -1.5473833 0.6711041 -0.45553786 0.66224231 -0.49187983 -0.33462608 0.004155 1789457430.045060635 190.608 -4.733 0.026 0.00000 -1 ACTUAL_TF
+39.2312 0.0403129 -1.5471942 0.6711114 -0.45553461 0.66224249 -0.49188250 -0.33462623 0.003910 1789457430.101793766 190.797 -4.922 0.033 0.00000 -1 ACTUAL_TF
+39.2818 0.0403105 -1.5469870 0.6711130 -0.45553696 0.66224347 -0.49188072 -0.33462369 0.003860 1789457430.157152414 191.005 -5.129 0.034 0.00000 -1 ACTUAL_TF
+39.3404 0.0403061 -1.5468188 0.6711107 -0.45554417 0.66224257 -0.49187671 -0.33462155 0.003603 1789457430.213166237 191.173 -5.297 0.031 0.00000 -1 ACTUAL_TF
+39.3930 0.0403099 -1.5466619 0.6711172 -0.45554017 0.66224281 -0.49188123 -0.33461988 0.003366 1789457430.269033194 191.330 -5.454 0.039 0.00000 -1 ACTUAL_TF
+39.4471 0.0403115 -1.5465263 0.6711222 -0.45553787 0.66224340 -0.49188451 -0.33461704 0.003083 1789457430.325064421 191.465 -5.590 0.045 0.00000 -1 ACTUAL_TF
+39.5005 0.0403030 -1.5464308 0.6711305 -0.45553680 0.66223859 -0.49188685 -0.33462457 0.002673 1789457430.381067038 191.561 -5.685 0.043 0.00000 -1 ACTUAL_TF
+39.5557 0.0402926 -1.5463226 0.6711248 -0.45554343 0.66223922 -0.49187952 -0.33462507 0.002454 1789457430.437045813 191.669 -5.794 0.032 0.00000 -1 ACTUAL_TF
+39.6111 0.0402894 -1.5462646 0.6711237 -0.45554103 0.66224101 -0.49187961 -0.33462468 0.002029 1789457430.493070364 191.727 -5.852 0.029 0.00000 -1 ACTUAL_TF
+39.6716 0.0402907 -1.5462125 0.6711259 -0.45554085 0.66224026 -0.49188093 -0.33462445 0.001700 1789457430.549064159 191.779 -5.904 0.032 0.00000 -1 ACTUAL_TF
+39.7326 0.0402892 -1.5461850 0.6711275 -0.45553929 0.66224075 -0.49188119 -0.33462522 0.001338 1789457430.605137587 191.807 -5.931 0.032 0.00000 -1 ACTUAL_TF

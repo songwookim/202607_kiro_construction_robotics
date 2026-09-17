@@ -160,6 +160,7 @@ def parse_weld_trajectory_log(path):
     section = "header"
     execution = {}
     actual = []
+    tcp_columns = TCP_TRAJECTORY_COLUMNS
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
@@ -172,13 +173,16 @@ def parse_weld_trajectory_log(path):
             execution[key] = value
         elif section == "tcp_trajectory":
             if line.startswith("elapsed_s "):
+                tcp_columns = tuple(line.split())
                 continue
-            values = line.split(maxsplit=len(TCP_TRAJECTORY_COLUMNS) - 1)
-            if len(values) != len(TCP_TRAJECTORY_COLUMNS):
+            values = line.split(maxsplit=len(tcp_columns) - 1)
+            if len(values) != len(tcp_columns):
                 continue
-            sample = dict(zip(TCP_TRAJECTORY_COLUMNS, values))
+            sample = dict(zip(tcp_columns, values))
+            if "waypoint" in sample:
+                sample["waypoint_index"] = sample.pop("waypoint")
             try:
-                for key in TCP_TRAJECTORY_COLUMNS[:-2]:
+                for key in tcp_columns[:-2]:
                     sample[key] = float(sample[key])
                 sample["waypoint_index"] = int(sample["waypoint_index"])
             except ValueError:
@@ -418,7 +422,6 @@ def plot_weld_feedback(path, output=None, show=True):
     )
     current_axis.set_ylabel("Current (A)")
     current_axis.grid(True, alpha=0.25)
-    current_axis.legend(loc="upper right")
 
     voltage_axis.plot(times, voltages, color="#1565c0", label="Voltage feedback")
     voltage_axis.plot(
@@ -435,6 +438,61 @@ def plot_weld_feedback(path, output=None, show=True):
         alpha=0.10,
         label="WCR detected",
     )
+    # Shade only observed RX states; requested crater settings are not evidence.
+    states = [sample.get("state") for sample in samples]
+    for state_name, color, label in (
+        ("main_weld", "#22c55e", "Main Weld (RX)"),
+        ("crater", "#f59e0b", "Crater (RX)"),
+    ):
+        spans = []
+        start = None
+        for index, state in enumerate(states):
+            if state == state_name and start is None:
+                start = times[index]
+            if state != state_name and start is not None:
+                spans.append((start, times[index]))
+                start = None
+        if start is not None:
+            spans.append((start, times[-1]))
+        for index, (begin, end) in enumerate(spans):
+            for axis in (current_axis, voltage_axis):
+                axis.axvspan(begin, end, color=color, alpha=0.055,
+                             label=label if axis is current_axis and index == 0 else None)
+    timeline = sections.get("event_timeline", {})
+    control = sections.get("arc_off_control", {})
+
+    def event_time(name, fallback=None):
+        try:
+            return float(timeline.get(f"{name}.elapsed_s", fallback))
+        except (TypeError, ValueError):
+            return None
+
+    off = event_time("ARC_OFF_CMD", control.get("command_elapsed_s"))
+    extinct = event_time("CURRENT_EXTINCT",
+                          control.get("feedback_current_extinguished_elapsed_s"))
+    if off is not None and extinct is not None and extinct >= off:
+        for axis in (current_axis, voltage_axis):
+            axis.axvspan(off, extinct, color="#6b7280", alpha=0.13,
+                         label="Arc Extinction" if axis is current_axis else None)
+    quality = sections.get("quality_metrics", {})
+    hot_status = quality.get("hot_start.status")
+    wcr_on = event_time("WCR_ON")
+    if hot_status == "CONFIRMED":
+        try:
+            duration = float(quality.get("hot_start.detected_duration_s"))
+        except (TypeError, ValueError):
+            duration = None
+        if wcr_on is not None and duration is not None and duration > 0:
+            current_axis.axvspan(wcr_on, wcr_on + duration,
+                                 color="#a855f7", alpha=0.15,
+                                 label="Hot Start (confirmed)")
+    elif hot_status in ("MISMATCH", "UNCONFIRMED") and wcr_on is not None:
+        current_axis.axvspan(
+            wcr_on, wcr_on + 1.0, facecolor="none", edgecolor="#a855f7",
+            hatch="///", linewidth=0.0,
+            label=f"Hot Start inspection window ({hot_status})",
+        )
+    current_axis.legend(loc="upper right")
     voltage_axis.set_xlabel("Elapsed time (s)")
     voltage_axis.set_ylabel("Voltage (V)")
     voltage_axis.grid(True, alpha=0.25)

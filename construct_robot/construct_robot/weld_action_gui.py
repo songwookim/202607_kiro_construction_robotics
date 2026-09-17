@@ -1,5 +1,6 @@
 import copy
 from dataclasses import dataclass
+import hashlib
 import math
 from pathlib import Path
 import queue
@@ -76,6 +77,7 @@ from construct_robot.hicomm_welder import (
     TxState,
     build_request,
 )
+from construct_robot.weld_quality_metrics import analyze_weld_quality, format_quality_summary
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
 FASTECH_GUI_CHANNELS = {
     0: "Touch sensing",
@@ -1985,6 +1987,7 @@ def format_weld_feedback_log(document):
         f"ended={document['ended']}",
         f"elapsed_seconds={document['elapsed_seconds']:.3f}",
     ]
+    lines.extend(("", *format_quality_summary(document)))
     commanded = document["commanded"]
     welding_echo = (
         document.get("rx_welding_setting_echo")
@@ -2083,6 +2086,21 @@ def format_weld_feedback_log(document):
     for key, value in flattened("", document.get("arc_off_control", {})):
         lines.append(f"{key}={value}")
 
+    lines.extend(("", "[quality_metrics]"))
+    for key, value in flattened("", document.get("quality_metrics", {})):
+        lines.append(f"{key}={value if value is not None else 'N/A'}")
+    lines.extend(("", "[event_timeline]"))
+    for name, event in (document.get("quality_metrics", {}).get("timeline", {}) or {}).items():
+        for field in ("elapsed_s", "unix_time", "wall_time"):
+            value = event.get(field)
+            lines.append(f"{name}.{field}={value if value is not None else 'N/A'}")
+    lines.extend(("", "[tx_frames]", "elapsed_s unix_time raw_hex"))
+    for frame in document.get("tx_frames", ()):
+        lines.append(
+            f"{float(frame['elapsed_s']):.6f} {float(frame['unix_time']):.6f} "
+            f"{frame['raw_hex']}"
+        )
+
     # Embedded YAML snapshots of the taught poses/touch points active for
     # this run, so "Load teaching/touch from log" can restore exactly what
     # was on screen when this weld happened -- reusing the same
@@ -2132,7 +2150,8 @@ def format_weld_feedback_log(document):
         "",
         "[tcp_trajectory]",
         "elapsed_s x_m y_m z_m qx qy qz qw speed_m_s tf_stamp_s "
-        "along_mm remaining_mm cross_track_mm progress waypoint phase",
+        "along_mm remaining_mm cross_track_mm signed_weave_offset_mm "
+        "weave_tracking_error_mm raw_speed_m_s progress waypoint phase",
     ))
     for sample in document.get("tcp_trajectory", ()):
         phase = str(sample.get("phase", "unknown")).replace(" ", "_")
@@ -2155,6 +2174,9 @@ def format_weld_feedback_log(document):
             f"{tcp_value('along_mm', 3)} "
             f"{tcp_value('remaining_mm', 3)} "
             f"{tcp_value('cross_track_mm', 3)} "
+            f"{tcp_value('signed_weave_offset_mm', 3)} "
+            f"{tcp_value('weave_tracking_error_mm', 3)} "
+            f"{tcp_value('raw_speed_m_s', 6)} "
             f"{float(sample.get('progress', 0.0)):.5f} "
             f"{int(sample.get('waypoint_index', -1))} {phase}"
         )
@@ -2352,6 +2374,105 @@ def read_teaching_and_touch_snapshot(path):
         return loaded if isinstance(loaded, dict) else {}
 
     return load_block("teaching_snapshot_yaml"), load_block("touch_snapshot_yaml")
+
+
+def read_weld_pass_reference(path):
+    """Read the executed START/GOAL TCP reference from one completed log."""
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"Pass reference log is missing: {path}")
+    raw = path.read_bytes()
+    if not any(line == "result=completed" for line in
+               raw.decode("utf-8").splitlines()[:8]):
+        raise ValueError(f"Pass reference must be a completed weld: {path.name}")
+    teaching, _touches = read_teaching_and_touch_snapshot(path)
+    poses = {}
+    for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
+        entry = teaching.get(name)
+        if not isinstance(entry, dict) or entry.get("planning_group") != "right_manipulator":
+            raise ValueError(f"{path.name} has no right-arm {name} reference")
+        pose = _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
+        if not pose_is_valid(pose):
+            raise ValueError(f"{path.name} has an invalid {name} TCP pose")
+        poses[endpoint] = pose
+    if math.dist(_pose_position_tuple(poses["start"]),
+                 _pose_position_tuple(poses["goal"])) < 0.001:
+        raise ValueError(f"{path.name} seam is shorter than 1 mm")
+    return {
+        "path": str(path.resolve()),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "start": poses["start"],
+        "goal": poses["goal"],
+    }
+
+
+def correct_four_pass_references(references, corrected_root_start, corrected_root_goal):
+    """Carry one measured root correction into four distinct logged seams.
+
+    Rotate each pass's endpoint offset with the change in root seam direction,
+    then anchor it at the independently sensed root START or GOAL. Preserve
+    every pass's logged TCP attitude; this is a prediction, not a re-probe.
+    """
+    if set(references) != {1, 2, 3, 4}:
+        raise ValueError("Exactly four pass references (1.log..4.log) are required")
+    if not all(
+        pose is not None and pose_is_valid(pose)
+        for pose in (corrected_root_start, corrected_root_goal)
+    ):
+        raise ValueError("Fresh corrected root START and GOAL are required")
+    root = references[1]
+    original_direction = seam_direction(root["start"], root["goal"])
+    corrected_direction = seam_direction(corrected_root_start, corrected_root_goal)
+    cosine = max(-1.0, min(1.0, _vector_dot(original_direction, corrected_direction)))
+    angle = math.acos(cosine)
+    if angle > math.radians(30.0):
+        raise ValueError("Root seam rotated over 30 degrees; verify logs and teaching")
+    cross = (
+        original_direction[1] * corrected_direction[2] - original_direction[2] * corrected_direction[1],
+        original_direction[2] * corrected_direction[0] - original_direction[0] * corrected_direction[2],
+        original_direction[0] * corrected_direction[1] - original_direction[1] * corrected_direction[0],
+    )
+    sine = math.sqrt(_vector_dot(cross, cross))
+    axis = tuple(value / sine for value in cross) if sine > 1e-12 else (1.0, 0.0, 0.0)
+
+    def rotate(vector):
+        if sine <= 1e-12:
+            return vector
+        cross_vector = (
+            axis[1] * vector[2] - axis[2] * vector[1],
+            axis[2] * vector[0] - axis[0] * vector[2],
+            axis[0] * vector[1] - axis[1] * vector[0],
+        )
+        projection = _vector_dot(axis, vector)
+        return tuple(
+            cosine * vector[index] + sine * cross_vector[index]
+            + (1.0 - cosine) * projection * axis[index]
+            for index in range(3)
+        )
+
+    corrected = {}
+    for number in range(1, 5):
+        source = references[number]
+        endpoints = {}
+        for endpoint in ("start", "goal"):
+            root_reference = _pose_position_tuple(root[endpoint])
+            root_measured = _pose_position_tuple(
+                corrected_root_start if endpoint == "start" else corrected_root_goal
+            )
+            offset = tuple(
+                value - root_reference[index]
+                for index, value in enumerate(_pose_position_tuple(source[endpoint]))
+            )
+            rotated_offset = rotate(offset)
+            xyz = tuple(
+                root_measured[index] + rotated_offset[index]
+                for index in range(3)
+            )
+            pose = copy.deepcopy(source[endpoint])
+            pose.position.x, pose.position.y, pose.position.z = xyz
+            endpoints[endpoint] = pose
+        corrected[number] = endpoints
+    return corrected, math.degrees(angle)
 
 
 def save_seam_touch_yaml(
@@ -5733,6 +5854,18 @@ class WeldActionGui:
         self.corrected_seam_geometry = None
         self.computed_seam_endpoints = {"start": None, "goal": None}
         self.computed_seam_wait_points = {"start": None, "goal": None}
+        self.four_pass_folder = tk.StringVar(
+            value=str(self._weld_feedback_directory() / "test_shimen_gth")
+        )
+        self.four_pass_status = tk.StringVar(value="Load 1.log..4.log (1 = root)")
+        self.four_pass_references = {}
+        self.four_pass_loaded_folder = None
+        self.four_pass_corrected = {}
+        self.four_pass_auto_pending = False
+        self.four_pass_output_folder = None
+        self.selected_pass_number = tk.IntVar(value=2)
+        self.active_pass_probe = None
+        self.pass_probe_touch_yaml_target = None
         self.seam_teaching_reference = None
         self.automatic_probe_kind = None
         self.seam_auto_running = False
@@ -6970,6 +7103,59 @@ class WeldActionGui:
         )
         self.stop_auto_seam_button.pack(side=tk.LEFT, padx=3)
 
+        four_pass = ttk.LabelFrame(
+            touch_corner, text="4-pass seam correction · root=1.log"
+        )
+        four_pass.pack(fill=tk.X, pady=3)
+        four_pass_row = ttk.Frame(four_pass)
+        four_pass_row.pack(fill=tk.X, pady=2)
+        ttk.Entry(
+            four_pass_row, textvariable=self.four_pass_folder, width=48
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            four_pass_row, text="Browse...", command=self.browse_four_pass_folder
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            four_pass_row, text="Load 4 references", command=self.load_four_pass_references
+        ).pack(side=tk.LEFT, padx=3)
+        four_pass_action_row = ttk.Frame(four_pass)
+        four_pass_action_row.pack(fill=tk.X, pady=2)
+        ttk.Button(
+            four_pass_action_row, text="AUTO root touch → correct 4 passes",
+            command=self.run_four_pass_correction,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            four_pass_action_row, text="Apply current root correction",
+            command=self.apply_four_pass_correction,
+        ).pack(side=tk.LEFT, padx=3)
+        pass_probe_row = ttk.Frame(four_pass)
+        pass_probe_row.pack(fill=tk.X, pady=2)
+        ttk.Label(pass_probe_row, text="1G pass").pack(side=tk.LEFT, padx=3)
+        ttk.Combobox(
+            pass_probe_row, textvariable=self.selected_pass_number,
+            values=(2, 3, 4), width=4, state="readonly",
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            pass_probe_row, text="Touch selected pass → re-correct",
+            command=self.run_selected_pass_correction,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            pass_probe_row, text="Apply selected pass after loading its log",
+            command=self.apply_selected_pass_correction,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Label(four_pass, textvariable=self.four_pass_status).pack(
+            anchor=tk.W, padx=3
+        )
+        ttk.Label(
+            four_pass,
+            text=(
+                "START/GOAL WAIT: teach once for root. Pass TCP orientations come "
+                "from their logs. Generated poses are predictions; re-probe each "
+                "pass before welding when bead buildup can shift the seam."
+            ),
+            foreground="#b3261e",
+        ).pack(anchor=tk.W, padx=3)
+
         probe_actions = ttk.LabelFrame(
             touch_corner, text="Manual / diagnostic"
         )
@@ -7738,6 +7924,7 @@ class WeldActionGui:
                 ),
                 status_callback=self._hicomm_status_received,
                 log_callback=lambda message: self.post(self.log, message),
+                tx_frame_callback=self._record_hicomm_tx_frame,
             )
             self.hicomm_client = client
             self.hicomm_connect_button.configure(state=tk.DISABLED)
@@ -7872,6 +8059,7 @@ class WeldActionGui:
             "set_voltage_v",
             "hot_start_current_a",
             "hot_start_hold_adjustment",
+            "hot_start_rx_raw_hex",
             "hot_start_arc_voltage_adjustment",
             "welder_error",
             "db_unavailable",
@@ -7949,12 +8137,25 @@ class WeldActionGui:
                 "last_welding_status": None,
                 "latest_measurement": None,
                 "samples": [],
+                "tx_frames": [],
                 "tcp_samples": [],
                 "latest_tcp_speed_m_s": 0.0,
                 "arc_off_control": {},
                 "weld_motion_timing": {},
                 "pending_final_status": None,
             }
+
+    def _record_hicomm_tx_frame(self, frame, unix_time, monotonic):
+        """Capture the exact bytes prepared for socket.send, without I/O work."""
+        with self.weld_feedback_lock:
+            session = self.active_weld_feedback_session
+            if session is None:
+                return
+            session["tx_frames"].append({
+                "elapsed_s": max(0.0, monotonic-float(session["started_monotonic"])),
+                "unix_time": float(unix_time),
+                "raw_hex": bytes(frame).hex(" ").upper(),
+            })
 
     def _mark_weld_motion_timing(self, event):
         """Record weld-path start/completion on the feedback session clock."""
@@ -7997,6 +8198,7 @@ class WeldActionGui:
                 "hot_start_hold_adjustment": int(
                     status.get("hot_start_hold_adjustment", 0)
                 ),
+                "hot_start_rx_raw_hex": status.get("hot_start_rx_raw_hex"),
             }
             sample = self._weld_status_snapshot(status)
             sample["elapsed_s"] = max(
@@ -8092,9 +8294,16 @@ class WeldActionGui:
                 "phase": str(phase),
             }
             previous = session["tcp_samples"][-1] if session["tcp_samples"] else None
-            if previous is not None and all(
+            same_pose = previous is not None and all(
                 math.isclose(sample[key], float(previous[key]), abs_tol=1e-12)
                 for key in ("x_m", "y_m", "z_m", "qx", "qy", "qz", "qw")
+            )
+            # Preserve fresh stationary TF updates for measured dwell/endpoint
+            # settling; discard repeats of the very same TF timestamp.
+            if same_pose and (
+                tf_stamp_s is None
+                or previous.get("tf_stamp_s") is None
+                or float(tf_stamp_s) <= float(previous["tf_stamp_s"])
             ):
                 return
             raw_speed = 0.0
@@ -8122,6 +8331,7 @@ class WeldActionGui:
                 else 0.30 * raw_speed + 0.70 * previous_filtered
             )
             filtered = max(0.0, min(2.0, filtered))
+            sample["raw_speed_m_s"] = raw_speed
             sample["speed_m_s"] = filtered
             session["latest_tcp_speed_m_s"] = filtered
             session["tcp_samples"].append(sample)
@@ -8140,6 +8350,18 @@ class WeldActionGui:
             geometry_valid = seam_length > 1e-9
             if geometry_valid:
                 tx, ty, tz = vx / seam_length, vy / seam_length, vz / seam_length
+
+        if geometry_valid:
+            with self.weld_feedback_lock:
+                session = self.active_weld_feedback_session
+                if session is not None:
+                    session["execution_conditions"]["seam_start_xyz"] = (sx, sy, sz)
+                    session["execution_conditions"]["seam_goal_xyz"] = (gx, gy, gz)
+                    session["execution_conditions"]["planned_weave_waypoints_xyz"] = [
+                        _pose_position_tuple(pose) for pose in step.get("points", ())
+                    ]
+
+        stopped_observing_at = None
 
         while True:
             try:
@@ -8177,7 +8399,10 @@ class WeldActionGui:
             except TransformException:
                 pass
             if self.weld_motion_done_event.is_set():
-                return
+                if stopped_observing_at is None:
+                    stopped_observing_at = time.monotonic()
+                elif time.monotonic() - stopped_observing_at >= 0.25:
+                    return
             time.sleep(0.01)
 
     def _latest_weld_tcp_state(self):
@@ -8585,12 +8810,20 @@ class WeldActionGui:
                 ),
             },
             "samples": session["samples"],
+            "tx_frames": session.get("tx_frames", []),
             "tcp_trajectory": session.get("tcp_samples", []),
             "arc_off_control": arc_off_control,
             "production_metrics": production_metrics,
             "teaching_snapshot": session.get("teaching_snapshot", {}),
             "touch_snapshot": session.get("touch_snapshot", {}),
         }
+        try:
+            document["quality_metrics"] = analyze_weld_quality(document)
+        except (ArithmeticError, KeyError, TypeError, ValueError) as error:
+            # A malformed or missing analysis field must never discard the raw
+            # feedback, TX frames, or TCP trajectory captured during a weld.
+            document["quality_metrics"] = {"error": str(error)}
+            self.post(self.error, f"Weld quality analysis unavailable: {error}")
         directory = self._weld_feedback_directory()
         timestamp = (
             time.strftime("%Y%m%d_%H%M%S", time.localtime(ended))
@@ -9285,17 +9518,417 @@ class WeldActionGui:
         if reason:
             self.log(f"Seam correction cache cleared · {reason}")
 
-    def run_automatic_seam_correction(self):
+    def browse_four_pass_folder(self):
+        folder = filedialog.askdirectory(
+            title="Select folder with 1.log..4.log",
+            initialdir=self.four_pass_folder.get(),
+            parent=self.root,
+        )
+        if folder:
+            self.four_pass_folder.set(folder)
+            self.four_pass_references = {}
+            self.four_pass_loaded_folder = None
+            self.four_pass_output_folder = None
+            self.four_pass_corrected = {}
+            self.four_pass_status.set("Folder changed · load four references")
+
+    def load_four_pass_references(self):
+        folder = Path(self.four_pass_folder.get()).expanduser().resolve()
+        try:
+            if not folder.is_dir():
+                raise ValueError(f"Pass log folder does not exist: {folder}")
+            references = {
+                number: read_weld_pass_reference(folder / f"{number}.log")
+                for number in range(1, 5)
+            }
+            # The sensed root must be measured against the same root teaching
+            # that anchors 1.log. Reject a different loaded workpiece/log.
+            for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
+                stored = self.taught_robot_poses.get(name)
+                if stored is None or stored[0] != "right_manipulator":
+                    raise ValueError("Load 1.log teaching before 4-pass correction")
+                mismatch_mm = 1000.0 * math.dist(
+                    _pose_position_tuple(stored[3]),
+                    _pose_position_tuple(references[1][endpoint]),
+                )
+                if mismatch_mm > 5.0:
+                    raise ValueError(
+                        f"Current {name} differs from 1.log by {mismatch_mm:.1f} mm; "
+                        "load the root log first"
+                    )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            self.four_pass_references = {}
+            self.four_pass_loaded_folder = None
+            self.error(f"Cannot load 4-pass references: {error}")
+            return False
+        self.four_pass_references = references
+        self.four_pass_loaded_folder = folder
+        self.four_pass_corrected = {}
+        self.four_pass_output_folder = None
+        lengths = [
+            1000.0 * math.dist(
+                _pose_position_tuple(references[number]["start"]),
+                _pose_position_tuple(references[number]["goal"]),
+            ) for number in range(1, 5)
+        ]
+        self.four_pass_status.set(
+            "Loaded pass 1–4 · seam lengths "
+            + "/".join(f"{length:.1f}" for length in lengths)
+            + " mm · root touch correction required"
+        )
+        self.log(
+            f"4-PASS REFERENCES LOADED · {folder} · root=1.log · "
+            f"lengths={lengths} mm"
+        )
+        return True
+
+    def run_four_pass_correction(self):
         if self.seam_auto_running:
             self.error("Automatic seam correction is already running")
             return
+        if (
+            not self.four_pass_references
+            or Path(self.four_pass_folder.get()).expanduser().resolve()
+            != self.four_pass_loaded_folder
+        ) and not self.load_four_pass_references():
+            return
+        for name in ("weld_start_wait", "weld_goal_wait"):
+            if self.taught_robot_poses.get(name) is None:
+                self.error(f"Teach {TEACHING_POSES[name]} before root probing")
+                return
+        self.four_pass_auto_pending = True
+        self.run_automatic_seam_correction()
+        if not self.seam_auto_running:
+            self.four_pass_auto_pending = False
+
+    def apply_four_pass_correction(self):
+        if self.seam_auto_running:
+            self.error("Wait for root seam correction to finish")
+            return
+        if not self.four_pass_references:
+            self.error("Load the four pass references before applying root correction")
+            return
+        folder = Path(self.four_pass_folder.get()).expanduser().resolve()
+        if folder != self.four_pass_loaded_folder:
+            self.error("Pass log folder changed; load references and re-probe root")
+            return
+        root_start = self.computed_seam_endpoints.get("start")
+        root_goal = self.computed_seam_endpoints.get("goal")
+        if not self.corrected_two_touch_seam or not all(
+            pose is not None and pose_is_valid(pose)
+            for pose in (root_start, root_goal)
+        ):
+            self.error("Run a fresh root four-touch seam correction first")
+            return
+        try:
+            for reference in self.four_pass_references.values():
+                current_hash = hashlib.sha256(
+                    Path(reference["path"]).read_bytes()
+                ).hexdigest()
+                if current_hash != reference["sha256"]:
+                    raise ValueError("A source pass log changed after loading; reload and re-probe")
+            corrected, angle_deg = correct_four_pass_references(
+                self.four_pass_references, root_start, root_goal
+            )
+            output = folder / (
+                "corrected_" + time.strftime("%Y%m%d_%H%M%S")
+                + f"_{time.monotonic_ns() % 1000000:06d}"
+            )
+            output.mkdir()
+            pose_dict = self._pose_execution_conditions
+            root_reference = self.four_pass_references[1]
+            manifest = {
+                "schema": "construct_robot_four_pass_correction_v1",
+                "status": "root_xyz_measured_other_passes_predicted",
+                "planning_group": "right_manipulator",
+                "root_log": root_reference["path"],
+                "root_log_sha256": root_reference["sha256"],
+                "root_reference_start": pose_dict(root_reference["start"]),
+                "root_reference_goal": pose_dict(root_reference["goal"]),
+                "root_measured_start": pose_dict(root_start),
+                "root_measured_goal": pose_dict(root_goal),
+                "root_direction_change_deg": angle_deg,
+                "method": (
+                    "each logged pass endpoint offset from root, rotated by "
+                    "root seam direction change and anchored to sensed root endpoint"
+                ),
+                "orientation_policy": "preserve each pass log orientation_xyzw",
+                "verification_required": True,
+                "common_start_wait": pose_dict(self.taught_robot_poses["weld_start_wait"][3]),
+                "common_goal_wait": pose_dict(self.taught_robot_poses["weld_goal_wait"][3]),
+                "passes": [],
+            }
+            for number in range(1, 5):
+                reference = self.four_pass_references[number]
+                record = {
+                    "pass": number,
+                    "status": (
+                        "root_xyz_measured_log_orientation"
+                        if number == 1 else "root_propagated_unverified"
+                    ),
+                    "source_log": reference["path"],
+                    "source_log_sha256": reference["sha256"],
+                    "reference_start": pose_dict(reference["start"]),
+                    "reference_goal": pose_dict(reference["goal"]),
+                    "corrected_start": pose_dict(corrected[number]["start"]),
+                    "corrected_goal": pose_dict(corrected[number]["goal"]),
+                    "orientation_policy": "from source log; no extra tilt applied",
+                }
+                file_name = f"pass_{number}.yaml"
+                (output / file_name).write_text(
+                    yaml.safe_dump(record, sort_keys=False), encoding="utf-8"
+                )
+                manifest["passes"].append({"pass": number, "file": file_name})
+                self.log(
+                    f"4-PASS CORRECTED P{number} · "
+                    f"START={_pose_position_tuple(corrected[number]['start'])} · "
+                    f"GOAL={_pose_position_tuple(corrected[number]['goal'])} · "
+                    "orientation=source log · predicted/unverified"
+                )
+            (output / "manifest.yaml").write_text(
+                yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
+            )
+        except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"4-pass correction was not saved completely: {error}")
+            return
+        self.four_pass_corrected = corrected
+        self.four_pass_output_folder = output
+        self.four_pass_status.set(
+            f"Root measured + 3 predicted passes saved · {output} · verify before welding"
+        )
+        self.pipeline_result(
+            f"4-PASS ROOT CORRECTION COMPLETE · {output} · "
+            "pass-specific re-probing still required after bead buildup"
+        )
+
+    def run_selected_pass_correction(self):
+        """Probe a predicted 1G pass without replacing root teaching/YAML."""
+        if self.seam_auto_running or self.active_pass_probe is not None:
+            self.error("Another seam touch session is running")
+            return
+        try:
+            number = int(self.selected_pass_number.get())
+            if number not in (2, 3, 4):
+                raise ValueError("Select pass 2, 3, or 4")
+            folder = self.four_pass_output_folder
+            if folder is None or not (folder / "manifest.yaml").is_file():
+                raise ValueError("Run root correction and save four passes first")
+            record = yaml.safe_load((folder / f"pass_{number}.yaml").read_text())
+            if record.get("source_log_sha256") != self.four_pass_references[number]["sha256"]:
+                raise ValueError("Pass source log changed; load references and redo root correction")
+            if hashlib.sha256(
+                Path(self.four_pass_references[number]["path"]).read_bytes()
+            ).hexdigest() != record["source_log_sha256"]:
+                raise ValueError("Pass source log changed on disk; redo root correction")
+            start = _pose_from_yaml_dict(record["corrected_start"], "pass START")
+            goal = _pose_from_yaml_dict(record["corrected_goal"], "pass GOAL")
+            if abs(seam_direction(start, goal)[2]) > 0.25:
+                raise ValueError("Selected seam is too steep for the 1G pass-touch workflow")
+            if any(abs(pose.position.z - root.position.z) > 0.050
+                   for pose, root in ((start, self.four_pass_corrected[1]["start"]),
+                                      (goal, self.four_pass_corrected[1]["goal"]))):
+                raise ValueError("Selected pass is >50 mm from root in World Z; not 1G")
+            root_record = yaml.safe_load((folder / "pass_1.yaml").read_text())
+            root_start = _pose_from_yaml_dict(root_record["corrected_start"], "root START")
+            root_goal = _pose_from_yaml_dict(root_record["corrected_goal"], "root GOAL")
+            waits = {}
+            for endpoint, wait_name, pass_pose, root_pose in (
+                ("start", "weld_start_wait", start, root_start),
+                ("goal", "weld_goal_wait", goal, root_goal),
+            ):
+                saved_wait = self.taught_robot_poses.get(wait_name)
+                if saved_wait is None or saved_wait[0] != "right_manipulator":
+                    raise ValueError(f"Teach/load {TEACHING_POSES[wait_name]} first")
+                # 1G: retain the proven root WAIT-to-seam displacement at
+                # each pass endpoint. A low root wait is not a safe template.
+                clearance = saved_wait[3].position.z - root_pose.position.z
+                if clearance < 0.020:
+                    raise ValueError(
+                        f"{TEACHING_POSES[wait_name]} needs >=20 mm World +Z "
+                        f"clearance above corrected root (now {clearance*1000:.1f} mm)"
+                    )
+                translated = copy.deepcopy(saved_wait[3])
+                for axis in ("x", "y", "z"):
+                    setattr(translated.position, axis,
+                            getattr(saved_wait[3].position, axis)
+                            + getattr(pass_pose.position, axis)
+                            - getattr(root_pose.position, axis))
+                translated.orientation = copy.deepcopy(pass_pose.orientation)
+                waits[wait_name] = translated
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Cannot prepare selected-pass touch: {error}")
+            return
+        if not messagebox.askyesno(
+            "Physical 1G pass re-probe",
+            f"Probe pass {number} with four DI4 contacts (wall/base at START/GOAL)?\n\n"
+            "Root correction is only an initial estimate. The root WAIT offsets "
+            "will be translated to this pass (at least 20 mm World +Z clearance). "
+            "Verify both elevated WAIT paths and the probe direction/max travel "
+            "against the actual bead and fixture. The two touched surfaces "
+            "must define the intended pass centerline; bead-top contact alone "
+            "does not determine TCP offset. Keep STOP accessible.\n\n"
+            "No welding will start. Root teaching and source logs stay unchanged.",
+            parent=self.root,
+        ):
+            return
+        reference = {
+            "weld_start": ("right_manipulator", (), (), copy.deepcopy(start)),
+            "weld_end": ("right_manipulator", (), (), copy.deepcopy(goal)),
+        }
+        self.active_pass_probe = {
+            "number": number, "folder": folder,
+            "reference": reference, "waits": waits,
+        }
+        self.pass_probe_touch_yaml_target = folder / f"pass_{number}_touch_points.yaml"
+        self.run_automatic_seam_correction(pass_mode=True)
+        if not self.seam_auto_running:
+            self.active_pass_probe = None
+
+    def _save_selected_pass_touch_result(self):
+        session = self.active_pass_probe
+        if session is None:
+            raise ValueError("No selected-pass touch session")
+        number, folder = session["number"], session["folder"]
+        if any(self.seam_probe_touches[name] is None for name in CORNER_TOUCH_NAMES):
+            raise ValueError("All four DI4 contacts are required")
+        reference = session["reference"]
+        _, wall_normal, floor_normal, wall_label, floor_label = (
+            self._seam_geometry_settings(require_teaching=True)
+        )
+        if abs(floor_normal[2]) < 0.99 or abs(wall_normal[2]) > 0.1:
+            raise ValueError("1G pass touch needs a World Z base normal and XY wall normal")
+        geometry = self._compute_touch_corrected_seam_geometry(
+            reference, wall_normal, floor_normal, 0.0, 0.0, log_debug=True
+        )
+        predicted = (reference["weld_start"][3], reference["weld_end"][3])
+        measured = (geometry.start, geometry.goal)
+        errors_mm = [1000.0 * math.dist(_pose_position_tuple(a), _pose_position_tuple(b))
+                     for a, b in zip(predicted, measured)]
+        if max(errors_mm) > 20.0:
+            raise ValueError(
+                f"Pass {number} touch differs from prediction by {max(errors_mm):.1f} mm "
+                "(limit 20 mm); inspect contact geometry before retrying"
+            )
+        angle = math.degrees(math.acos(max(-1.0, min(1.0, _vector_dot(
+            seam_direction(*predicted), seam_direction(*measured)
+        )))))
+        if angle > 5.0:
+            raise ValueError(f"Pass {number} seam direction changed {angle:.1f}° (>5°)")
+        path = folder / f"pass_{number}.yaml"
+        record = yaml.safe_load(path.read_text())
+        record["status"] = "pass_physically_probed_unverified_for_weld"
+        record["corrected_start"] = self._pose_execution_conditions(measured[0])
+        record["corrected_goal"] = self._pose_execution_conditions(measured[1])
+        record["touch_provenance"] = {
+            "method": "1G four-contact wall/base at each endpoint; plane intersection",
+            "wall_normal": list(wall_normal), "base_normal": list(floor_normal),
+            "wall_axis": wall_label, "base_axis": floor_label,
+            "wall_sign": self.wall_probe_sign.get(),
+            "base_sign": self.floor_probe_sign.get(),
+            "predicted_delta_mm": errors_mm,
+            "direction_change_deg": angle,
+            "contacts": {name: self._pose_execution_conditions(self.seam_probe_touches[name])
+                         for name in CORNER_TOUCH_NAMES},
+        }
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=folder,
+                prefix=f".pass_{number}.", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                yaml.safe_dump(record, stream, sort_keys=False)
+            temporary_path.replace(path)
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
+        manifest_path = folder / "manifest.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text())
+        for entry in manifest.get("passes", []):
+            if entry.get("pass") == number:
+                entry["status"] = record["status"]
+        manifest["status"] = "root_measured_with_selected_pass_reprobes"
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=folder,
+                prefix=".manifest.", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                yaml.safe_dump(manifest, stream, sort_keys=False)
+            temporary_path.replace(manifest_path)
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
+        self.four_pass_corrected[number] = {
+            "start": copy.deepcopy(measured[0]), "goal": copy.deepcopy(measured[1])
+        }
+        self.four_pass_status.set(
+            f"Pass {number} physically re-probed · {path} · load source log separately for welding"
+        )
+        self.pipeline_result(
+            f"1G PASS {number} TOUCH RE-CORRECTED · START/GOAL saved · "
+            f"Δ={errors_mm[0]:.1f}/{errors_mm[1]:.1f} mm · no welding started"
+        )
+
+    def apply_selected_pass_correction(self):
+        """Apply one saved pass TCP pair in memory after its source log is loaded."""
+        try:
+            number = int(self.selected_pass_number.get())
+            if number not in (2, 3, 4) or self.four_pass_output_folder is None:
+                raise ValueError("Select pass 2–4 and run root correction first")
+            record = yaml.safe_load(
+                (self.four_pass_output_folder / f"pass_{number}.yaml").read_text()
+            )
+            reference = self.four_pass_references[number]
+            if hashlib.sha256(Path(reference["path"]).read_bytes()).hexdigest() != record["source_log_sha256"]:
+                raise ValueError("Source log changed since correction")
+            for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
+                loaded = self.taught_robot_poses.get(name)
+                if loaded is None or loaded[0] != "right_manipulator":
+                    raise ValueError(f"Load pass {number} source log first")
+                if math.dist(_pose_position_tuple(loaded[3]),
+                             _pose_position_tuple(reference[endpoint])) > 0.001:
+                    raise ValueError(
+                        f"{name} does not match {number}.log; load that pass log first"
+                    )
+            start = _pose_from_yaml_dict(record["corrected_start"], "corrected START")
+            goal = _pose_from_yaml_dict(record["corrected_goal"], "corrected GOAL")
+            if record.get("status") != "pass_physically_probed_unverified_for_weld":
+                raise ValueError(f"Pass {number} has not been physically re-probed")
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Cannot apply pass correction: {error}")
+            return
+        self._invalidate_seam_correction_runtime(
+            f"applying pass {number} physical correction", clear_touches=True
+        )
+        for name, corrected in (("weld_start", start), ("weld_end", goal)):
+            group, names, positions, _ = self.taught_robot_poses[name]
+            self.taught_robot_poses[name] = (
+                group, names, positions, copy.deepcopy(corrected)
+            )
+        self.seam_teaching_reference = None
+        self.four_pass_status.set(
+            f"Pass {number} measured START/GOAL active in memory · rebuild scenario before execute"
+        )
+        self.pipeline_result(
+            f"1G PASS {number} TCPs APPLIED · in-memory only · "
+            "review path/clearance and rebuild scenario before executing"
+        )
+
+    def run_automatic_seam_correction(self, pass_mode=False):
+        if self.seam_auto_running:
+            self.error("Automatic seam correction is already running")
+            return
+        if not pass_mode:
+            self.pass_probe_touch_yaml_target = None
         if not self.execution_allowed or not self.robot_connected["right"]:
             self.error("Connect the right robot and enable physical execution")
             return
         if self.planning_group.get() != "right_manipulator":
             self.error("Automatic seam correction currently supports right arm")
             return
-        fixed_tilt_mode = self._wait_fixed_tilt_mode_enabled()
+        fixed_tilt_mode = self._wait_fixed_tilt_mode_enabled() and not pass_mode
         required = (
             ("weld_start_wait", "weld_goal_wait", "weld_finish")
             if fixed_tilt_mode
@@ -9307,6 +9940,8 @@ class WeldActionGui:
                 "weld_finish",
             )
         )
+        if pass_mode:
+            required = ("weld_start_wait", "weld_goal_wait")
         missing = [
             TEACHING_POSES[name]
             for name in required
@@ -9341,7 +9976,7 @@ class WeldActionGui:
             if fixed_tilt_mode
             else "START/GOAL orientation = existing Weld START/GOAL teaching."
         )
-        if not messagebox.askyesno(
+        if not pass_mode and not messagebox.askyesno(
             "Automatic Seam Correction",
             "Execute the complete four-probe correction?\n\n"
             "START wait → wall/base → GOAL wait → wall/base\n"
@@ -9374,6 +10009,9 @@ class WeldActionGui:
                     f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)"
                 )
+            elif pass_mode:
+                endpoint_tcp = self.active_pass_probe["reference"][endpoint_name][3]
+                orientation_source = f"pass {self.active_pass_probe['number']} source log"
             else:
                 endpoint_tcp = self.taught_robot_poses[endpoint_name][3]
                 orientation_source = TEACHING_POSES[endpoint_name]
@@ -9387,7 +10025,9 @@ class WeldActionGui:
             # geometry cancels between teaching and sensing. Keep the WAIT XYZ
             # stand-off unchanged; only its temporary AUTO-probe orientation is
             # replaced. The stored WAIT teaching itself is never modified.
-            probe_wait_tcp = copy.deepcopy(tcp)
+            probe_wait_tcp = copy.deepcopy(
+                self.active_pass_probe["waits"][wait_name] if pass_mode else tcp
+            )
             probe_wait_tcp.orientation = copy.deepcopy(endpoint_tcp.orientation)
             orientation_delta = quaternion_angular_distance(
                 tcp.orientation, endpoint_tcp.orientation
@@ -9447,6 +10087,8 @@ class WeldActionGui:
             self.log("STOP AUTO ignored · automatic seam correction is idle")
             return
         self.seam_auto_running = False
+        self.four_pass_auto_pending = False
+        self.active_pass_probe = None
         self.seam_auto_expected_kind = None
         self.seam_auto_stage_success = False
         self.seam_auto_stage_event.set()
@@ -9701,6 +10343,21 @@ class WeldActionGui:
         self.pipeline_waiting(text)
 
     def _complete_automatic_seam_correction(self):
+        if self.active_pass_probe is not None:
+            try:
+                self._save_selected_pass_touch_result()
+            except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+                self._finish_automatic_seam_correction(False, f"pass touch rejected: {error}")
+                return
+            number = self.active_pass_probe["number"]
+            self._invalidate_seam_correction_runtime(
+                f"pass {number} touch complete; global root teaching unchanged",
+                clear_touches=True,
+            )
+            self._finish_automatic_seam_correction(
+                True, f"pass {number} saved; no weld executed"
+            )
+            return
         self.compute_two_touch_seam()
         if not self.corrected_two_touch_seam:
             self._finish_automatic_seam_correction(
@@ -9766,6 +10423,9 @@ class WeldActionGui:
         )
 
     def _finish_automatic_seam_correction(self, success, message):
+        apply_four_pass = bool(self.four_pass_auto_pending and success)
+        self.four_pass_auto_pending = False
+        self.active_pass_probe = None
         self.seam_auto_running = False
         self.seam_auto_expected_kind = None
         self.seam_auto_stage_event.set()
@@ -9773,6 +10433,8 @@ class WeldActionGui:
         self.stop_auto_seam_button.configure(state=tk.DISABLED)
         if success:
             self.pipeline_result(f"AUTO SEAM CORRECTION COMPLETE · {message}")
+            if apply_four_pass:
+                self.apply_four_pass_correction()
         else:
             self.error(f"Automatic seam correction stopped: {message}")
 
@@ -9935,6 +10597,8 @@ class WeldActionGui:
         )
 
     def start_automatic_touch_probe(self, kind, skip_confirmation=False):
+        if not self.seam_auto_running and self.active_pass_probe is None:
+            self.pass_probe_touch_yaml_target = None
         if kind not in CORNER_TOUCH_NAMES:
             self.error(f"Unknown touch probe kind: {kind}")
             return
@@ -10096,6 +10760,8 @@ class WeldActionGui:
 
     def _ensure_seam_teaching_reference(self, require_complete=False):
         """Return immutable TCP1/TCP2 seam references used for geometry/yaw."""
+        if self.active_pass_probe is not None:
+            return self.active_pass_probe["reference"]
         if self._wait_fixed_tilt_mode_enabled():
             reference = self._wait_fixed_tilt_seam_reference(require_complete)
             if reference is not None:
@@ -13558,6 +14224,7 @@ class WeldActionGui:
 
     def emergency_stop_all(self, restore_keyboard_controller=True):
         """Stop every GUI-owned workflow, robot goal, and welder output."""
+        self.four_pass_auto_pending = False
         self._stop_keyboard_wire()
         self._cancel_keyboard_release_timer()
         self.keyboard_velocity_active_key = None
@@ -15318,7 +15985,10 @@ class WeldActionGui:
         ).start()
 
     def _persist_seam_touch_yaml(self, planning_group, event_label):
-        touch_yaml = self._seam_touch_yaml_path(planning_group)
+        touch_yaml = (
+            self.pass_probe_touch_yaml_target
+            or self._seam_touch_yaml_path(planning_group)
+        )
         try:
             save_seam_touch_yaml(
                 touch_yaml,

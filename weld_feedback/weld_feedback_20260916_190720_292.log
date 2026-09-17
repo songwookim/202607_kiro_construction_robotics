@@ -1,0 +1,2922 @@
+WELD FEEDBACK LOG
+result=completed
+started=2026-09-16 19:07:01
+ended=2026-09-16 19:07:20
+elapsed_seconds=18.382
+
+================ OPERATOR OVERVIEW ================
+REQUESTED : 220 A / 26.0 V · FE-SOLID 1.2 mm · LSM · CO2 100%
+RX ECHO   : 220 A / 26.0 V · MATCH=YES
+CURRENT FB: no positive feedback A
+VOLTAGE FB: no positive feedback V
+WIRE FEED : no positive feedback m/min
+ARC ON    : 0.000 s
+NET WELD  : 0.000 s
+WIRE USED : 0.000 mm (base 0.000 + alpha 0.000)
+WCR       : NOT DETECTED
+SAMPLES   : RX 459 / welding 0 / TCP 329
+===================================================
+
+[commanded]
+current_a=220
+voltage_tenths=260
+voltage=26.0
+material=FE-SOLID
+diameter_mm=1.2
+mode=LSM
+gas=CO2 100%
+synergic=False
+correction=0.0
+hot_start_enabled=True
+hot_start_percent=5.0
+hot_start_hold_adjustment=0
+crater_enabled=False
+crater_percent=27.27272727272727
+crater_current_a=60.0
+crater_voltage_v=25.0
+crater_seconds=1.0
+wire_consumable_alpha_mm=0.0
+hot_start_current_a=231
+
+[rx_setting_echo]
+current_a=220
+voltage_v=26.0
+hot_start_current_a=0
+hot_start_hold_adjustment=-15
+
+[rx_welding_setting_echo]
+
+[execution_conditions]
+mode=sequence_execute
+run_all=True
+touch_io_backend=fastech_ethernet
+touch_input_port=4
+touch_sensing_output_port=0
+fastech_ip=192.168.0.3
+fastech_poll_target_hz=100.0
+hicomm_source_ip=192.168.1.2
+hicomm_welder_ip=192.168.1.10
+hicomm_port=60000
+gui_velocity_percent=36.95263157894737
+gui_speed_mode=scale
+gui_tcp_speed_mm_s=10.0
+gui_interpolation_step_mm=5.0
+seam_orientation_mode=Wait poses + fixed World-XYZ tilt
+weld_fixed_tilt_x_deg=0.0
+weld_fixed_tilt_y_deg=0.0
+weld_fixed_tilt_z_deg=-0.0
+weld_weave_enabled=True
+weld_weave_pattern=sine
+weld_weave_pitch_mm=7.8
+weld_weave_left_dwell_s=0.2
+weld_weave_right_dwell_s=0.2
+weld_weave_amplitude_mm=4.0
+weld_weave_cycles=16
+weld_weave_samples_per_cycle=12
+weld_weave_axis=tool_y
+weld_lead_in_mm=0.0
+weld_lead_out_mm=0.0
+weld_safe_approach_mm=30.0
+weld_approach_mode=taught_wait
+weld_pre_start_lead_mm=0.0
+weld_tcp_speed_mm_s=7.0
+weld_arc_off_delay_ms=0.0
+tcp_tracking.parent_frame=World
+tcp_tracking.child_frame=right_manipulator_ee_point
+tcp_tracking.timestamp_source=TF_header_stamp
+initial_fastech_di0=False
+initial_fastech_do0=True
+robot_connected.left=True
+robot_connected.right=True
+robot_connected.head=True
+hicomm_connected=True
+execution_allowed=True
+steps[0].sequence_number=1
+steps[0].type=named_pose
+steps[0].parallel_slot=1
+steps[0].duration=0.0
+steps[0].planning_group=right_manipulator
+steps[0].velocity_scale=0.3695263157894737
+steps[0].tcp_speed_m_s=0.0
+steps[0].pose_name=weld_start_wait
+steps[0].pose_label=3 · Weld start wait pose
+steps[0].touch_guard=False
+steps[0].continue_after_touch=False
+steps[0].weld_scenario_id=weld-15379464266827
+steps[0].weld_scenario_stage=start_wait
+steps[0].target_tcp.position_m.x=0.031212466961125673
+steps[0].target_tcp.position_m.y=-1.7091327983089077
+steps[0].target_tcp.position_m.z=0.6872469136320036
+steps[0].target_tcp.orientation_xyzw.x=-0.4211740485252506
+steps[0].target_tcp.orientation_xyzw.y=0.6845358506649529
+steps[0].target_tcp.orientation_xyzw.z=-0.5097955893494354
+steps[0].target_tcp.orientation_xyzw.w=-0.3068086489705285
+steps[0].joint_names[0]=right_manipulator_joint1
+steps[0].joint_names[1]=right_manipulator_joint2
+steps[0].joint_names[2]=right_manipulator_joint3
+steps[0].joint_names[3]=right_manipulator_joint4
+steps[0].joint_names[4]=right_manipulator_joint5
+steps[0].joint_names[5]=right_manipulator_joint6
+steps[0].joint_positions_rad[0]=5.1190877673017425
+steps[0].joint_positions_rad[1]=1.2564555670076283
+steps[0].joint_positions_rad[2]=1.8688746265436504
+steps[0].joint_positions_rad[3]=3.5404428384582736
+steps[0].joint_positions_rad[4]=1.2595273901669803
+steps[0].joint_positions_rad[5]=1.5180524214058773
+steps[1].sequence_number=2
+steps[1].type=motion
+steps[1].parallel_slot=2
+steps[1].duration=0.0
+steps[1].planning_group=right_manipulator
+steps[1].velocity_scale=0.3695263157894737
+steps[1].tcp_speed_m_s=0.0
+steps[1].interpolation_step=0.005
+steps[1].path_kind=taught_wait_align_weld_attitude
+steps[1].touch_guard=False
+steps[1].continue_after_touch=False
+steps[1].accept_initial_touch=False
+steps[1].weld_scenario_id=weld-15379464266827
+steps[1].weld_scenario_stage=start_safe
+steps[1].waypoint_count=1
+steps[1].waypoints[0].position_m.x=0.031212466961125673
+steps[1].waypoints[0].position_m.y=-1.7091327983089077
+steps[1].waypoints[0].position_m.z=0.6872469136320036
+steps[1].waypoints[0].orientation_xyzw.x=-0.4212326695268382
+steps[1].waypoints[0].orientation_xyzw.y=0.6845517045409693
+steps[1].waypoints[0].orientation_xyzw.z=-0.5097211431047998
+steps[1].waypoints[0].orientation_xyzw.w=-0.3068164894611816
+steps[2].sequence_number=3
+steps[2].type=motion
+steps[2].parallel_slot=3
+steps[2].duration=0.0
+steps[2].planning_group=right_manipulator
+steps[2].velocity_scale=0.3695263157894737
+steps[2].tcp_speed_m_s=0.0
+steps[2].interpolation_step=0.005
+steps[2].path_kind=taught_wait_to_weld_start
+steps[2].touch_guard=False
+steps[2].continue_after_touch=True
+steps[2].accept_initial_touch=False
+steps[2].weld_scenario_id=weld-15379464266827
+steps[2].weld_scenario_stage=start_contact
+steps[2].waypoint_count=1
+steps[2].waypoints[0].position_m.x=0.031157721276056816
+steps[2].waypoints[0].position_m.y=-1.7090406537320921
+steps[2].waypoints[0].position_m.z=0.6817607365790759
+steps[2].waypoints[0].orientation_xyzw.x=-0.4212326695268382
+steps[2].waypoints[0].orientation_xyzw.y=0.6845517045409693
+steps[2].waypoints[0].orientation_xyzw.z=-0.5097211431047998
+steps[2].waypoints[0].orientation_xyzw.w=-0.3068164894611816
+steps[3].sequence_number=4
+steps[3].type=digital_output
+steps[3].parallel_slot=4
+steps[3].duration=0.0
+steps[3].port=0
+steps[3].value=False
+steps[3].weld_scenario_id=weld-15379464266827
+steps[3].weld_scenario_stage=touch_output_off
+steps[4].sequence_number=5
+steps[4].type=digital_weld
+steps[4].parallel_slot=5
+steps[4].duration=0.0
+steps[4].command=on
+steps[4].weld_scenario_id=weld-15379464266827
+steps[4].weld_scenario_stage=arc_on
+steps[4].settings.current_a=220
+steps[4].settings.voltage_tenths=260
+steps[4].settings.voltage=26.0
+steps[4].settings.material=FE-SOLID
+steps[4].settings.diameter_mm=1.2
+steps[4].settings.mode=LSM
+steps[4].settings.gas=CO2 100%
+steps[4].settings.synergic=False
+steps[4].settings.correction=0.0
+steps[4].settings.hot_start_enabled=True
+steps[4].settings.hot_start_percent=5.0
+steps[4].settings.hot_start_hold_adjustment=0
+steps[4].settings.crater_enabled=False
+steps[4].settings.crater_percent=27.27272727272727
+steps[4].settings.crater_current_a=60.0
+steps[4].settings.crater_voltage_v=25.0
+steps[4].settings.crater_seconds=1.0
+steps[4].settings.wire_consumable_alpha_mm=0.0
+steps[4].settings.hot_start_current_a=231
+steps[5].sequence_number=6
+steps[5].type=motion
+steps[5].parallel_slot=5
+steps[5].duration=0.0
+steps[5].planning_group=right_manipulator
+steps[5].velocity_scale=0.3695263157894737
+steps[5].tcp_speed_m_s=0.026984929753774672
+steps[5].interpolation_step=0.005
+steps[5].path_kind=continuous_sine_weave_over_taught_goal_fastech_di0_ignored
+steps[5].touch_guard=False
+steps[5].weld_scenario_id=weld-15379464266827
+steps[5].weld_scenario_stage=weld_motion
+steps[5].lead_in_mm=0.0
+steps[5].lead_out_mm=0.0
+steps[5].linear_motion_profile=False
+steps[5].path_to_seam_speed_factor=0.4146878475055882
+steps[5].waypoint_hold_s[0]=0.0
+steps[5].waypoint_hold_s[1]=0.0
+steps[5].waypoint_hold_s[2]=0.0
+steps[5].waypoint_hold_s[3]=0.2
+steps[5].waypoint_hold_s[4]=0.0
+steps[5].waypoint_hold_s[5]=0.0
+steps[5].waypoint_hold_s[6]=0.0
+steps[5].waypoint_hold_s[7]=0.0
+steps[5].waypoint_hold_s[8]=0.0
+steps[5].waypoint_hold_s[9]=0.2
+steps[5].waypoint_hold_s[10]=0.0
+steps[5].waypoint_hold_s[11]=0.0
+steps[5].waypoint_hold_s[12]=0.0
+steps[5].waypoint_hold_s[13]=0.0
+steps[5].waypoint_hold_s[14]=0.0
+steps[5].waypoint_hold_s[15]=0.2
+steps[5].waypoint_hold_s[16]=0.0
+steps[5].waypoint_hold_s[17]=0.0
+steps[5].waypoint_hold_s[18]=0.0
+steps[5].waypoint_hold_s[19]=0.0
+steps[5].waypoint_hold_s[20]=0.0
+steps[5].waypoint_hold_s[21]=0.2
+steps[5].waypoint_hold_s[22]=0.0
+steps[5].waypoint_hold_s[23]=0.0
+steps[5].waypoint_hold_s[24]=0.0
+steps[5].waypoint_hold_s[25]=0.0
+steps[5].waypoint_hold_s[26]=0.0
+steps[5].waypoint_hold_s[27]=0.2
+steps[5].waypoint_hold_s[28]=0.0
+steps[5].waypoint_hold_s[29]=0.0
+steps[5].waypoint_hold_s[30]=0.0
+steps[5].waypoint_hold_s[31]=0.0
+steps[5].waypoint_hold_s[32]=0.0
+steps[5].waypoint_hold_s[33]=0.2
+steps[5].waypoint_hold_s[34]=0.0
+steps[5].waypoint_hold_s[35]=0.0
+steps[5].waypoint_hold_s[36]=0.0
+steps[5].waypoint_hold_s[37]=0.0
+steps[5].waypoint_hold_s[38]=0.0
+steps[5].waypoint_hold_s[39]=0.2
+steps[5].waypoint_hold_s[40]=0.0
+steps[5].waypoint_hold_s[41]=0.0
+steps[5].waypoint_hold_s[42]=0.0
+steps[5].waypoint_hold_s[43]=0.0
+steps[5].waypoint_hold_s[44]=0.0
+steps[5].waypoint_hold_s[45]=0.2
+steps[5].waypoint_hold_s[46]=0.0
+steps[5].waypoint_hold_s[47]=0.0
+steps[5].waypoint_hold_s[48]=0.0
+steps[5].waypoint_hold_s[49]=0.0
+steps[5].waypoint_hold_s[50]=0.0
+steps[5].waypoint_hold_s[51]=0.2
+steps[5].waypoint_hold_s[52]=0.0
+steps[5].waypoint_hold_s[53]=0.0
+steps[5].waypoint_hold_s[54]=0.0
+steps[5].waypoint_hold_s[55]=0.0
+steps[5].waypoint_hold_s[56]=0.0
+steps[5].waypoint_hold_s[57]=0.2
+steps[5].waypoint_hold_s[58]=0.0
+steps[5].waypoint_hold_s[59]=0.0
+steps[5].waypoint_hold_s[60]=0.0
+steps[5].waypoint_hold_s[61]=0.0
+steps[5].waypoint_hold_s[62]=0.0
+steps[5].waypoint_hold_s[63]=0.2
+steps[5].waypoint_hold_s[64]=0.0
+steps[5].waypoint_hold_s[65]=0.0
+steps[5].waypoint_hold_s[66]=0.0
+steps[5].waypoint_hold_s[67]=0.0
+steps[5].waypoint_hold_s[68]=0.0
+steps[5].waypoint_hold_s[69]=0.2
+steps[5].waypoint_hold_s[70]=0.0
+steps[5].waypoint_hold_s[71]=0.0
+steps[5].waypoint_hold_s[72]=0.0
+steps[5].waypoint_hold_s[73]=0.0
+steps[5].waypoint_hold_s[74]=0.0
+steps[5].waypoint_hold_s[75]=0.2
+steps[5].waypoint_hold_s[76]=0.0
+steps[5].waypoint_hold_s[77]=0.0
+steps[5].waypoint_hold_s[78]=0.0
+steps[5].waypoint_hold_s[79]=0.0
+steps[5].waypoint_hold_s[80]=0.0
+steps[5].waypoint_hold_s[81]=0.2
+steps[5].waypoint_hold_s[82]=0.0
+steps[5].waypoint_hold_s[83]=0.0
+steps[5].waypoint_hold_s[84]=0.0
+steps[5].waypoint_hold_s[85]=0.0
+steps[5].waypoint_hold_s[86]=0.0
+steps[5].waypoint_hold_s[87]=0.2
+steps[5].waypoint_hold_s[88]=0.0
+steps[5].waypoint_hold_s[89]=0.0
+steps[5].waypoint_hold_s[90]=0.0
+steps[5].waypoint_hold_s[91]=0.0
+steps[5].waypoint_hold_s[92]=0.0
+steps[5].waypoint_hold_s[93]=0.2
+steps[5].waypoint_hold_s[94]=0.0
+steps[5].waypoint_hold_s[95]=0.0
+steps[5].waypoint_hold_s[96]=0.0
+steps[5].waypoint_hold_s[97]=0.0
+steps[5].waypoint_hold_s[98]=0.0
+steps[5].waypoint_hold_s[99]=0.2
+steps[5].waypoint_hold_s[100]=0.0
+steps[5].waypoint_hold_s[101]=0.0
+steps[5].waypoint_hold_s[102]=0.0
+steps[5].waypoint_hold_s[103]=0.0
+steps[5].waypoint_hold_s[104]=0.0
+steps[5].waypoint_hold_s[105]=0.2
+steps[5].waypoint_hold_s[106]=0.0
+steps[5].waypoint_hold_s[107]=0.0
+steps[5].waypoint_hold_s[108]=0.0
+steps[5].waypoint_hold_s[109]=0.0
+steps[5].waypoint_hold_s[110]=0.0
+steps[5].waypoint_hold_s[111]=0.2
+steps[5].waypoint_hold_s[112]=0.0
+steps[5].waypoint_hold_s[113]=0.0
+steps[5].waypoint_hold_s[114]=0.0
+steps[5].waypoint_hold_s[115]=0.0
+steps[5].waypoint_hold_s[116]=0.0
+steps[5].waypoint_hold_s[117]=0.2
+steps[5].waypoint_hold_s[118]=0.0
+steps[5].waypoint_hold_s[119]=0.0
+steps[5].waypoint_hold_s[120]=0.0
+steps[5].waypoint_hold_s[121]=0.0
+steps[5].waypoint_hold_s[122]=0.0
+steps[5].waypoint_hold_s[123]=0.2
+steps[5].waypoint_hold_s[124]=0.0
+steps[5].waypoint_hold_s[125]=0.0
+steps[5].waypoint_hold_s[126]=0.0
+steps[5].waypoint_hold_s[127]=0.0
+steps[5].waypoint_hold_s[128]=0.0
+steps[5].waypoint_hold_s[129]=0.2
+steps[5].waypoint_hold_s[130]=0.0
+steps[5].waypoint_hold_s[131]=0.0
+steps[5].waypoint_hold_s[132]=0.0
+steps[5].waypoint_hold_s[133]=0.0
+steps[5].waypoint_hold_s[134]=0.0
+steps[5].waypoint_hold_s[135]=0.2
+steps[5].waypoint_hold_s[136]=0.0
+steps[5].waypoint_hold_s[137]=0.0
+steps[5].waypoint_hold_s[138]=0.0
+steps[5].waypoint_hold_s[139]=0.0
+steps[5].waypoint_hold_s[140]=0.0
+steps[5].waypoint_hold_s[141]=0.2
+steps[5].waypoint_hold_s[142]=0.0
+steps[5].waypoint_hold_s[143]=0.0
+steps[5].waypoint_hold_s[144]=0.0
+steps[5].waypoint_hold_s[145]=0.0
+steps[5].waypoint_hold_s[146]=0.0
+steps[5].waypoint_hold_s[147]=0.2
+steps[5].waypoint_hold_s[148]=0.0
+steps[5].waypoint_hold_s[149]=0.0
+steps[5].waypoint_hold_s[150]=0.0
+steps[5].waypoint_hold_s[151]=0.0
+steps[5].waypoint_hold_s[152]=0.0
+steps[5].waypoint_hold_s[153]=0.2
+steps[5].waypoint_hold_s[154]=0.0
+steps[5].waypoint_hold_s[155]=0.0
+steps[5].waypoint_hold_s[156]=0.0
+steps[5].waypoint_hold_s[157]=0.0
+steps[5].waypoint_hold_s[158]=0.0
+steps[5].waypoint_hold_s[159]=0.2
+steps[5].waypoint_hold_s[160]=0.0
+steps[5].waypoint_hold_s[161]=0.0
+steps[5].waypoint_hold_s[162]=0.0
+steps[5].waypoint_hold_s[163]=0.0
+steps[5].waypoint_hold_s[164]=0.0
+steps[5].waypoint_hold_s[165]=0.2
+steps[5].waypoint_hold_s[166]=0.0
+steps[5].waypoint_hold_s[167]=0.0
+steps[5].waypoint_hold_s[168]=0.0
+steps[5].waypoint_hold_s[169]=0.0
+steps[5].waypoint_hold_s[170]=0.0
+steps[5].waypoint_hold_s[171]=0.2
+steps[5].waypoint_hold_s[172]=0.0
+steps[5].waypoint_hold_s[173]=0.0
+steps[5].waypoint_hold_s[174]=0.0
+steps[5].waypoint_hold_s[175]=0.0
+steps[5].waypoint_hold_s[176]=0.0
+steps[5].waypoint_hold_s[177]=0.2
+steps[5].waypoint_hold_s[178]=0.0
+steps[5].waypoint_hold_s[179]=0.0
+steps[5].waypoint_hold_s[180]=0.0
+steps[5].waypoint_hold_s[181]=0.0
+steps[5].waypoint_hold_s[182]=0.0
+steps[5].waypoint_hold_s[183]=0.2
+steps[5].waypoint_hold_s[184]=0.0
+steps[5].waypoint_hold_s[185]=0.0
+steps[5].waypoint_hold_s[186]=0.0
+steps[5].waypoint_hold_s[187]=0.0
+steps[5].waypoint_hold_s[188]=0.0
+steps[5].waypoint_hold_s[189]=0.2
+steps[5].waypoint_hold_s[190]=0.0
+steps[5].waypoint_hold_s[191]=0.0
+steps[5].waypoint_hold_s[192]=0.0
+steps[5].weld_weave_amplitude_mm=4.0
+steps[5].weld_weave_pitch_mm=7.8
+steps[5].weld_weave_cycles=16
+steps[5].weld_weave_actual_pitch_mm=7.477444350767709
+steps[5].weld_weave_left_dwell_s=0.2
+steps[5].weld_weave_right_dwell_s=0.2
+steps[5].weld_weave_axis=tool_y
+steps[5].waypoint_count=193
+steps[5].waypoints[0].position_m.x=0.031157721276056816
+steps[5].waypoints[0].position_m.y=-1.7090406537320921
+steps[5].waypoints[0].position_m.z=0.6817607365790759
+steps[5].waypoints[0].orientation_xyzw.x=-0.4212326695268382
+steps[5].waypoints[0].orientation_xyzw.y=0.6845517045409693
+steps[5].waypoints[0].orientation_xyzw.z=-0.5097211431047998
+steps[5].waypoints[0].orientation_xyzw.w=-0.3068164894611816
+steps[5].waypoints[1].position_m.x=0.029355518209976835
+steps[5].waypoints[1].position_m.y=-1.7084406317084704
+steps[5].waypoints[1].position_m.z=0.6808773812338028
+steps[5].waypoints[1].orientation_xyzw.x=-0.4212326981378311
+steps[5].waypoints[1].orientation_xyzw.y=0.6845515110112261
+steps[5].waypoints[1].orientation_xyzw.z=-0.5097212646781933
+steps[5].waypoints[1].orientation_xyzw.w=-0.3068166800006693
+steps[5].waypoints[2].position_m.x=0.02803317526867208
+steps[5].waypoints[2].position_m.y=-1.707834457951925
+steps[5].waypoints[2].position_m.z=0.6802325285001121
+steps[5].waypoints[2].orientation_xyzw.x=-0.42123272674878637
+steps[5].waypoints[2].orientation_xyzw.y=0.684551317481422
+steps[5].waypoints[2].orientation_xyzw.z=-0.5097213862515415
+steps[5].waypoints[2].orientation_xyzw.w=-0.3068168705401296
+steps[5].waypoints[3].position_m.x=0.027541975012391983
+steps[5].waypoints[3].position_m.y=-1.7072176290586665
+steps[5].waypoints[3].position_m.z=0.6800007732632503
+steps[5].waypoints[3].orientation_xyzw.x=-0.421232755359704
+steps[5].waypoints[3].orientation_xyzw.y=0.6845511239515566
+steps[5].waypoints[3].orientation_xyzw.z=-0.5097215078248438
+steps[5].waypoints[3].orientation_xyzw.w=-0.3068170610795626
+steps[5].waypoints[4].position_m.x=0.02801049605194565
+steps[5].waypoints[4].position_m.y=-1.7065884966577116
+steps[5].waypoints[4].position_m.z=0.6802460211433738
+steps[5].waypoints[4].orientation_xyzw.x=-0.42123278397058406
+steps[5].waypoints[4].orientation_xyzw.y=0.68455093042163
+steps[5].waypoints[4].orientation_xyzw.z=-0.5097216293981008
+steps[5].waypoints[4].orientation_xyzw.w=-0.30681725161896806
+steps[5].waypoints[5].position_m.x=0.029310160451964523
+steps[5].waypoints[5].position_m.y=-1.7059487090930279
+steps[5].waypoints[5].position_m.z=0.6809043651606556
+steps[5].waypoints[5].orientation_xyzw.x=-0.42123281258142636
+steps[5].waypoints[5].orientation_xyzw.y=0.6845507368916423
+steps[5].waypoints[5].orientation_xyzw.z=-0.5097217509713123
+steps[5].waypoints[5].orientation_xyzw.w=-0.3068174421583461
+steps[5].waypoints[6].position_m.x=0.031089686023041775
+steps[5].waypoints[6].position_m.y=-1.705302769753571
+steps[5].waypoints[6].position_m.z=0.6818012096833383
+steps[5].waypoints[6].orientation_xyzw.x=-0.42123284119223114
+steps[5].waypoints[6].orientation_xyzw.y=0.6845505433615933
+steps[5].waypoints[6].orientation_xyzw.z=-0.5097218725444782
+steps[5].waypoints[6].orientation_xyzw.w=-0.3068176326976968
+steps[5].waypoints[7].position_m.x=0.03286921205545339
+steps[5].waypoints[7].position_m.y=-1.7046568303956615
+steps[5].waypoints[7].position_m.z=0.6826980532773473
+steps[5].waypoints[7].orientation_xyzw.x=-0.4212328698029982
+steps[5].waypoints[7].orientation_xyzw.y=0.6845503498314832
+steps[5].waypoints[7].orientation_xyzw.z=-0.5097219941175984
+steps[5].waypoints[7].orientation_xyzw.w=-0.3068178232370201
+steps[5].waypoints[8].position_m.x=0.034168877592247
+steps[5].waypoints[8].position_m.y=-1.7040170427855088
+steps[5].waypoints[8].position_m.z=0.6833563950062824
+steps[5].waypoints[8].orientation_xyzw.x=-0.42123289841372763
+steps[5].waypoints[8].orientation_xyzw.y=0.6845501563013119
+steps[5].waypoints[8].orientation_xyzw.z=-0.5097221156906733
+steps[5].waypoints[8].orientation_xyzw.w=-0.3068180137763159
+steps[5].waypoints[9].position_m.x=0.03463739980169772
+steps[5].waypoints[9].position_m.y=-1.7033879103377605
+steps[5].waypoints[9].position_m.z=0.6836016405313836
+steps[5].waypoints[9].orientation_xyzw.x=-0.4212329270244195
+steps[5].waypoints[9].orientation_xyzw.y=0.6845499627710795
+steps[5].waypoints[9].orientation_xyzw.z=-0.5097222372637025
+steps[5].waypoints[9].orientation_xyzw.w=-0.3068182043155843
+steps[5].waypoints[10].position_m.x=0.034146199973629665
+steps[5].waypoints[10].position_m.y=-1.7027710814273744
+steps[5].waypoints[10].position_m.z=0.6833698844325237
+steps[5].waypoints[10].orientation_xyzw.x=-0.42123295563507357
+steps[5].waypoints[10].orientation_xyzw.y=0.6845497692407858
+steps[5].waypoints[10].orientation_xyzw.z=-0.5097223588366862
+steps[5].waypoints[10].orientation_xyzw.w=-0.3068183948548253
+steps[5].waypoints[11].position_m.x=0.03282385614277851
+steps[5].waypoints[11].position_m.y=-1.7021649077064092
+steps[5].waypoints[11].position_m.z=0.6827250334895048
+steps[5].waypoints[11].orientation_xyzw.x=-0.4212329842456901
+steps[5].waypoints[11].orientation_xyzw.y=0.6845495757104311
+steps[5].waypoints[11].orientation_xyzw.z=-0.5097224804096244
+steps[5].waypoints[11].orientation_xyzw.w=-0.30681858539403895
+steps[5].waypoints[12].position_m.x=0.031021650770026735
+steps[5].waypoints[12].position_m.y=-1.7015648857750496
+steps[5].waypoints[12].position_m.z=0.6818416827876008
+steps[5].waypoints[12].orientation_xyzw.x=-0.421233012856269
+steps[5].waypoints[12].orientation_xyzw.y=0.6845493821800152
+steps[5].waypoints[12].orientation_xyzw.z=-0.5097226019825168
+steps[5].waypoints[12].orientation_xyzw.w=-0.30681877593322515
+steps[5].waypoints[13].position_m.x=0.02921944493594084
+steps[5].waypoints[13].position_m.y=-1.7009648638621429
+steps[5].waypoints[13].position_m.z=0.6809583330143738
+steps[5].waypoints[13].orientation_xyzw.x=-0.42123304146681023
+steps[5].waypoints[13].orientation_xyzw.y=0.6845491886495381
+steps[5].waypoints[13].orientation_xyzw.z=-0.509722723555364
+steps[5].waypoints[13].orientation_xyzw.w=-0.3068189664723839
+steps[5].waypoints[14].position_m.x=0.02789709996831552
+steps[5].waypoints[14].position_m.y=-1.7003586901866463
+steps[5].waypoints[14].position_m.z=0.6803134843597094
+steps[5].waypoints[14].orientation_xyzw.x=-0.42123307007731386
+steps[5].waypoints[14].orientation_xyzw.y=0.6845489951189997
+steps[5].waypoints[14].orientation_xyzw.z=-0.5097228451281655
+steps[5].waypoints[14].orientation_xyzw.w=-0.30681915701151524
+steps[5].waypoints[15].position_m.x=0.027405898970351006
+steps[5].waypoints[15].position_m.y=-1.6997418613230542
+steps[5].waypoints[15].position_m.z=0.6800817306158798
+steps[5].waypoints[15].orientation_xyzw.x=-0.42123309868777975
+steps[5].waypoints[15].orientation_xyzw.y=0.6845488015884003
+steps[5].waypoints[15].orientation_xyzw.z=-0.5097229667009214
+steps[5].waypoints[15].orientation_xyzw.w=-0.3068193475506192
+steps[5].waypoints[16].position_m.x=0.027874420751589902
+steps[5].waypoints[16].position_m.y=-1.6991127288924335
+steps[5].waypoints[16].position_m.z=0.680326977002982
+steps[5].waypoints[16].orientation_xyzw.x=-0.4212331272982081
+steps[5].waypoints[16].orientation_xyzw.y=0.6845486080577395
+steps[5].waypoints[16].orientation_xyzw.z=-0.5097230882736319
+steps[5].waypoints[16].orientation_xyzw.w=-0.30681953808969575
+steps[5].waypoints[17].position_m.x=0.029174087177929464
+steps[5].waypoints[17].position_m.y=-1.6984729412467006
+steps[5].waypoints[17].position_m.z=0.6809853169412391
+steps[5].waypoints[17].orientation_xyzw.x=-0.42123315590859883
+steps[5].waypoints[17].orientation_xyzw.y=0.6845484145270178
+steps[5].waypoints[17].orientation_xyzw.z=-0.5097232098462967
+steps[5].waypoints[17].orientation_xyzw.w=-0.30681972862874485
+steps[5].waypoints[18].position_m.x=0.030953615517011694
+steps[5].waypoints[18].position_m.y=-1.6978270017965285
+steps[5].waypoints[18].position_m.z=0.6818821558918633
+steps[5].waypoints[18].orientation_xyzw.x=-0.4212331845189518
+steps[5].waypoints[18].orientation_xyzw.y=0.6845482209962347
+steps[5].waypoints[18].orientation_xyzw.z=-0.509723331418916
+steps[5].waypoints[18].orientation_xyzw.w=-0.3068199191677665
+steps[5].waypoints[19].position_m.x=0.03273314431742781
+steps[5].waypoints[19].position_m.y=-1.6971810623279038
+steps[5].waypoints[19].position_m.z=0.6827789939138074
+steps[5].waypoints[19].orientation_xyzw.x=-0.42123321312926726
+steps[5].waypoints[19].orientation_xyzw.y=0.6845480274653906
+steps[5].waypoints[19].orientation_xyzw.z=-0.5097234529914898
+steps[5].waypoints[19].orientation_xyzw.w=-0.3068201097067608
+steps[5].waypoints[20].position_m.x=0.034032811880540956
+steps[5].waypoints[20].position_m.y=-1.696541274636702
+steps[5].waypoints[20].position_m.z=0.6834373315637023
+steps[5].waypoints[20].orientation_xyzw.x=-0.421233241739545
+steps[5].waypoints[20].orientation_xyzw.y=0.6845478339344852
+steps[5].waypoints[20].orientation_xyzw.z=-0.5097235745640181
+steps[5].waypoints[20].orientation_xyzw.w=-0.3068203002457277
+steps[5].waypoints[21].position_m.x=0.03450133483167571
+steps[5].waypoints[21].position_m.y=-1.6959121421592873
+steps[5].waypoints[21].position_m.z=0.6836825755957661
+steps[5].waypoints[21].orientation_xyzw.x=-0.42123327034978514
+steps[5].waypoints[21].orientation_xyzw.y=0.6845476404035187
+steps[5].waypoints[21].orientation_xyzw.z=-0.5097236961365007
+steps[5].waypoints[21].orientation_xyzw.w=-0.30682049078466717
+steps[5].waypoints[22].position_m.x=0.03401013426192281
+steps[5].waypoints[22].position_m.y=-1.6952953132785673
+steps[5].waypoints[22].position_m.z=0.6834508209899326
+steps[5].waypoints[22].orientation_xyzw.x=-0.4212332989599876
+steps[5].waypoints[22].orientation_xyzw.y=0.684547446872491
+steps[5].waypoints[22].orientation_xyzw.z=-0.5097238177089378
+steps[5].waypoints[22].orientation_xyzw.w=-0.3068206813235792
+steps[5].waypoints[23].position_m.x=0.03268778840475199
+steps[5].waypoints[23].position_m.y=-1.6946891396386512
+steps[5].waypoints[23].position_m.z=0.6828059741259522
+steps[5].waypoints[23].orientation_xyzw.x=-0.4212333275701524
+steps[5].waypoints[23].orientation_xyzw.y=0.6845472533414022
+steps[5].waypoints[23].orientation_xyzw.z=-0.5097239392813294
+steps[5].waypoints[23].orientation_xyzw.w=-0.3068208718624639
+steps[5].waypoints[24].position_m.x=0.030885580263996657
+steps[5].waypoints[24].position_m.y=-1.6940891178180073
+steps[5].waypoints[24].position_m.z=0.6819226289961258
+steps[5].waypoints[24].orientation_xyzw.x=-0.42123335618027963
+steps[5].waypoints[24].orientation_xyzw.y=0.6845470598102521
+steps[5].waypoints[24].orientation_xyzw.z=-0.5097240608536755
+steps[5].waypoints[24].orientation_xyzw.w=-0.30682106240132107
+steps[5].waypoints[25].position_m.x=0.029083371661907657
+steps[5].waypoints[25].position_m.y=-1.693489096015816
+steps[5].waypoints[25].position_m.z=0.6810392847949827
+steps[5].waypoints[25].orientation_xyzw.x=-0.4212333847903692
+steps[5].waypoints[25].orientation_xyzw.y=0.6845468662790408
+steps[5].waypoints[25].orientation_xyzw.z=-0.509724182425976
+steps[5].waypoints[25].orientation_xyzw.w=-0.3068212529401508
+steps[5].waypoints[26].position_m.x=0.027761024667963853
+steps[5].waypoints[26].position_m.y=-1.6928829224213688
+steps[5].waypoints[26].position_m.z=0.6803944402193721
+steps[5].waypoints[26].orientation_xyzw.x=-0.42123341340042114
+steps[5].waypoints[26].orientation_xyzw.y=0.6845466727477686
+steps[5].waypoints[26].orientation_xyzw.z=-0.5097243039982309
+steps[5].waypoints[26].orientation_xyzw.w=-0.30682144347895324
+steps[5].waypoints[27].position_m.x=0.027269822928315673
+steps[5].waypoints[27].position_m.y=-1.692266093587443
+steps[5].waypoints[27].position_m.z=0.6801626879685851
+steps[5].waypoints[27].orientation_xyzw.x=-0.42123344201043544
+steps[5].waypoints[27].orientation_xyzw.y=0.684546479216435
+steps[5].waypoints[27].orientation_xyzw.z=-0.5097244255704403
+steps[5].waypoints[27].orientation_xyzw.w=-0.30682163401772816
+steps[5].waypoints[28].position_m.x=0.027738345451239047
+steps[5].waypoints[28].position_m.y=-1.691636961127156
+steps[5].waypoints[28].position_m.z=0.6804079328626557
+steps[5].waypoints[28].orientation_xyzw.x=-0.42123347062041205
+steps[5].waypoints[28].orientation_xyzw.y=0.6845462856850403
+steps[5].waypoints[28].orientation_xyzw.z=-0.5097245471426042
+steps[5].waypoints[28].orientation_xyzw.w=-0.3068218245564758
+steps[5].waypoints[29].position_m.x=0.029038013903897222
+steps[5].waypoints[29].position_m.y=-1.6909971734003737
+steps[5].waypoints[29].position_m.z=0.6810662687218606
+steps[5].waypoints[29].orientation_xyzw.x=-0.421233499230351
+steps[5].waypoints[29].orientation_xyzw.y=0.6845460921535843
+steps[5].waypoints[29].orientation_xyzw.z=-0.5097246687147226
+steps[5].waypoints[29].orientation_xyzw.w=-0.3068220150951959
+steps[5].waypoints[30].position_m.x=0.03081754501098161
+steps[5].waypoints[30].position_m.y=-1.6903512338394862
+steps[5].waypoints[30].position_m.z=0.6819631021003882
+steps[5].waypoints[30].orientation_xyzw.x=-0.4212335278402524
+steps[5].waypoints[30].orientation_xyzw.y=0.6845458986220674
+steps[5].waypoints[30].orientation_xyzw.z=-0.5097247902867952
+steps[5].waypoints[30].orientation_xyzw.w=-0.3068222056338886
+steps[5].waypoints[31].position_m.x=0.03259707657939941
+steps[5].waypoints[31].position_m.y=-1.689705294260146
+steps[5].waypoints[31].position_m.z=0.6828599345502295
+steps[5].waypoints[31].orientation_xyzw.x=-0.4212335564501162
+steps[5].waypoints[31].orientation_xyzw.y=0.6845457050904891
+steps[5].waypoints[31].orientation_xyzw.z=-0.5097249118588224
+steps[5].waypoints[31].orientation_xyzw.w=-0.3068223961725539
+steps[5].waypoints[32].position_m.x=0.03389674616883002
+steps[5].waypoints[32].position_m.y=-1.6890655064878946
+steps[5].waypoints[32].position_m.z=0.6835182681210566
+steps[5].waypoints[32].orientation_xyzw.x=-0.42123358505994224
+steps[5].waypoints[32].orientation_xyzw.y=0.6845455115588497
+steps[5].waypoints[32].orientation_xyzw.z=-0.5097250334308041
+steps[5].waypoints[32].orientation_xyzw.w=-0.3068225867111919
+steps[5].waypoints[33].position_m.x=0.03436526986164806
+steps[5].waypoints[33].position_m.y=-1.6884363739808137
+steps[5].waypoints[33].position_m.z=0.6837635106600728
+steps[5].waypoints[33].orientation_xyzw.x=-0.42123361366973067
+steps[5].waypoints[33].orientation_xyzw.y=0.684545318027149
+steps[5].waypoints[33].orientation_xyzw.z=-0.5097251550027403
+steps[5].waypoints[33].orientation_xyzw.w=-0.30682277724980234
+steps[5].waypoints[34].position_m.x=0.03387406855021105
+steps[5].waypoints[34].position_m.y=-1.68781954512976
+steps[5].waypoints[34].position_m.z=0.683531757547276
+steps[5].waypoints[34].orientation_xyzw.x=-0.42123364227948146
+steps[5].waypoints[34].orientation_xyzw.y=0.6845451244953874
+steps[5].waypoints[34].orientation_xyzw.z=-0.509725276574631
+steps[5].waypoints[34].orientation_xyzw.w=-0.3068229677883854
+steps[5].waypoints[35].position_m.x=0.032551720666722656
+steps[5].waypoints[35].position_m.y=-1.6872133715708932
+steps[5].waypoints[35].position_m.z=0.6828869147623617
+steps[5].waypoints[35].orientation_xyzw.x=-0.4212336708891946
+steps[5].waypoints[35].orientation_xyzw.y=0.6845449309635645
+steps[5].waypoints[35].orientation_xyzw.z=-0.5097253981464759
+steps[5].waypoints[35].orientation_xyzw.w=-0.30682315832694107
+steps[5].waypoints[36].position_m.x=0.030749509757966576
+steps[5].waypoints[36].position_m.y=-1.686613349860965
+steps[5].waypoints[36].position_m.z=0.6820035752046507
+steps[5].waypoints[36].orientation_xyzw.x=-0.4212336994988702
+steps[5].waypoints[36].orientation_xyzw.y=0.6845447374316804
+steps[5].waypoints[36].orientation_xyzw.z=-0.5097255197182754
+steps[5].waypoints[36].orientation_xyzw.w=-0.3068233488654693
+steps[5].waypoints[37].position_m.x=0.02894729838787731
+steps[5].waypoints[37].position_m.y=-1.6860133281694891
+steps[5].waypoints[37].position_m.z=0.6811202365756293
+steps[5].waypoints[37].orientation_xyzw.x=-0.421233728108508
+steps[5].waypoints[37].orientation_xyzw.y=0.6845445438997351
+steps[5].waypoints[37].orientation_xyzw.z=-0.5097256412900293
+steps[5].waypoints[37].orientation_xyzw.w=-0.3068235394039701
+steps[5].waypoints[38].position_m.x=0.027624949367617068
+steps[5].waypoints[38].position_m.y=-1.6854071546560918
+steps[5].waypoints[38].position_m.z=0.6804753960791005
+steps[5].waypoints[38].orientation_xyzw.x=-0.42123375671810825
+steps[5].waypoints[38].orientation_xyzw.y=0.6845443503677286
+steps[5].waypoints[38].orientation_xyzw.z=-0.5097257628617378
+steps[5].waypoints[38].orientation_xyzw.w=-0.30682372994244356
+steps[5].waypoints[39].position_m.x=0.027133746886285986
+steps[5].waypoints[39].position_m.y=-1.684790325851832
+steps[5].waypoints[39].position_m.z=0.6802436453213662
+steps[5].waypoints[39].orientation_xyzw.x=-0.4212337853276709
+steps[5].waypoints[39].orientation_xyzw.y=0.684544156835661
+steps[5].waypoints[39].orientation_xyzw.z=-0.5097258844334005
+steps[5].waypoints[39].orientation_xyzw.w=-0.3068239204808895
+steps[5].waypoints[40].position_m.x=0.027602270150893077
+steps[5].waypoints[40].position_m.y=-1.684161193361879
+steps[5].waypoints[40].position_m.z=0.6804888887223949
+steps[5].waypoints[40].orientation_xyzw.x=-0.4212338139371958
+steps[5].waypoints[40].orientation_xyzw.y=0.6845439633035323
+steps[5].waypoints[40].orientation_xyzw.z=-0.5097260060050178
+steps[5].waypoints[40].orientation_xyzw.w=-0.3068241110193081
+steps[5].waypoints[41].position_m.x=0.02890194062986781
+steps[5].waypoints[41].position_m.y=-1.683521405554047
+steps[5].waypoints[41].position_m.z=0.6811472205025199
+steps[5].waypoints[41].orientation_xyzw.x=-0.42123384254668317
+steps[5].waypoints[41].orientation_xyzw.y=0.6845437697713423
+steps[5].waypoints[41].orientation_xyzw.z=-0.5097261275765896
+steps[5].waypoints[41].orientation_xyzw.w=-0.3068243015576993
+steps[5].waypoints[42].position_m.x=0.03068147450495153
+steps[5].waypoints[42].position_m.y=-1.6828754658824436
+steps[5].waypoints[42].position_m.z=0.6820440483089132
+steps[5].waypoints[42].orientation_xyzw.x=-0.4212338711561328
+steps[5].waypoints[42].orientation_xyzw.y=0.6845435762390912
+steps[5].waypoints[42].orientation_xyzw.z=-0.5097262491481158
+steps[5].waypoints[42].orientation_xyzw.w=-0.306824492096063
+steps[5].waypoints[43].position_m.x=0.0324610088413682
+steps[5].waypoints[43].position_m.y=-1.6822295261923876
+steps[5].waypoints[43].position_m.z=0.6829408751866138
+steps[5].waypoints[43].orientation_xyzw.x=-0.4212338997655448
+steps[5].waypoints[43].orientation_xyzw.y=0.684543382706779
+steps[5].waypoints[43].orientation_xyzw.z=-0.5097263707195965
+steps[5].waypoints[43].orientation_xyzw.w=-0.3068246826343993
+steps[5].waypoints[44].position_m.x=0.033760680457114195
+steps[5].waypoints[44].position_m.y=-1.6815897383390863
+steps[5].waypoints[44].position_m.z=0.6835992046783455
+steps[5].waypoints[44].orientation_xyzw.x=-0.4212339283749193
+steps[5].waypoints[44].orientation_xyzw.y=0.6845431891744055
+steps[5].waypoints[44].orientation_xyzw.z=-0.5097264922910316
+steps[5].waypoints[44].orientation_xyzw.w=-0.3068248731727083
+steps[5].waypoints[45].position_m.x=0.03422920489161477
+steps[5].waypoints[45].position_m.y=-1.6809606058023392
+steps[5].waypoints[45].position_m.z=0.6838444457243039
+steps[5].waypoints[45].orientation_xyzw.x=-0.421233956984256
+steps[5].waypoints[45].orientation_xyzw.y=0.6845429956419707
+steps[5].waypoints[45].orientation_xyzw.z=-0.5097266138624211
+steps[5].waypoints[45].orientation_xyzw.w=-0.3068250637109898
+steps[5].waypoints[46].position_m.x=0.033738002838494416
+steps[5].waypoints[46].position_m.y=-1.6803437769809517
+steps[5].waypoints[46].position_m.z=0.6836126941045539
+steps[5].waypoints[46].orientation_xyzw.x=-0.4212339855935551
+steps[5].waypoints[46].orientation_xyzw.y=0.684542802109475
+steps[5].waypoints[46].orientation_xyzw.z=-0.5097267354337651
+steps[5].waypoints[46].orientation_xyzw.w=-0.30682525424924384
+steps[5].waypoints[47].position_m.x=0.0324156529286905
+steps[5].waypoints[47].position_m.y=-1.6797376035031346
+steps[5].waypoints[47].position_m.z=0.6829678553987334
+steps[5].waypoints[47].orientation_xyzw.x=-0.42123401420281664
+steps[5].waypoints[47].orientation_xyzw.y=0.6845426085769181
+steps[5].waypoints[47].orientation_xyzw.z=-0.5097268570050637
+steps[5].waypoints[47].orientation_xyzw.w=-0.30682544478747054
+steps[5].waypoints[48].position_m.x=0.030613439251936495
+steps[5].waypoints[48].position_m.y=-1.6791375819039225
+steps[5].waypoints[48].position_m.z=0.6820845214131757
+steps[5].waypoints[48].orientation_xyzw.x=-0.4212340428120404
+steps[5].waypoints[48].orientation_xyzw.y=0.6845424150442999
+steps[5].waypoints[48].orientation_xyzw.z=-0.5097269785763165
+steps[5].waypoints[48].orientation_xyzw.w=-0.30682563532566975
+steps[5].waypoints[49].position_m.x=0.028811225113849776
+steps[5].waypoints[49].position_m.y=-1.678537560323163
+steps[5].waypoints[49].position_m.z=0.6812011883563138
+steps[5].waypoints[49].orientation_xyzw.x=-0.42123407142122665
+steps[5].waypoints[49].orientation_xyzw.y=0.6845422215116205
+steps[5].waypoints[49].orientation_xyzw.z=-0.5097271001475239
+steps[5].waypoints[49].orientation_xyzw.w=-0.30682582586384166
+steps[5].waypoints[50].position_m.x=0.027488874067275168
+steps[5].waypoints[50].position_m.y=-1.6779313868908154
+steps[5].waypoints[50].position_m.z=0.6805563519388943
+steps[5].waypoints[50].orientation_xyzw.x=-0.4212341000303752
+steps[5].waypoints[50].orientation_xyzw.y=0.6845420279788801
+steps[5].waypoints[50].orientation_xyzw.z=-0.5097272217186858
+steps[5].waypoints[50].orientation_xyzw.w=-0.30682601640198603
+steps[5].waypoints[51].position_m.x=0.026997670844261943
+steps[5].waypoints[51].position_m.y=-1.677314558116222
+steps[5].waypoints[51].position_m.z=0.6803246026742228
+steps[5].waypoints[51].orientation_xyzw.x=-0.4212341286394861
+steps[5].waypoints[51].orientation_xyzw.y=0.6845418344460784
+steps[5].waypoints[51].orientation_xyzw.z=-0.5097273432898021
+steps[5].waypoints[51].orientation_xyzw.w=-0.3068262069401031
+steps[5].waypoints[52].position_m.x=0.02746619485055199
+steps[5].waypoints[52].position_m.y=-1.6766854255966028
+steps[5].waypoints[52].position_m.z=0.6805698445821997
+steps[5].waypoints[52].orientation_xyzw.x=-0.4212341572485594
+steps[5].waypoints[52].orientation_xyzw.y=0.6845416409132156
+steps[5].waypoints[52].orientation_xyzw.z=-0.5097274648608728
+steps[5].waypoints[52].orientation_xyzw.w=-0.3068263974781926
+steps[5].waypoints[53].position_m.x=0.028765867355841218
+steps[5].waypoints[53].position_m.y=-1.676045637707721
+steps[5].waypoints[53].position_m.z=0.681228172283217
+steps[5].waypoints[53].orientation_xyzw.x=-0.42123418585759503
+steps[5].waypoints[53].orientation_xyzw.y=0.6845414473802917
+steps[5].waypoints[53].orientation_xyzw.z=-0.509727586431898
+steps[5].waypoints[53].orientation_xyzw.w=-0.3068265880162549
+steps[5].waypoints[54].position_m.x=0.030545403998921448
+steps[5].waypoints[54].position_m.y=-1.6753996979254013
+steps[5].waypoints[54].position_m.z=0.6821249945174381
+steps[5].waypoints[54].orientation_xyzw.x=-0.42123421446659304
+steps[5].waypoints[54].orientation_xyzw.y=0.6845412538473065
+steps[5].waypoints[54].orientation_xyzw.z=-0.5097277080028776
+steps[5].waypoints[54].orientation_xyzw.w=-0.3068267785542896
+steps[5].waypoints[55].position_m.x=0.03232494110333416
+steps[5].waypoints[55].position_m.y=-1.674753758124629
+steps[5].waypoints[55].position_m.z=0.6830218158229603
+steps[5].waypoints[55].orientation_xyzw.x=-0.4212342430755534
+steps[5].waypoints[55].orientation_xyzw.y=0.6845410603142601
+steps[5].waypoints[55].orientation_xyzw.z=-0.5097278295738117
+steps[5].waypoints[55].orientation_xyzw.w=-0.30682696909229695
+steps[5].waypoints[56].position_m.x=0.03362461474539349
+steps[5].waypoints[56].position_m.y=-1.6741139701902779
+steps[5].waypoints[56].position_m.z=0.6836801412355688
+steps[5].waypoints[56].orientation_xyzw.x=-0.4212342716844761
+steps[5].waypoints[56].orientation_xyzw.y=0.6845408667811527
+steps[5].waypoints[56].orientation_xyzw.z=-0.5097279511447003
+steps[5].waypoints[56].orientation_xyzw.w=-0.30682715963027685
+steps[5].waypoints[57].position_m.x=0.034093139921575824
+steps[5].waypoints[57].position_m.y=-1.6734848376238642
+steps[5].waypoints[57].position_m.z=0.6839253807884593
+steps[5].waypoints[57].orientation_xyzw.x=-0.4212343002933612
+steps[5].waypoints[57].orientation_xyzw.y=0.684540673247984
+steps[5].waypoints[57].orientation_xyzw.z=-0.5097280727155433
+steps[5].waypoints[57].orientation_xyzw.w=-0.30682735016822943
+steps[5].waypoints[58].position_m.x=0.033601937126772896
+steps[5].waypoints[58].position_m.y=-1.672868008832143
+steps[5].waypoints[58].position_m.z=0.6836936306617664
+steps[5].waypoints[58].orientation_xyzw.x=-0.42123432890220863
+steps[5].waypoints[58].orientation_xyzw.y=0.6845404797147541
+steps[5].waypoints[58].orientation_xyzw.z=-0.5097281942863406
+steps[5].waypoints[58].orientation_xyzw.w=-0.3068275407061545
+steps[5].waypoints[59].position_m.x=0.03227958519065552
+steps[5].waypoints[59].position_m.y=-1.672261835435376
+steps[5].waypoints[59].position_m.z=0.6830487960350673
+steps[5].waypoints[59].orientation_xyzw.x=-0.4212343575110184
+steps[5].waypoints[59].orientation_xyzw.y=0.684540286181463
+steps[5].waypoints[59].orientation_xyzw.z=-0.5097283158570927
+steps[5].waypoints[59].orientation_xyzw.w=-0.30682773124405216
+steps[5].waypoints[60].position_m.x=0.030477368745906414
+steps[5].waypoints[60].position_m.y=-1.67166181394688
+steps[5].waypoints[60].position_m.z=0.6821654676217006
+steps[5].waypoints[60].orientation_xyzw.x=-0.4212343861197905
+steps[5].waypoints[60].orientation_xyzw.y=0.6845400926481108
+steps[5].waypoints[60].orientation_xyzw.z=-0.509728437427799
+steps[5].waypoints[60].orientation_xyzw.w=-0.3068279217819224
+steps[5].waypoints[61].position_m.x=0.028675151839825067
+steps[5].waypoints[61].position_m.y=-1.671061792476837
+steps[5].waypoints[61].position_m.z=0.6812821401370361
+steps[5].waypoints[61].orientation_xyzw.x=-0.4212344147285251
+steps[5].waypoints[61].orientation_xyzw.y=0.6845398991146975
+steps[5].waypoints[61].orientation_xyzw.z=-0.5097285589984598
+steps[5].waypoints[61].orientation_xyzw.w=-0.3068281123197653
+steps[5].waypoints[62].position_m.x=0.02735279876693817
+steps[5].waypoints[62].position_m.y=-1.6704556191255395
+steps[5].waypoints[62].position_m.z=0.6806373077987536
+steps[5].waypoints[62].orientation_xyzw.x=-0.42123444333722193
+steps[5].waypoints[62].orientation_xyzw.y=0.684539705581223
+steps[5].waypoints[62].orientation_xyzw.z=-0.509728680569075
+steps[5].waypoints[62].orientation_xyzw.w=-0.3068283028575807
+steps[5].waypoints[63].position_m.x=0.026861594802243545
+steps[5].waypoints[63].position_m.y=-1.6698387903806127
+steps[5].waypoints[63].position_m.z=0.680405560027155
+steps[5].waypoints[63].orientation_xyzw.x=-0.4212344719458812
+steps[5].waypoints[63].orientation_xyzw.y=0.6845395120476873
+steps[5].waypoints[63].orientation_xyzw.z=-0.5097288021396448
+steps[5].waypoints[63].orientation_xyzw.w=-0.3068284933953688
+steps[5].waypoints[64].position_m.x=0.0273301195502158
+steps[5].waypoints[64].position_m.y=-1.669209657831327
+steps[5].waypoints[64].position_m.z=0.6806508004420699
+steps[5].waypoints[64].orientation_xyzw.x=-0.42123450055450273
+steps[5].waypoints[64].orientation_xyzw.y=0.6845393185140903
+steps[5].waypoints[64].orientation_xyzw.z=-0.509728923710169
+steps[5].waypoints[64].orientation_xyzw.w=-0.3068286839331293
+steps[5].waypoints[65].position_m.x=0.02862979408181745
+steps[5].waypoints[65].position_m.y=-1.668569869861395
+steps[5].waypoints[65].position_m.z=0.6813091240639518
+steps[5].waypoints[65].orientation_xyzw.x=-0.4212345291630867
+steps[5].waypoints[65].orientation_xyzw.y=0.6845391249804323
+steps[5].waypoints[65].orientation_xyzw.z=-0.5097290452806476
+steps[5].waypoints[65].orientation_xyzw.w=-0.30682887447086254
+steps[5].waypoints[66].position_m.x=0.030409333492891353
+steps[5].waypoints[66].position_m.y=-1.6679239299683588
+steps[5].waypoints[66].position_m.z=0.6822059407259631
+steps[5].waypoints[66].orientation_xyzw.x=-0.421234557771633
+steps[5].waypoints[66].orientation_xyzw.y=0.6845389314467131
+steps[5].waypoints[66].orientation_xyzw.z=-0.5097291668510806
+steps[5].waypoints[66].orientation_xyzw.w=-0.30682906500856827
+steps[5].waypoints[67].position_m.x=0.032188873365297285
+steps[5].waypoints[67].position_m.y=-1.6672779900568697
+steps[5].waypoints[67].position_m.z=0.683102756459269
+steps[5].waypoints[67].orientation_xyzw.x=-0.42123458638014166
+steps[5].waypoints[67].orientation_xyzw.y=0.6845387379129327
+steps[5].waypoints[67].orientation_xyzw.z=-0.5097292884214681
+steps[5].waypoints[67].orientation_xyzw.w=-0.3068292555462466
+steps[5].waypoints[68].position_m.x=0.03348854903366789
+steps[5].waypoints[68].position_m.y=-1.6666382020414683
+steps[5].waypoints[68].position_m.z=0.6837610777927265
+steps[5].waypoints[68].orientation_xyzw.x=-0.4212346149886127
+steps[5].waypoints[68].orientation_xyzw.y=0.6845385443790911
+steps[5].waypoints[68].orientation_xyzw.z=-0.50972940999181
+steps[5].waypoints[68].orientation_xyzw.w=-0.3068294460838975
+steps[5].waypoints[69].position_m.x=0.03395707495153124
+steps[5].waypoints[69].position_m.y=-1.6660090694453882
+steps[5].waypoints[69].position_m.z=0.684006315852539
+steps[5].waypoints[69].orientation_xyzw.x=-0.42123464359704604
+steps[5].waypoints[69].orientation_xyzw.y=0.6845383508451884
+steps[5].waypoints[69].orientation_xyzw.z=-0.5097295315621065
+steps[5].waypoints[69].orientation_xyzw.w=-0.3068296366215211
+steps[5].waypoints[70].position_m.x=0.03346587141504648
+steps[5].waypoints[70].position_m.y=-1.6653922406833335
+steps[5].waypoints[70].position_m.z=0.6837745672189132
+steps[5].waypoints[70].orientation_xyzw.x=-0.4212346722054418
+steps[5].waypoints[70].orientation_xyzw.y=0.6845381573112245
+steps[5].waypoints[70].orientation_xyzw.z=-0.5097296531323575
+steps[5].waypoints[70].orientation_xyzw.w=-0.30682982715911716
+steps[5].waypoints[71].position_m.x=0.032143517452617704
+steps[5].waypoints[71].position_m.y=-1.6647860673676167
+steps[5].waypoints[71].position_m.z=0.6831297366713633
+steps[5].waypoints[71].orientation_xyzw.x=-0.4212347008138
+steps[5].waypoints[71].orientation_xyzw.y=0.6845379637771996
+steps[5].waypoints[71].orientation_xyzw.z=-0.5097297747025628
+steps[5].waypoints[71].orientation_xyzw.w=-0.3068300176966859
+steps[5].waypoints[72].position_m.x=0.030341298239876337
+steps[5].waypoints[72].position_m.y=-1.6641860459898377
+steps[5].waypoints[72].position_m.z=0.6822464138302256
+steps[5].waypoints[72].orientation_xyzw.x=-0.4212347294221204
+steps[5].waypoints[72].orientation_xyzw.y=0.6845377702431132
+steps[5].waypoints[72].orientation_xyzw.z=-0.5097298962727226
+steps[5].waypoints[72].orientation_xyzw.w=-0.30683020823422713
+steps[5].waypoints[73].position_m.x=0.02853907856580319
+steps[5].waypoints[73].position_m.y=-1.6635860246305114
+steps[5].waypoints[73].position_m.z=0.6813630919177962
+steps[5].waypoints[73].orientation_xyzw.x=-0.4212347580304033
+steps[5].waypoints[73].orientation_xyzw.y=0.6845375767089659
+steps[5].waypoints[73].orientation_xyzw.z=-0.5097300178428368
+steps[5].waypoints[73].orientation_xyzw.w=-0.30683039877174095
+steps[5].waypoints[74].position_m.x=0.027216723466606054
+steps[5].waypoints[74].position_m.y=-1.6629798513602645
+steps[5].waypoints[74].position_m.z=0.6807182636586785
+steps[5].waypoints[74].orientation_xyzw.x=-0.42123478663864844
+steps[5].waypoints[74].orientation_xyzw.y=0.6845373831747573
+steps[5].waypoints[74].orientation_xyzw.z=-0.5097301394129056
+steps[5].waypoints[74].orientation_xyzw.w=-0.3068305893092274
+steps[5].waypoints[75].position_m.x=0.026725518760230795
+steps[5].waypoints[75].position_m.y=-1.6623630226450041
+steps[5].waypoints[75].position_m.z=0.6804865173801631
+steps[5].waypoints[75].orientation_xyzw.x=-0.42123481524685596
+steps[5].waypoints[75].orientation_xyzw.y=0.6845371896404876
+steps[5].waypoints[75].orientation_xyzw.z=-0.5097302609829287
+steps[5].waypoints[75].orientation_xyzw.w=-0.30683077984668644
+steps[5].waypoints[76].position_m.x=0.0271940442498845
+steps[5].waypoints[76].position_m.y=-1.6617338900660519
+steps[5].waypoints[76].position_m.z=0.6807317563020058
+steps[5].waypoints[76].orientation_xyzw.x=-0.42123484385502585
+steps[5].waypoints[76].orientation_xyzw.y=0.6845369961061566
+steps[5].waypoints[76].orientation_xyzw.z=-0.5097303825529061
+steps[5].waypoints[76].orientation_xyzw.w=-0.306830970384118
+steps[5].waypoints[77].position_m.x=0.028493720807796503
+steps[5].waypoints[77].position_m.y=-1.6610941020150698
+steps[5].waypoints[77].position_m.z=0.6813900758447247
+steps[5].waypoints[77].orientation_xyzw.x=-0.4212348724631582
+steps[5].waypoints[77].orientation_xyzw.y=0.6845368025717646
+steps[5].waypoints[77].orientation_xyzw.z=-0.5097305041228383
+steps[5].waypoints[77].orientation_xyzw.w=-0.30683116092152224
+steps[5].waypoints[78].position_m.x=0.030273262986861296
+steps[5].waypoints[78].position_m.y=-1.6604481620113165
+steps[5].waypoints[78].position_m.z=0.682286886934488
+steps[5].waypoints[78].orientation_xyzw.x=-0.4212349010712528
+steps[5].waypoints[78].orientation_xyzw.y=0.6845366090373113
+steps[5].waypoints[78].orientation_xyzw.z=-0.5097306256927248
+steps[5].waypoints[78].orientation_xyzw.w=-0.306831351458899
+steps[5].waypoints[79].position_m.x=0.032052805627257604
+steps[5].waypoints[79].position_m.y=-1.6598022219891104
+steps[5].waypoints[79].position_m.z=0.6831836970955397
+steps[5].waypoints[79].orientation_xyzw.x=-0.42123492967930976
+steps[5].waypoints[79].orientation_xyzw.y=0.6845364155027969
+steps[5].waypoints[79].orientation_xyzw.z=-0.5097307472625657
+steps[5].waypoints[79].orientation_xyzw.w=-0.30683154199624835
+steps[5].waypoints[80].position_m.x=0.033352483321937396
+steps[5].waypoints[80].position_m.y=-1.6591624338926585
+steps[5].waypoints[80].position_m.z=0.6838420143498187
+steps[5].waypoints[80].orientation_xyzw.x=-0.4212349582873291
+steps[5].waypoints[80].orientation_xyzw.y=0.6845362219682213
+steps[5].waypoints[80].orientation_xyzw.z=-0.5097308688323611
+steps[5].waypoints[80].orientation_xyzw.w=-0.30683173253357027
+steps[5].waypoints[81].position_m.x=0.033821009981481
+steps[5].waypoints[81].position_m.y=-1.658533301266912
+steps[5].waypoints[81].position_m.z=0.6840872509165431
+steps[5].waypoints[81].orientation_xyzw.x=-0.42123498689531086
+steps[5].waypoints[81].orientation_xyzw.y=0.6845360284335846
+steps[5].waypoints[81].orientation_xyzw.z=-0.509730990402111
+steps[5].waypoints[81].orientation_xyzw.w=-0.3068319230708648
+steps[5].waypoints[82].position_m.x=0.03332980570331517
+steps[5].waypoints[82].position_m.y=-1.6579164725345235
+steps[5].waypoints[82].position_m.z=0.6838555037759945
+steps[5].waypoints[82].orientation_xyzw.x=-0.4212350155032549
+steps[5].waypoints[82].orientation_xyzw.y=0.6845358348988866
+steps[5].waypoints[82].orientation_xyzw.z=-0.5097311119718153
+steps[5].waypoints[82].orientation_xyzw.w=-0.3068321136081319
+steps[5].waypoints[83].position_m.x=0.03200744971457708
+steps[5].waypoints[83].position_m.y=-1.6573102992998572
+steps[5].waypoints[83].position_m.z=0.6832106773076215
+steps[5].waypoints[83].orientation_xyzw.x=-0.4212350441111613
+steps[5].waypoints[83].orientation_xyzw.y=0.6845356413641275
+steps[5].waypoints[83].orientation_xyzw.z=-0.5097312335414741
+steps[5].waypoints[83].orientation_xyzw.w=-0.30683230414537155
+steps[5].waypoints[84].position_m.x=0.030205227733846256
+steps[5].waypoints[84].position_m.y=-1.6567102780327954
+steps[5].waypoints[84].position_m.z=0.6823273600387505
+steps[5].waypoints[84].orientation_xyzw.x=-0.42123507271903005
+steps[5].waypoints[84].orientation_xyzw.y=0.6845354478293072
+steps[5].waypoints[84].orientation_xyzw.z=-0.5097313551110872
+steps[5].waypoints[84].orientation_xyzw.w=-0.3068324946825838
+steps[5].waypoints[85].position_m.x=0.02840300529178413
+steps[5].waypoints[85].position_m.y=-1.656110256784186
+steps[5].waypoints[85].position_m.z=0.6814440436985942
+steps[5].waypoints[85].orientation_xyzw.x=-0.42123510132686126
+steps[5].waypoints[85].orientation_xyzw.y=0.6845352542944259
+steps[5].waypoints[85].orientation_xyzw.z=-0.5097314766806549
+steps[5].waypoints[85].orientation_xyzw.w=-0.30683268521976864
+steps[5].waypoints[86].position_m.x=0.02708064816627883
+steps[5].waypoints[86].position_m.y=-1.6555040835949897
+steps[5].waypoints[86].position_m.z=0.680799219518669
+steps[5].waypoints[86].orientation_xyzw.x=-0.42123512993465473
+steps[5].waypoints[86].orientation_xyzw.y=0.6845350607594832
+steps[5].waypoints[86].orientation_xyzw.z=-0.5097315982501771
+steps[5].waypoints[86].orientation_xyzw.w=-0.30683287575692614
+steps[5].waypoints[87].position_m.x=0.02658944271822369
+steps[5].waypoints[87].position_m.y=-1.654887254909396
+steps[5].waypoints[87].position_m.z=0.6805674747332467
+steps[5].waypoints[87].orientation_xyzw.x=-0.4212351585424106
+steps[5].waypoints[87].orientation_xyzw.y=0.6845348672244795
+steps[5].waypoints[87].orientation_xyzw.z=-0.5097317198196536
+steps[5].waypoints[87].orientation_xyzw.w=-0.3068330662940561
+steps[5].waypoints[88].position_m.x=0.027057968949558087
+steps[5].waypoints[88].position_m.y=-1.6542581223007775
+steps[5].waypoints[88].position_m.z=0.6808127121620071
+steps[5].waypoints[88].orientation_xyzw.x=-0.42123518715012875
+steps[5].waypoints[88].orientation_xyzw.y=0.6845346736894146
+steps[5].waypoints[88].orientation_xyzw.z=-0.5097318413890847
+steps[5].waypoints[88].orientation_xyzw.w=-0.3068332568311587
+steps[5].waypoints[89].position_m.x=0.028357647533778382
+steps[5].waypoints[89].position_m.y=-1.6536183341687445
+steps[5].waypoints[89].position_m.z=0.6814710276255352
+steps[5].waypoints[89].orientation_xyzw.x=-0.42123521575780937
+steps[5].waypoints[89].orientation_xyzw.y=0.6845344801542884
+steps[5].waypoints[89].orientation_xyzw.z=-0.5097319629584701
+steps[5].waypoints[89].orientation_xyzw.w=-0.3068334473682338
+steps[5].waypoints[90].position_m.x=0.030137192480831188
+steps[5].waypoints[90].position_m.y=-1.652972394054274
+steps[5].waypoints[90].position_m.z=0.682367833143013
+steps[5].waypoints[90].orientation_xyzw.x=-0.42123524436545234
+steps[5].waypoints[90].orientation_xyzw.y=0.6845342866191012
+steps[5].waypoints[90].orientation_xyzw.z=-0.5097320845278099
+steps[5].waypoints[90].orientation_xyzw.w=-0.3068336379052816
+steps[5].waypoints[91].position_m.x=0.03191673788921509
+steps[5].waypoints[91].position_m.y=-1.6523264539213505
+steps[5].waypoints[91].position_m.z=0.6832646377317727
+steps[5].waypoints[91].orientation_xyzw.x=-0.4212352729730576
+steps[5].waypoints[91].orientation_xyzw.y=0.6845340930838526
+steps[5].waypoints[91].orientation_xyzw.z=-0.5097322060971043
+steps[5].waypoints[91].orientation_xyzw.w=-0.30683382844230195
+steps[5].waypoints[92].position_m.x=0.03321641761020201
+steps[5].waypoints[92].position_m.y=-1.6516866657438478
+steps[5].waypoints[92].position_m.z=0.6839229509068454
+steps[5].waypoints[92].orientation_xyzw.x=-0.4212353015806253
+steps[5].waypoints[92].orientation_xyzw.y=0.684533899548543
+steps[5].waypoints[92].orientation_xyzw.z=-0.5097323276663532
+steps[5].waypoints[92].orientation_xyzw.w=-0.3068340189792949
+steps[5].waypoints[93].position_m.x=0.03368494501142512
+steps[5].waypoints[93].position_m.y=-1.6510575330884345
+steps[5].waypoints[93].position_m.z=0.6841681859804715
+steps[5].waypoints[93].orientation_xyzw.x=-0.4212353301881553
+steps[5].waypoints[93].orientation_xyzw.y=0.6845337060131723
+steps[5].waypoints[93].orientation_xyzw.z=-0.5097324492355566
+steps[5].waypoints[93].orientation_xyzw.w=-0.3068342095162604
+steps[5].waypoints[94].position_m.x=0.03319373999157897
+steps[5].waypoints[94].position_m.y=-1.6504407043857126
+steps[5].waypoints[94].position_m.z=0.6839364403330103
+steps[5].waypoints[94].orientation_xyzw.x=-0.4212353587956477
+steps[5].waypoints[94].orientation_xyzw.y=0.6845335124777404
+steps[5].waypoints[94].orientation_xyzw.z=-0.5097325708047142
+steps[5].waypoints[94].orientation_xyzw.w=-0.3068344000531985
+steps[5].waypoints[95].position_m.x=0.03187138197653363
+steps[5].waypoints[95].position_m.y=-1.6498345312320972
+steps[5].waypoints[95].position_m.z=0.683291617943842
+steps[5].waypoints[95].orientation_xyzw.x=-0.42123538740310246
+steps[5].waypoints[95].orientation_xyzw.y=0.6845333189422472
+steps[5].waypoints[95].orientation_xyzw.z=-0.5097326923738265
+steps[5].waypoints[95].orientation_xyzw.w=-0.30683459059010915
+steps[5].waypoints[96].position_m.x=0.030069157227816175
+steps[5].waypoints[96].position_m.y=-1.6492345100757528
+steps[5].waypoints[96].position_m.z=0.6824083062472754
+steps[5].waypoints[96].orientation_xyzw.x=-0.42123541601051956
+steps[5].waypoints[96].orientation_xyzw.y=0.684533125406693
+steps[5].waypoints[96].orientation_xyzw.z=-0.509732813942893
+steps[5].waypoints[96].orientation_xyzw.w=-0.3068347811269924
+steps[5].waypoints[97].position_m.x=0.02826693201776787
+steps[5].waypoints[97].position_m.y=-1.6486344889378615
+steps[5].waypoints[97].position_m.z=0.68152499547943
+steps[5].waypoints[97].orientation_xyzw.x=-0.42123544461789897
+steps[5].waypoints[97].orientation_xyzw.y=0.6845329318710776
+steps[5].waypoints[97].orientation_xyzw.z=-0.5097329355119142
+steps[5].waypoints[97].orientation_xyzw.w=-0.3068349716638482
+steps[5].waypoints[98].position_m.x=0.026944572865956494
+steps[5].waypoints[98].position_m.y=-1.648028315829716
+steps[5].waypoints[98].position_m.z=0.6808801753787249
+steps[5].waypoints[98].orientation_xyzw.x=-0.4212354732252408
+steps[5].waypoints[98].orientation_xyzw.y=0.6845327383354008
+steps[5].waypoints[98].orientation_xyzw.z=-0.5097330570808897
+steps[5].waypoints[98].orientation_xyzw.w=-0.3068351622006766
+steps[5].waypoints[99].position_m.x=0.026453366676222233
+steps[5].waypoints[99].position_m.y=-1.647411487173789
+steps[5].waypoints[99].position_m.z=0.680648432086406
+steps[5].waypoints[99].orientation_xyzw.x=-0.42123550183254493
+steps[5].waypoints[99].orientation_xyzw.y=0.6845325447996631
+steps[5].waypoints[99].orientation_xyzw.z=-0.5097331786498196
+steps[5].waypoints[99].orientation_xyzw.w=-0.30683535273747764
+steps[5].waypoints[100].position_m.x=0.02692189364923658
+steps[5].waypoints[100].position_m.y=-1.6467823545355036
+steps[5].waypoints[100].position_m.z=0.6808936680220741
+steps[5].waypoints[100].orientation_xyzw.x=-0.4212355304398115
+steps[5].waypoints[100].orientation_xyzw.y=0.6845323512638641
+steps[5].waypoints[100].orientation_xyzw.z=-0.5097333002187041
+steps[5].waypoints[100].orientation_xyzw.w=-0.3068355432742512
+steps[5].waypoints[101].position_m.x=0.02822157425976306
+steps[5].waypoints[101].position_m.y=-1.6461425663224198
+steps[5].waypoints[101].position_m.z=0.6815519794063837
+steps[5].waypoints[101].orientation_xyzw.x=-0.4212355590470404
+steps[5].waypoints[101].orientation_xyzw.y=0.684532157728004
+steps[5].waypoints[101].orientation_xyzw.z=-0.509733421787543
+steps[5].waypoints[101].orientation_xyzw.w=-0.3068357338109973
+steps[5].waypoints[102].position_m.x=0.030001121974801134
+steps[5].waypoints[102].position_m.y=-1.6454966260972317
+steps[5].waypoints[102].position_m.z=0.6824487793515379
+steps[5].waypoints[102].orientation_xyzw.x=-0.42123558765423164
+steps[5].waypoints[102].orientation_xyzw.y=0.6845319641920827
+steps[5].waypoints[102].orientation_xyzw.z=-0.5097335433563364
+steps[5].waypoints[102].orientation_xyzw.w=-0.3068359243477161
+steps[5].waypoints[103].position_m.x=0.031780670151169775
+steps[5].waypoints[103].position_m.y=-1.6448506858535905
+steps[5].waypoints[103].position_m.z=0.6833455783679679
+steps[5].waypoints[103].orientation_xyzw.x=-0.4212356162613852
+steps[5].waypoints[103].orientation_xyzw.y=0.6845317706561003
+steps[5].waypoints[103].orientation_xyzw.z=-0.5097336649250841
+steps[5].waypoints[103].orientation_xyzw.w=-0.30683611488440743
+steps[5].waypoints[104].position_m.x=0.03308035189846173
+steps[5].waypoints[104].position_m.y=-1.6442108975950367
+steps[5].waypoints[104].position_m.z=0.6840038874638066
+steps[5].waypoints[104].orientation_xyzw.x=-0.42123564486850124
+steps[5].waypoints[104].orientation_xyzw.y=0.6845315771200565
+steps[5].waypoints[104].orientation_xyzw.z=-0.5097337864937863
+steps[5].waypoints[104].orientation_xyzw.w=-0.3068363054210713
+steps[5].waypoints[105].position_m.x=0.03354888004136359
+steps[5].waypoints[105].position_m.y=-1.6435817649099564
+steps[5].waypoints[105].position_m.z=0.6842491210443242
+steps[5].waypoints[105].orientation_xyzw.x=-0.4212356734755795
+steps[5].waypoints[105].orientation_xyzw.y=0.6845313835839518
+steps[5].waypoints[105].orientation_xyzw.z=-0.509733908062443
+steps[5].waypoints[105].orientation_xyzw.w=-0.3068364959577078
+steps[5].waypoints[106].position_m.x=0.033057674279837884
+steps[5].waypoints[106].position_m.y=-1.6429649362369014
+steps[5].waypoints[106].position_m.z=0.6840173768899604
+steps[5].waypoints[106].orientation_xyzw.x=-0.42123570208262023
+steps[5].waypoints[106].orientation_xyzw.y=0.6845311900477858
+steps[5].waypoints[106].orientation_xyzw.z=-0.5097340296310542
+steps[5].waypoints[106].orientation_xyzw.w=-0.3068366864943169
+steps[5].waypoints[107].position_m.x=0.031735314238487376
+steps[5].waypoints[107].position_m.y=-1.642358763164337
+steps[5].waypoints[107].position_m.z=0.6833725585800244
+steps[5].waypoints[107].orientation_xyzw.x=-0.4212357306896233
+steps[5].waypoints[107].orientation_xyzw.y=0.6845309965115587
+steps[5].waypoints[107].orientation_xyzw.z=-0.5097341511996198
+steps[5].waypoints[107].orientation_xyzw.w=-0.30683687703089857
+steps[5].waypoints[108].position_m.x=0.029933086721786094
+steps[5].waypoints[108].position_m.y=-1.6417587421187103
+steps[5].waypoints[108].position_m.z=0.6824892524558004
+steps[5].waypoints[108].orientation_xyzw.x=-0.42123575929658863
+steps[5].waypoints[108].orientation_xyzw.y=0.6845308029752704
+steps[5].waypoints[108].orientation_xyzw.z=-0.5097342727681398
+steps[5].waypoints[108].orientation_xyzw.w=-0.30683706756745277
+steps[5].waypoints[109].position_m.x=0.028130858743754455
+steps[5].waypoints[109].position_m.y=-1.6411587210915368
+steps[5].waypoints[109].position_m.z=0.6816059472603038
+steps[5].waypoints[109].orientation_xyzw.x=-0.42123578790351646
+steps[5].waypoints[109].orientation_xyzw.y=0.684530609438921
+steps[5].waypoints[109].orientation_xyzw.z=-0.5097343943366143
+steps[5].waypoints[109].orientation_xyzw.w=-0.30683725810397955
+steps[5].waypoints[110].position_m.x=0.026808497565639054
+steps[5].waypoints[110].position_m.y=-1.6405525480644425
+steps[5].waypoints[110].position_m.z=0.6809611312388465
+steps[5].waypoints[110].orientation_xyzw.x=-0.4212358165104066
+steps[5].waypoints[110].orientation_xyzw.y=0.6845304159025104
+steps[5].waypoints[110].orientation_xyzw.z=-0.5097345159050434
+steps[5].waypoints[110].orientation_xyzw.w=-0.30683744864047896
+steps[5].waypoints[111].position_m.x=0.026317290634226425
+steps[5].waypoints[111].position_m.y=-1.6399357194381823
+steps[5].waypoints[111].position_m.z=0.680729389439641
+steps[5].waypoints[111].orientation_xyzw.x=-0.42123584511725903
+steps[5].waypoints[111].orientation_xyzw.y=0.6845302223660386
+steps[5].waypoints[111].orientation_xyzw.z=-0.5097346374734267
+steps[5].waypoints[111].orientation_xyzw.w=-0.30683763917695095
+steps[5].waypoints[112].position_m.x=0.02678581834891995
+steps[5].waypoints[112].position_m.y=-1.6393065867702303
+steps[5].waypoints[112].position_m.z=0.6809746238822064
+steps[5].waypoints[112].orientation_xyzw.x=-0.4212358737240739
+steps[5].waypoints[112].orientation_xyzw.y=0.6845300288295055
+steps[5].waypoints[112].orientation_xyzw.z=-0.5097347590417646
+steps[5].waypoints[112].orientation_xyzw.w=-0.30683782971339546
+steps[5].waypoints[113].position_m.x=0.028085500985750585
+steps[5].waypoints[113].position_m.y=-1.6386667984760954
+steps[5].waypoints[113].position_m.z=0.68163293118727
+steps[5].waypoints[113].orientation_xyzw.x=-0.4212359023308511
+steps[5].waypoints[113].orientation_xyzw.y=0.6845298352929114
+steps[5].waypoints[113].orientation_xyzw.z=-0.5097348806100569
+steps[5].waypoints[113].orientation_xyzw.w=-0.30683802024981266
+steps[5].waypoints[114].position_m.x=0.029865051468771026
+steps[5].waypoints[114].position_m.y=-1.6380208581401892
+steps[5].waypoints[114].position_m.z=0.6825297255600629
+steps[5].waypoints[114].orientation_xyzw.x=-0.42123593093759065
+steps[5].waypoints[114].orientation_xyzw.y=0.6845296417562561
+steps[5].waypoints[114].orientation_xyzw.z=-0.5097350021783036
+steps[5].waypoints[114].orientation_xyzw.w=-0.3068382107862023
+steps[5].waypoints[115].position_m.x=0.031644602413121614
+steps[5].waypoints[115].position_m.y=-1.6373749177858299
+steps[5].waypoints[115].position_m.z=0.6834265190041252
+steps[5].waypoints[115].orientation_xyzw.x=-0.42123595954429255
+steps[5].waypoints[115].orientation_xyzw.y=0.6845294482195395
+steps[5].waypoints[115].orientation_xyzw.z=-0.5097351237465048
+steps[5].waypoints[115].orientation_xyzw.w=-0.3068384013225647
+steps[5].waypoints[116].position_m.x=0.03294428618671656
+steps[5].waypoints[116].position_m.y=-1.6367351294462247
+steps[5].waypoints[116].position_m.z=0.6840848240207021
+steps[5].waypoints[116].orientation_xyzw.x=-0.42123598815095686
+steps[5].waypoints[116].orientation_xyzw.y=0.6845292546827619
+steps[5].waypoints[116].orientation_xyzw.z=-0.5097352453146605
+steps[5].waypoints[116].orientation_xyzw.w=-0.3068385918588995
+steps[5].waypoints[117].position_m.x=0.03341281507129641
+steps[5].waypoints[117].position_m.y=-1.6361059967314777
+steps[5].waypoints[117].position_m.z=0.6843300561081013
+steps[5].waypoints[117].orientation_xyzw.x=-0.42123601675758354
+steps[5].waypoints[117].orientation_xyzw.y=0.6845290611459232
+steps[5].waypoints[117].orientation_xyzw.z=-0.5097353668827705
+steps[5].waypoints[117].orientation_xyzw.w=-0.306838782395207
+steps[5].waypoints[118].position_m.x=0.032921608568091905
+steps[5].waypoints[118].position_m.y=-1.6354891680880894
+steps[5].waypoints[118].position_m.z=0.6840983134468451
+steps[5].waypoints[118].orientation_xyzw.x=-0.42123604536417253
+steps[5].waypoints[118].orientation_xyzw.y=0.6845288676090232
+steps[5].waypoints[118].orientation_xyzw.z=-0.5097354884508352
+steps[5].waypoints[118].orientation_xyzw.w=-0.30683897293148704
+steps[5].waypoints[119].position_m.x=0.03159924650043827
+steps[5].waypoints[119].position_m.y=-1.6348829950965764
+steps[5].waypoints[119].position_m.z=0.6834534992161692
+steps[5].waypoints[119].orientation_xyzw.x=-0.4212360739707239
+steps[5].waypoints[119].orientation_xyzw.y=0.6845286740720621
+steps[5].waypoints[119].orientation_xyzw.z=-0.5097356100188541
+steps[5].waypoints[119].orientation_xyzw.w=-0.3068391634677397
+steps[5].waypoints[120].position_m.x=0.029797016215756016
+steps[5].waypoints[120].position_m.y=-1.634282974161668
+steps[5].waypoints[120].position_m.z=0.6825701986643253
+steps[5].waypoints[120].orientation_xyzw.x=-0.4212361025772376
+steps[5].waypoints[120].orientation_xyzw.y=0.6845284805350397
+steps[5].waypoints[120].orientation_xyzw.z=-0.5097357315868276
+steps[5].waypoints[120].orientation_xyzw.w=-0.30683935400396484
+steps[5].waypoints[121].position_m.x=0.027994785469743867
+steps[5].waypoints[121].position_m.y=-1.6336829532452126
+steps[5].waypoints[121].position_m.z=0.6816868990412153
+steps[5].waypoints[121].orientation_xyzw.x=-0.4212361311837136
+steps[5].waypoints[121].orientation_xyzw.y=0.6845282869979562
+steps[5].waypoints[121].orientation_xyzw.z=-0.5097358531547556
+steps[5].waypoints[121].orientation_xyzw.w=-0.3068395445401626
+steps[5].waypoints[122].position_m.x=0.026672422265326505
+steps[5].waypoints[122].position_m.y=-1.63307678029917
+steps[5].waypoints[122].position_m.z=0.6810420870990335
+steps[5].waypoints[122].orientation_xyzw.x=-0.4212361597901521
+steps[5].waypoints[122].orientation_xyzw.y=0.6845280934608117
+steps[5].waypoints[122].orientation_xyzw.z=-0.5097359747226379
+steps[5].waypoints[122].orientation_xyzw.w=-0.306839735076333
+steps[5].waypoints[123].position_m.x=0.026181214592236268
+steps[5].waypoints[123].position_m.y=-1.6324599517025766
+steps[5].waypoints[123].position_m.z=0.6808103467929516
+steps[5].waypoints[123].orientation_xyzw.x=-0.4212361883965529
+steps[5].waypoints[123].orientation_xyzw.y=0.6845278999236057
+steps[5].waypoints[123].orientation_xyzw.z=-0.5097360962904747
+steps[5].waypoints[123].orientation_xyzw.w=-0.3068399256124759
+steps[5].waypoints[124].position_m.x=0.026649743048608204
+steps[5].waypoints[124].position_m.y=-1.631830819004958
+steps[5].waypoints[124].position_m.z=0.6810555797424044
+steps[5].waypoints[124].orientation_xyzw.x=-0.421236217002916
+steps[5].waypoints[124].orientation_xyzw.y=0.6845277063863388
+steps[5].waypoints[124].orientation_xyzw.z=-0.509736217858266
+steps[5].waypoints[124].orientation_xyzw.w=-0.30684011614859147
+steps[5].waypoints[125].position_m.x=0.027949427711740957
+steps[5].waypoints[125].position_m.y=-1.6311910306297714
+steps[5].waypoints[125].position_m.z=0.681713882968194
+steps[5].waypoints[125].orientation_xyzw.x=-0.42123624560924156
+steps[5].waypoints[125].orientation_xyzw.y=0.6845275128490106
+steps[5].waypoints[125].orientation_xyzw.z=-0.5097363394260116
+steps[5].waypoints[125].orientation_xyzw.w=-0.30684030668467954
+steps[5].waypoints[126].position_m.x=0.02972898096274097
+steps[5].waypoints[126].position_m.y=-1.6305450901831469
+steps[5].waypoints[126].position_m.z=0.6826106717685878
+steps[5].waypoints[126].orientation_xyzw.x=-0.42123627421552945
+steps[5].waypoints[126].orientation_xyzw.y=0.6845273193116215
+steps[5].waypoints[126].orientation_xyzw.z=-0.5097364609937118
+steps[5].waypoints[126].orientation_xyzw.w=-0.3068404972207403
+steps[5].waypoints[127].position_m.x=0.03150853467507063
+steps[5].waypoints[127].position_m.y=-1.6298991497180693
+steps[5].waypoints[127].position_m.z=0.6835074596402447
+steps[5].waypoints[127].orientation_xyzw.x=-0.42123630282177965
+steps[5].waypoints[127].orientation_xyzw.y=0.6845271257741709
+steps[5].waypoints[127].orientation_xyzw.z=-0.5097365825613663
+steps[5].waypoints[127].orientation_xyzw.w=-0.3068406877567735
+steps[5].waypoints[128].position_m.x=0.0328082204749665
+steps[5].waypoints[128].position_m.y=-1.6292593612974124
+steps[5].waypoints[128].position_m.z=0.6841657605775323
+steps[5].waypoints[128].orientation_xyzw.x=-0.42123633142799227
+steps[5].waypoints[128].orientation_xyzw.y=0.6845269322366592
+steps[5].waypoints[128].orientation_xyzw.z=-0.5097367041289754
+steps[5].waypoints[128].orientation_xyzw.w=-0.3068408782927794
+steps[5].waypoints[129].position_m.x=0.033276750101223586
+steps[5].waypoints[129].position_m.y=-1.6286302285529983
+steps[5].waypoints[129].position_m.z=0.6844109911718027
+steps[5].waypoints[129].orientation_xyzw.x=-0.4212363600341672
+steps[5].waypoints[129].orientation_xyzw.y=0.6845267386990864
+steps[5].waypoints[129].orientation_xyzw.z=-0.509736825696539
+steps[5].waypoints[129].orientation_xyzw.w=-0.3068410688287578
+steps[5].waypoints[130].position_m.x=0.032785542856341034
+steps[5].waypoints[130].position_m.y=-1.628013399939277
+steps[5].waypoints[130].position_m.z=0.6841792500036643
+steps[5].waypoints[130].orientation_xyzw.x=-0.4212363886403045
+steps[5].waypoints[130].orientation_xyzw.y=0.6845265451614524
+steps[5].waypoints[130].orientation_xyzw.z=-0.5097369472640569
+steps[5].waypoints[130].orientation_xyzw.w=-0.3068412593647088
+steps[5].waypoints[131].position_m.x=0.03146317876238637
+steps[5].waypoints[131].position_m.y=-1.6274072270288156
+steps[5].waypoints[131].position_m.z=0.683534439852276
+steps[5].waypoints[131].orientation_xyzw.x=-0.4212364172464042
+steps[5].waypoints[131].orientation_xyzw.y=0.6845263516237573
+steps[5].waypoints[131].orientation_xyzw.z=-0.5097370688315292
+steps[5].waypoints[131].orientation_xyzw.w=-0.30684144990063233
+steps[5].waypoints[132].position_m.x=0.02966094570972596
+steps[5].waypoints[132].position_m.y=-1.6268072062046257
+steps[5].waypoints[132].position_m.z=0.6826511448728503
+steps[5].waypoints[132].orientation_xyzw.x=-0.4212364458524662
+steps[5].waypoints[132].orientation_xyzw.y=0.684526158086001
+steps[5].waypoints[132].orientation_xyzw.z=-0.5097371903989562
+steps[5].waypoints[132].orientation_xyzw.w=-0.30684164043652856
+steps[5].waypoints[133].position_m.x=0.027858712195736077
+steps[5].waypoints[133].position_m.y=-1.6262071853988889
+steps[5].waypoints[133].position_m.z=0.6817678508221645
+steps[5].waypoints[133].orientation_xyzw.x=-0.4212364744584906
+steps[5].waypoints[133].orientation_xyzw.y=0.6845259645481835
+steps[5].waypoints[133].orientation_xyzw.z=-0.5097373119663375
+steps[5].waypoints[133].orientation_xyzw.w=-0.3068418309723973
+steps[5].waypoints[134].position_m.x=0.02653634696501885
+steps[5].waypoints[134].position_m.y=-1.6256010125338978
+steps[5].waypoints[134].position_m.z=0.681123042959286
+steps[5].waypoints[134].orientation_xyzw.x=-0.4212365030644773
+steps[5].waypoints[134].orientation_xyzw.y=0.6845257710103048
+steps[5].waypoints[134].orientation_xyzw.z=-0.5097374335336733
+steps[5].waypoints[134].orientation_xyzw.w=-0.30684202150823864
+steps[5].waypoints[135].position_m.x=0.02604513855025176
+steps[5].waypoints[135].position_m.y=-1.6249841839669716
+steps[5].waypoints[135].position_m.z=0.680891304146338
+steps[5].waypoints[135].orientation_xyzw.x=-0.42123653167042646
+steps[5].waypoints[135].orientation_xyzw.y=0.684525577472365
+steps[5].waypoints[135].orientation_xyzw.z=-0.5097375551009634
+steps[5].waypoints[135].orientation_xyzw.w=-0.30684221204405254
+steps[5].waypoints[136].position_m.x=0.026513667748301377
+steps[5].waypoints[136].position_m.y=-1.6243550512396858
+steps[5].waypoints[136].position_m.z=0.681136535602668
+steps[5].waypoints[136].orientation_xyzw.x=-0.42123656027633793
+steps[5].waypoints[136].orientation_xyzw.y=0.684525383934364
+steps[5].waypoints[136].orientation_xyzw.z=-0.5097376766682081
+steps[5].waypoints[136].orientation_xyzw.w=-0.3068424025798391
+steps[5].waypoints[137].position_m.x=0.02781335443773411
+steps[5].waypoints[137].position_m.y=-1.6237152627834477
+steps[5].waypoints[137].position_m.z=0.681794834749156
+steps[5].waypoints[137].orientation_xyzw.x=-0.4212365888822117
+steps[5].waypoints[137].orientation_xyzw.y=0.6845251903963019
+steps[5].waypoints[137].orientation_xyzw.z=-0.5097377982354073
+steps[5].waypoints[137].orientation_xyzw.w=-0.3068425931155981
+steps[5].waypoints[138].position_m.x=0.02959291045671086
+steps[5].waypoints[138].position_m.y=-1.6230693222261043
+steps[5].waypoints[138].position_m.z=0.6826916179771128
+steps[5].waypoints[138].orientation_xyzw.x=-0.4212366174880479
+steps[5].waypoints[138].orientation_xyzw.y=0.6845249968581786
+steps[5].waypoints[138].orientation_xyzw.z=-0.5097379198025609
+steps[5].waypoints[138].orientation_xyzw.w=-0.3068427836513297
+steps[5].waypoints[139].position_m.x=0.0313724669370168
+steps[5].waypoints[139].position_m.y=-1.6224233816503077
+steps[5].waypoints[139].position_m.z=0.6835884002763263
+steps[5].waypoints[139].orientation_xyzw.x=-0.4212366460938465
+steps[5].waypoints[139].orientation_xyzw.y=0.6845248033199941
+steps[5].waypoints[139].orientation_xyzw.z=-0.5097380413696688
+steps[5].waypoints[139].orientation_xyzw.w=-0.30684297418703393
+steps[5].waypoints[140].position_m.x=0.03267215476321156
+steps[5].waypoints[140].position_m.y=-1.6217835931485993
+steps[5].waypoints[140].position_m.z=0.6842466971342969
+steps[5].waypoints[140].orientation_xyzw.x=-0.42123667469960735
+steps[5].waypoints[140].orientation_xyzw.y=0.6845246097817484
+steps[5].waypoints[140].orientation_xyzw.z=-0.5097381629367312
+steps[5].waypoints[140].orientation_xyzw.w=-0.3068431647227108
+steps[5].waypoints[141].position_m.x=0.033140685131145105
+steps[5].waypoints[141].position_m.y=-1.621154460374518
+steps[5].waypoints[141].position_m.z=0.6844919262354284
+steps[5].waypoints[141].orientation_xyzw.x=-0.4212367033053306
+steps[5].waypoints[141].orientation_xyzw.y=0.6845244162434416
+steps[5].waypoints[141].orientation_xyzw.z=-0.5097382845037481
+steps[5].waypoints[141].orientation_xyzw.w=-0.30684335525836015
+steps[5].waypoints[142].position_m.x=0.03264947714458525
+steps[5].waypoints[142].position_m.y=-1.6205376317904636
+steps[5].waypoints[142].position_m.z=0.684260186560418
+steps[5].waypoints[142].orientation_xyzw.x=-0.4212367319110162
+steps[5].waypoints[142].orientation_xyzw.y=0.6845242227050737
+steps[5].waypoints[142].orientation_xyzw.z=-0.5097384060707196
+steps[5].waypoints[142].orientation_xyzw.w=-0.3068435457939821
+steps[5].waypoints[143].position_m.x=0.0313271110243316
+steps[5].waypoints[143].position_m.y=-1.619931458961054
+steps[5].waypoints[143].position_m.z=0.683615380488345
+steps[5].waypoints[143].orientation_xyzw.x=-0.42123676051666414
+steps[5].waypoints[143].orientation_xyzw.y=0.6845240291666446
+steps[5].waypoints[143].orientation_xyzw.z=-0.5097385276376454
+steps[5].waypoints[143].orientation_xyzw.w=-0.3068437363295766
+steps[5].waypoints[144].position_m.x=0.029524875203695854
+steps[5].waypoints[144].position_m.y=-1.6193314382475832
+steps[5].waypoints[144].position_m.z=0.6827320910813752
+steps[5].waypoints[144].orientation_xyzw.x=-0.4212367891222746
+steps[5].waypoints[144].orientation_xyzw.y=0.6845238356281542
+steps[5].waypoints[144].orientation_xyzw.z=-0.5097386492045257
+steps[5].waypoints[144].orientation_xyzw.w=-0.30684392686514383
+steps[5].waypoints[145].position_m.x=0.02772263892173116
+steps[5].waypoints[145].position_m.y=-1.6187314175525656
+steps[5].waypoints[145].position_m.z=0.6818488026031517
+steps[5].waypoints[145].orientation_xyzw.x=-0.4212368177278472
+steps[5].waypoints[145].orientation_xyzw.y=0.6845236420896027
+steps[5].waypoints[145].orientation_xyzw.z=-0.5097387707713603
+steps[5].waypoints[145].orientation_xyzw.w=-0.3068441174006835
+steps[5].waypoints[146].position_m.x=0.026400271664716098
+steps[5].waypoints[146].position_m.y=-1.6181252447686263
+steps[5].waypoints[146].position_m.z=0.6812039988196041
+steps[5].waypoints[146].orientation_xyzw.x=-0.42123684633338226
+steps[5].waypoints[146].orientation_xyzw.y=0.68452344855099
+steps[5].waypoints[146].orientation_xyzw.z=-0.5097388923381495
+steps[5].waypoints[146].orientation_xyzw.w=-0.30684430793619577
+steps[5].waypoints[147].position_m.x=0.025909062508272903
+steps[5].waypoints[147].position_m.y=-1.6175084162313673
+steps[5].waypoints[147].position_m.z=0.6809722614998
+steps[5].waypoints[147].orientation_xyzw.x=-0.42123687493887974
+steps[5].waypoints[147].orientation_xyzw.y=0.6845232550123163
+steps[5].waypoints[147].orientation_xyzw.z=-0.5097390139048932
+steps[5].waypoints[147].orientation_xyzw.w=-0.30684449847168066
+steps[5].waypoints[148].position_m.x=0.026377592447999417
+steps[5].waypoints[148].position_m.y=-1.6168792834744146
+steps[5].waypoints[148].position_m.z=0.6812174914629969
+steps[5].waypoints[148].orientation_xyzw.x=-0.42123690354433946
+steps[5].waypoints[148].orientation_xyzw.y=0.6845230614735813
+steps[5].waypoints[148].orientation_xyzw.z=-0.5097391354715912
+steps[5].waypoints[148].orientation_xyzw.w=-0.30684468900713807
+steps[5].waypoints[149].position_m.x=0.027677281163730135
+steps[5].waypoints[149].position_m.y=-1.6162394949371244
+steps[5].waypoints[149].position_m.z=0.6818757865301558
+steps[5].waypoints[149].orientation_xyzw.x=-0.4212369321497616
+steps[5].waypoints[149].orientation_xyzw.y=0.6845228679347852
+steps[5].waypoints[149].orientation_xyzw.z=-0.5097392570382436
+steps[5].waypoints[149].orientation_xyzw.w=-0.3068448795425681
+steps[5].waypoints[150].position_m.x=0.029456839950680807
+steps[5].waypoints[150].position_m.y=-1.615593554269062
+steps[5].waypoints[150].position_m.z=0.6827725641856377
+steps[5].waypoints[150].orientation_xyzw.x=-0.4212369607551461
+steps[5].waypoints[150].orientation_xyzw.y=0.684522674395928
+steps[5].waypoints[150].orientation_xyzw.z=-0.5097393786048506
+steps[5].waypoints[150].orientation_xyzw.w=-0.30684507007797074
+steps[5].waypoints[151].position_m.x=0.031236399198960187
+steps[5].waypoints[151].position_m.y=-1.6149476135825465
+steps[5].waypoints[151].position_m.z=0.6836693409123702
+steps[5].waypoints[151].orientation_xyzw.x=-0.42123698936049286
+steps[5].waypoints[151].orientation_xyzw.y=0.6845224808570094
+steps[5].waypoints[151].orientation_xyzw.z=-0.509739500171412
+steps[5].waypoints[151].orientation_xyzw.w=-0.3068452606133458
+steps[5].waypoints[152].position_m.x=0.0325360890514517
+steps[5].waypoints[152].position_m.y=-1.6143078249997858
+steps[5].waypoints[152].position_m.z=0.6843276336909959
+steps[5].waypoints[152].orientation_xyzw.x=-0.42123701796580215
+steps[5].waypoints[152].orientation_xyzw.y=0.6845222873180298
+steps[5].waypoints[152].orientation_xyzw.z=-0.509739621737928
+steps[5].waypoints[152].orientation_xyzw.w=-0.3068454511486936
+steps[5].waypoints[153].position_m.x=0.033004620161060975
+steps[5].waypoints[153].position_m.y=-1.6136786921960373
+steps[5].waypoints[153].position_m.z=0.6845728612989785
+steps[5].waypoints[153].orientation_xyzw.x=-0.42123704657107364
+steps[5].waypoints[153].orientation_xyzw.y=0.684522093778989
+steps[5].waypoints[153].orientation_xyzw.z=-0.5097397433043983
+steps[5].waypoints[153].orientation_xyzw.w=-0.30684564168401396
+steps[5].waypoints[154].position_m.x=0.0325134114328246
+steps[5].waypoints[154].position_m.y=-1.61306186364165
+steps[5].waypoints[154].position_m.z=0.684341123117106
+steps[5].waypoints[154].orientation_xyzw.x=-0.4212370751763076
+steps[5].waypoints[154].orientation_xyzw.y=0.684521900239887
+steps[5].waypoints[154].orientation_xyzw.z=-0.509739864870823
+steps[5].waypoints[154].orientation_xyzw.w=-0.3068458322193069
+steps[5].waypoints[155].position_m.x=0.031191043286274044
+steps[5].waypoints[155].position_m.y=-1.6124556908932925
+steps[5].waypoints[155].position_m.z=0.6836963211243763
+steps[5].waypoints[155].orientation_xyzw.x=-0.4212371037815039
+steps[5].waypoints[155].orientation_xyzw.y=0.6845217067007239
+steps[5].waypoints[155].orientation_xyzw.z=-0.5097399864372022
+steps[5].waypoints[155].orientation_xyzw.w=-0.3068460227545724
+steps[5].waypoints[156].position_m.x=0.02938880469766575
+steps[5].waypoints[156].position_m.y=-1.6118556702905407
+steps[5].waypoints[156].position_m.z=0.6828130372899002
+steps[5].waypoints[156].orientation_xyzw.x=-0.42123713238666255
+steps[5].waypoints[156].orientation_xyzw.y=0.6845215131614996
+steps[5].waypoints[156].orientation_xyzw.z=-0.509740108003536
+steps[5].waypoints[156].orientation_xyzw.w=-0.3068462132898105
+steps[5].waypoints[157].position_m.x=0.027586565647729027
+steps[5].waypoints[157].position_m.y=-1.6112556497062422
+steps[5].waypoints[157].position_m.z=0.6819297543841767
+steps[5].waypoints[157].orientation_xyzw.x=-0.42123716099178354
+steps[5].waypoints[157].orientation_xyzw.y=0.6845213196222141
+steps[5].waypoints[157].orientation_xyzw.z=-0.509740229569824
+steps[5].waypoints[157].orientation_xyzw.w=-0.30684640382502115
+steps[5].waypoints[158].position_m.x=0.026264196364418214
+steps[5].waypoints[158].position_m.y=-1.6106494770033555
+steps[5].waypoints[158].position_m.z=0.6812849546799877
+steps[5].waypoints[158].orientation_xyzw.x=-0.42123718959686696
+steps[5].waypoints[158].orientation_xyzw.y=0.6845211260828675
+steps[5].waypoints[158].orientation_xyzw.z=-0.5097403511360665
+steps[5].waypoints[158].orientation_xyzw.w=-0.3068465943602044
+steps[5].waypoints[159].position_m.x=0.025772986466299698
+steps[5].waypoints[159].position_m.y=-1.6100326484957637
+steps[5].waypoints[159].position_m.z=0.6810532188533377
+steps[5].waypoints[159].orientation_xyzw.x=-0.4212372182019126
+steps[5].waypoints[159].orientation_xyzw.y=0.6845209325434597
+steps[5].waypoints[159].orientation_xyzw.z=-0.5097404727022635
+steps[5].waypoints[159].orientation_xyzw.w=-0.30684678489536016
+steps[5].waypoints[160].position_m.x=0.026241517147702377
+steps[5].waypoints[160].position_m.y=-1.6094035157091438
+steps[5].waypoints[160].position_m.z=0.6812984473233915
+steps[5].waypoints[160].orientation_xyzw.x=-0.42123724680692076
+steps[5].waypoints[160].orientation_xyzw.y=0.6845207390039908
+steps[5].waypoints[160].orientation_xyzw.z=-0.509740594268415
+steps[5].waypoints[160].orientation_xyzw.w=-0.30684697543048856
+steps[5].waypoints[161].position_m.x=0.02754120788972894
+steps[5].waypoints[161].position_m.y=-1.6087637270908015
+steps[5].waypoints[161].position_m.z=0.6819567383111934
+steps[5].waypoints[161].orientation_xyzw.x=-0.42123727541189115
+steps[5].waypoints[161].orientation_xyzw.y=0.6845205454644606
+steps[5].waypoints[161].orientation_xyzw.z=-0.509740715834521
+steps[5].waypoints[161].orientation_xyzw.w=-0.3068471659655896
+steps[5].waypoints[162].position_m.x=0.029320769444650698
+steps[5].waypoints[162].position_m.y=-1.6081177863120195
+steps[5].waypoints[162].position_m.z=0.6828535103941626
+steps[5].waypoints[162].orientation_xyzw.x=-0.4212373040168239
+steps[5].waypoints[162].orientation_xyzw.y=0.6845203519248694
+steps[5].waypoints[162].orientation_xyzw.z=-0.5097408374005813
+steps[5].waypoints[162].orientation_xyzw.w=-0.3068473565006631
+steps[5].waypoints[163].position_m.x=0.0311003314609007
+steps[5].waypoints[163].position_m.y=-1.6074718455147843
+steps[5].waypoints[163].position_m.z=0.6837502815483761
+steps[5].waypoints[163].orientation_xyzw.x=-0.42123733262171914
+steps[5].waypoints[163].orientation_xyzw.y=0.684520158385217
+steps[5].waypoints[163].orientation_xyzw.z=-0.5097409589665961
+steps[5].waypoints[163].orientation_xyzw.w=-0.3068475470357092
+steps[5].waypoints[164].position_m.x=0.03240002333968697
+steps[5].waypoints[164].position_m.y=-1.6068320568509713
+steps[5].waypoints[164].position_m.z=0.6844085702476294
+steps[5].waypoints[164].orientation_xyzw.x=-0.4212373612265766
+steps[5].waypoints[164].orientation_xyzw.y=0.6845199648455034
+steps[5].waypoints[164].orientation_xyzw.z=-0.5097410805325654
+steps[5].waypoints[164].orientation_xyzw.w=-0.3068477375707279
+steps[5].waypoints[165].position_m.x=0.03286855519097119
+steps[5].waypoints[165].position_m.y=-1.6062029240175557
+steps[5].waypoints[165].position_m.z=0.6846537963624529
+steps[5].waypoints[165].orientation_xyzw.x=-0.42123738983139647
+steps[5].waypoints[165].orientation_xyzw.y=0.6845197713057285
+steps[5].waypoints[165].orientation_xyzw.z=-0.509741202098489
+steps[5].waypoints[165].orientation_xyzw.w=-0.3068479281057192
+steps[5].waypoints[166].position_m.x=0.032377345721059034
+steps[5].waypoints[166].position_m.y=-1.6055860954928356
+steps[5].waypoints[166].position_m.z=0.6844220596737287
+steps[5].waypoints[166].orientation_xyzw.x=-0.42123741843617873
+steps[5].waypoints[166].orientation_xyzw.y=0.6845195777658926
+steps[5].waypoints[166].orientation_xyzw.z=-0.5097413236643673
+steps[5].waypoints[166].orientation_xyzw.w=-0.30684811864068307
+steps[5].waypoints[167].position_m.x=0.03105497554821362
+steps[5].waypoints[167].position_m.y=-1.6049799228255304
+steps[5].waypoints[167].position_m.z=0.6837772617603697
+steps[5].waypoints[167].orientation_xyzw.x=-0.4212374470409233
+steps[5].waypoints[167].orientation_xyzw.y=0.6845193842259955
+steps[5].waypoints[167].orientation_xyzw.z=-0.5097414452301998
+steps[5].waypoints[167].orientation_xyzw.w=-0.3068483091756195
+steps[5].waypoints[168].position_m.x=0.029252734191635696
+steps[5].waypoints[168].position_m.y=-1.6043799023334984
+steps[5].waypoints[168].position_m.z=0.6828939834984251
+steps[5].waypoints[168].orientation_xyzw.x=-0.42123747564563024
+steps[5].waypoints[168].orientation_xyzw.y=0.6845191906860372
+steps[5].waypoints[168].orientation_xyzw.z=-0.5097415667959868
+steps[5].waypoints[168].orientation_xyzw.w=-0.3068484997105285
+steps[5].waypoints[169].position_m.x=0.027450492373729762
+steps[5].waypoints[169].position_m.y=-1.6037798818599198
+steps[5].waypoints[169].position_m.z=0.6820107061652395
+steps[5].waypoints[169].orientation_xyzw.x=-0.4212375042502996
+steps[5].waypoints[169].orientation_xyzw.y=0.6845189971460178
+steps[5].waypoints[169].orientation_xyzw.z=-0.5097416883617284
+steps[5].waypoints[169].orientation_xyzw.w=-0.3068486902454101
+steps[5].waypoints[170].position_m.x=0.026128121064125258
+steps[5].waypoints[170].position_m.y=-1.6031737092380853
+steps[5].waypoints[170].position_m.z=0.6813659105404369
+steps[5].waypoints[170].orientation_xyzw.x=-0.4212375328549312
+steps[5].waypoints[170].orientation_xyzw.y=0.6845188036059371
+steps[5].waypoints[170].orientation_xyzw.z=-0.5097418099274243
+steps[5].waypoints[170].orientation_xyzw.w=-0.3068488807802643
+steps[5].waypoints[171].position_m.x=0.025636910424332145
+steps[5].waypoints[171].position_m.y=-1.602556880760161
+steps[5].waypoints[171].position_m.z=0.6811341762069509
+steps[5].waypoints[171].orientation_xyzw.x=-0.42123756145952523
+steps[5].waypoints[171].orientation_xyzw.y=0.6845186100657953
+steps[5].waypoints[171].orientation_xyzw.z=-0.5097419314930747
+steps[5].waypoints[171].orientation_xyzw.w=-0.30684907131509104
+steps[5].waypoints[172].position_m.x=0.026105441847410205
+steps[5].waypoints[172].position_m.y=-1.6019277479438736
+steps[5].waypoints[172].position_m.z=0.6813794031838516
+steps[5].waypoints[172].orientation_xyzw.x=-0.4212375900640816
+steps[5].waypoints[172].orientation_xyzw.y=0.6845184165255925
+steps[5].waypoints[172].orientation_xyzw.z=-0.5097420530586796
+steps[5].waypoints[172].orientation_xyzw.w=-0.30684926184989036
+steps[5].waypoints[173].position_m.x=0.027405134615730617
+steps[5].waypoints[173].position_m.y=-1.6012879592444789
+steps[5].waypoints[173].position_m.z=0.6820376900922688
+steps[5].waypoints[173].orientation_xyzw.x=-0.4212376186686004
+steps[5].waypoints[173].orientation_xyzw.y=0.6845182229853284
+steps[5].waypoints[173].orientation_xyzw.z=-0.5097421746242388
+steps[5].waypoints[173].orientation_xyzw.w=-0.3068494523846622
+steps[5].waypoints[174].position_m.x=0.02918469893862064
+steps[5].waypoints[174].position_m.y=-1.6006420183549772
+steps[5].waypoints[174].position_m.z=0.6829344566026876
+steps[5].waypoints[174].orientation_xyzw.x=-0.4212376472730815
+steps[5].waypoints[174].orientation_xyzw.y=0.6845180294450032
+steps[5].waypoints[174].orientation_xyzw.z=-0.5097422961897526
+steps[5].waypoints[174].orientation_xyzw.w=-0.3068496429194068
+steps[5].waypoints[175].position_m.x=0.030964263722838437
+steps[5].waypoints[175].position_m.y=-1.599996077447022
+steps[5].waypoints[175].position_m.z=0.6838312221843442
+steps[5].waypoints[175].orientation_xyzw.x=-0.4212376758775249
+steps[5].waypoints[175].orientation_xyzw.y=0.6845178359046167
+steps[5].waypoints[175].orientation_xyzw.z=-0.5097424177552208
+steps[5].waypoints[175].orientation_xyzw.w=-0.3068498334541238
+steps[5].waypoints[176].position_m.x=0.032263957627917325
+steps[5].waypoints[176].position_m.y=-1.5993562887021564
+steps[5].waypoints[176].position_m.z=0.6844895068041974
+steps[5].waypoints[176].orientation_xyzw.x=-0.42123770448193076
+steps[5].waypoints[176].orientation_xyzw.y=0.6845176423641691
+steps[5].waypoints[176].orientation_xyzw.z=-0.5097425393206434
+steps[5].waypoints[176].orientation_xyzw.w=-0.30685002398881345
+steps[5].waypoints[177].position_m.x=0.03273249022087575
+steps[5].waypoints[177].position_m.y=-1.5987271558390734
+steps[5].waypoints[177].position_m.z=0.6847347314258516
+steps[5].waypoints[177].orientation_xyzw.x=-0.42123773308629897
+steps[5].waypoints[177].orientation_xyzw.y=0.6845174488236603
+steps[5].waypoints[177].orientation_xyzw.z=-0.5097426608860205
+steps[5].waypoints[177].orientation_xyzw.w=-0.30685021452347566
+steps[5].waypoints[178].position_m.x=0.032241280009288595
+steps[5].waypoints[178].position_m.y=-1.5981103273440207
+steps[5].waypoints[178].position_m.z=0.6845029962302858
+steps[5].waypoints[178].orientation_xyzw.x=-0.4212377616906295
+steps[5].waypoints[178].orientation_xyzw.y=0.6845172552830904
+steps[5].waypoints[178].orientation_xyzw.z=-0.5097427824513521
+steps[5].waypoints[178].orientation_xyzw.w=-0.3068504050581105
+steps[5].waypoints[179].position_m.x=0.030918907810150414
+steps[5].waypoints[179].position_m.y=-1.597504154757768
+steps[5].waypoints[179].position_m.z=0.6838582023963252
+steps[5].waypoints[179].orientation_xyzw.x=-0.42123779029492237
+steps[5].waypoints[179].orientation_xyzw.y=0.6845170617424593
+steps[5].waypoints[179].orientation_xyzw.z=-0.509742904016638
+steps[5].waypoints[179].orientation_xyzw.w=-0.3068505955927179
+steps[5].waypoints[180].position_m.x=0.02911666368560564
+steps[5].waypoints[180].position_m.y=-1.596904134376456
+steps[5].waypoints[180].position_m.z=0.6829749297069501
+steps[5].waypoints[180].orientation_xyzw.x=-0.4212378188991776
+steps[5].waypoints[180].orientation_xyzw.y=0.684516868201767
+steps[5].waypoints[180].orientation_xyzw.z=-0.5097430255818786
+steps[5].waypoints[180].orientation_xyzw.w=-0.3068507861272978
+steps[5].waypoints[181].position_m.x=0.02731441909973328
+steps[5].waypoints[181].position_m.y=-1.5963041140135972
+steps[5].waypoints[181].position_m.z=0.6820916579463402
+steps[5].waypoints[181].orientation_xyzw.x=-0.42123784750339527
+steps[5].waypoints[181].orientation_xyzw.y=0.6845166746610137
+steps[5].waypoints[181].orientation_xyzw.z=-0.5097431471470734
+steps[5].waypoints[181].orientation_xyzw.w=-0.30685097666185035
+steps[5].waypoints[182].position_m.x=0.025992045763837165
+steps[5].waypoints[182].position_m.y=-1.5956979414728156
+steps[5].waypoints[182].position_m.z=0.6814468664009516
+steps[5].waypoints[182].orientation_xyzw.x=-0.42123787610757524
+steps[5].waypoints[182].orientation_xyzw.y=0.6845164811201991
+steps[5].waypoints[182].orientation_xyzw.z=-0.5097432687122228
+steps[5].waypoints[182].orientation_xyzw.w=-0.3068511671963755
+steps[5].waypoints[183].position_m.x=0.025500834382370247
+steps[5].waypoints[183].position_m.y=-1.5950811130245586
+steps[5].waypoints[183].position_m.z=0.68121513356064
+steps[5].waypoints[183].orientation_xyzw.x=-0.4212379047117175
+steps[5].waypoints[183].orientation_xyzw.y=0.6845162875793234
+steps[5].waypoints[183].orientation_xyzw.z=-0.5097433902773265
+steps[5].waypoints[183].orientation_xyzw.w=-0.3068513577308732
+steps[5].waypoints[184].position_m.x=0.025969366547122955
+steps[5].waypoints[184].position_m.y=-1.5944519801786041
+steps[5].waypoints[184].position_m.z=0.6814603590443772
+steps[5].waypoints[184].orientation_xyzw.x=-0.42123793331582227
+steps[5].waypoints[184].orientation_xyzw.y=0.6845160940383865
+steps[5].waypoints[184].orientation_xyzw.z=-0.5097435118423848
+steps[5].waypoints[184].orientation_xyzw.w=-0.30685154826534344
+steps[5].waypoints[185].position_m.x=0.027269061341735075
+steps[5].waypoints[185].position_m.y=-1.5938121913981567
+steps[5].waypoints[185].position_m.z=0.6821186418733821
+steps[5].waypoints[185].orientation_xyzw.x=-0.42123796191988927
+steps[5].waypoints[185].orientation_xyzw.y=0.6845159004973883
+steps[5].waypoints[185].orientation_xyzw.z=-0.5097436334073974
+steps[5].waypoints[185].orientation_xyzw.w=-0.3068517387997862
+steps[5].waypoints[186].position_m.x=0.029048628432590533
+steps[5].waypoints[186].position_m.y=-1.5931662503979347
+steps[5].waypoints[186].position_m.z=0.6830154028112125
+steps[5].waypoints[186].orientation_xyzw.x=-0.4212379905239187
+steps[5].waypoints[186].orientation_xyzw.y=0.6845157069563292
+steps[5].waypoints[186].orientation_xyzw.z=-0.5097437549723646
+steps[5].waypoints[186].orientation_xyzw.w=-0.3068519293342017
+steps[5].waypoints[187].position_m.x=0.0308281959847733
+steps[5].waypoints[187].position_m.y=-1.5925203093792595
+steps[5].waypoints[187].position_m.z=0.6839121628202746
+steps[5].waypoints[187].orientation_xyzw.x=-0.4212380191279105
+steps[5].waypoints[187].orientation_xyzw.y=0.6845155134152088
+steps[5].waypoints[187].orientation_xyzw.z=-0.5097438765372861
+steps[5].waypoints[187].orientation_xyzw.w=-0.3068521198685897
+steps[5].waypoints[188].position_m.x=0.0321278919161428
+steps[5].waypoints[188].position_m.y=-1.5918805205533408
+steps[5].waypoints[188].position_m.z=0.6845704433606998
+steps[5].waypoints[188].orientation_xyzw.x=-0.4212380477318646
+steps[5].waypoints[188].orientation_xyzw.y=0.6845153198740273
+steps[5].waypoints[188].orientation_xyzw.z=-0.5097439981021622
+steps[5].waypoints[188].orientation_xyzw.w=-0.30685231040295025
+steps[5].waypoints[189].position_m.x=0.03259642525077466
+steps[5].waypoints[189].position_m.y=-1.5912513876605905
+steps[5].waypoints[189].position_m.z=0.6848156664891747
+steps[5].waypoints[189].orientation_xyzw.x=-0.4212380763357811
+steps[5].waypoints[189].orientation_xyzw.y=0.6845151263327844
+steps[5].waypoints[189].orientation_xyzw.z=-0.5097441196669926
+steps[5].waypoints[189].orientation_xyzw.w=-0.3068525009372834
+steps[5].waypoints[190].position_m.x=0.03210521429751323
+steps[5].waypoints[190].position_m.y=-1.590634559195205
+steps[5].waypoints[190].position_m.z=0.6845839327867772
+steps[5].waypoints[190].orientation_xyzw.x=-0.42123810493965996
+steps[5].waypoints[190].orientation_xyzw.y=0.6845149327914807
+steps[5].waypoints[190].orientation_xyzw.z=-0.5097442412317775
+steps[5].waypoints[190].orientation_xyzw.w=-0.30685269147158917
+steps[5].waypoints[191].position_m.x=0.030782840072084334
+steps[5].waypoints[191].position_m.y=-1.5900283866900051
+steps[5].waypoints[191].position_m.z=0.6839391430322429
+steps[5].waypoints[191].orientation_xyzw.x=-0.4212381335435011
+steps[5].waypoints[191].orientation_xyzw.y=0.6845147392501156
+steps[5].waypoints[191].orientation_xyzw.z=-0.5097443627965169
+steps[5].waypoints[191].orientation_xyzw.w=-0.30685288200586747
+steps[5].waypoints[192].position_m.x=0.02898059317957552
+steps[5].waypoints[192].position_m.y=-1.5894283664194135
+steps[5].waypoints[192].position_m.z=0.683055875915475
+steps[5].waypoints[192].orientation_xyzw.x=-0.4212381621473047
+steps[5].waypoints[192].orientation_xyzw.y=0.6845145457086894
+steps[5].waypoints[192].orientation_xyzw.z=-0.5097444843612108
+steps[5].waypoints[192].orientation_xyzw.w=-0.30685307254011834
+steps[5].lead_start.position_m.x=0.031157721276056816
+steps[5].lead_start.position_m.y=-1.7090406537320921
+steps[5].lead_start.position_m.z=0.6817607365790759
+steps[5].lead_start.orientation_xyzw.x=-0.4212326695268382
+steps[5].lead_start.orientation_xyzw.y=0.6845517045409693
+steps[5].lead_start.orientation_xyzw.z=-0.5097211431047998
+steps[5].lead_start.orientation_xyzw.w=-0.3068164894611816
+steps[5].usable_seam_start.position_m.x=0.031157721276056816
+steps[5].usable_seam_start.position_m.y=-1.7090406537320921
+steps[5].usable_seam_start.position_m.z=0.6817607365790759
+steps[5].usable_seam_start.orientation_xyzw.x=-0.4212326695268382
+steps[5].usable_seam_start.orientation_xyzw.y=0.6845517045409693
+steps[5].usable_seam_start.orientation_xyzw.z=-0.5097211431047998
+steps[5].usable_seam_start.orientation_xyzw.w=-0.3068164894611816
+steps[5].usable_seam_goal.position_m.x=0.02898059317957552
+steps[5].usable_seam_goal.position_m.y=-1.5894283664194135
+steps[5].usable_seam_goal.position_m.z=0.683055875915475
+steps[5].usable_seam_goal.orientation_xyzw.x=-0.4212381621473047
+steps[5].usable_seam_goal.orientation_xyzw.y=0.6845145457086894
+steps[5].usable_seam_goal.orientation_xyzw.z=-0.5097444843612108
+steps[5].usable_seam_goal.orientation_xyzw.w=-0.30685307254011834
+steps[5].lead_end.position_m.x=0.02898059317957552
+steps[5].lead_end.position_m.y=-1.5894283664194135
+steps[5].lead_end.position_m.z=0.683055875915475
+steps[5].lead_end.orientation_xyzw.x=-0.4212381621473047
+steps[5].lead_end.orientation_xyzw.y=0.6845145457086894
+steps[5].lead_end.orientation_xyzw.z=-0.5097444843612108
+steps[5].lead_end.orientation_xyzw.w=-0.30685307254011834
+steps[6].sequence_number=7
+steps[6].type=digital_weld
+steps[6].parallel_slot=5
+steps[6].duration=0.0
+steps[6].velocity_scale=0.3695263157894737
+steps[6].tcp_speed_m_s=0.026984929753774672
+steps[6].command=off
+steps[6].weld_scenario_id=weld-15379464266827
+steps[6].weld_scenario_stage=arc_off
+steps[6].path_to_seam_speed_factor=0.4146878475055882
+steps[6].trigger_before_goal=True
+steps[6].arc_off_delay_s=0.0
+steps[6].settings.current_a=220
+steps[6].settings.voltage_tenths=260
+steps[6].settings.voltage=26.0
+steps[6].settings.material=FE-SOLID
+steps[6].settings.diameter_mm=1.2
+steps[6].settings.mode=LSM
+steps[6].settings.gas=CO2 100%
+steps[6].settings.synergic=False
+steps[6].settings.correction=0.0
+steps[6].settings.hot_start_enabled=True
+steps[6].settings.hot_start_percent=5.0
+steps[6].settings.hot_start_hold_adjustment=0
+steps[6].settings.crater_enabled=False
+steps[6].settings.crater_percent=27.27272727272727
+steps[6].settings.crater_current_a=60.0
+steps[6].settings.crater_voltage_v=25.0
+steps[6].settings.crater_seconds=1.0
+steps[6].settings.wire_consumable_alpha_mm=0.0
+steps[6].settings.hot_start_current_a=231
+steps[7].sequence_number=8
+steps[7].type=motion
+steps[7].parallel_slot=6
+steps[7].duration=0.0
+steps[7].planning_group=right_manipulator
+steps[7].velocity_scale=0.3695263157894737
+steps[7].tcp_speed_m_s=0.0
+steps[7].interpolation_step=0.005
+steps[7].path_kind=weld_end_to_taught_wait_fixed_attitude
+steps[7].pose_name=weld_goal_wait
+steps[7].pose_label=5 · Weld goal wait pose
+steps[7].touch_guard=False
+steps[7].continue_after_touch=False
+steps[7].weld_scenario_id=weld-15379464266827
+steps[7].weld_scenario_stage=goal_wait
+steps[7].waypoint_count=1
+steps[7].waypoints[0].position_m.x=0.02894816753550461
+steps[7].waypoints[0].position_m.y=-1.589299100339434
+steps[7].waypoints[0].position_m.z=0.6873185127882666
+steps[7].waypoints[0].orientation_xyzw.x=-0.4212381621473047
+steps[7].waypoints[0].orientation_xyzw.y=0.6845145457086894
+steps[7].waypoints[0].orientation_xyzw.z=-0.5097444843612108
+steps[7].waypoints[0].orientation_xyzw.w=-0.30685307254011834
+steps[8].sequence_number=9
+steps[8].type=named_pose
+steps[8].parallel_slot=7
+steps[8].duration=0.0
+steps[8].planning_group=right_manipulator
+steps[8].velocity_scale=0.3695263157894737
+steps[8].tcp_speed_m_s=0.0
+steps[8].pose_name=weld_finish
+steps[8].pose_label=7 · Weld end pose
+steps[8].touch_guard=False
+steps[8].continue_after_touch=False
+steps[8].weld_scenario_id=weld-15379464266827
+steps[8].weld_scenario_stage=finish
+steps[8].target_tcp.position_m.x=0.02904971943048862
+steps[8].target_tcp.position_m.y=-1.5894499420784702
+steps[8].target_tcp.position_m.z=0.716369205132813
+steps[8].target_tcp.orientation_xyzw.x=-0.4211874360060486
+steps[8].target_tcp.orientation_xyzw.y=0.6845207085616676
+steps[8].target_tcp.orientation_xyzw.z=-0.5098032632062242
+steps[8].target_tcp.orientation_xyzw.w=-0.30681130377671645
+steps[8].joint_names[0]=right_manipulator_joint1
+steps[8].joint_names[1]=right_manipulator_joint2
+steps[8].joint_names[2]=right_manipulator_joint3
+steps[8].joint_names[3]=right_manipulator_joint4
+steps[8].joint_names[4]=right_manipulator_joint5
+steps[8].joint_names[5]=right_manipulator_joint6
+steps[8].joint_positions_rad[0]=5.18003314358377
+steps[8].joint_positions_rad[1]=1.2271124586429718
+steps[8].joint_positions_rad[2]=2.0171164259876577
+steps[8].joint_positions_rad[3]=3.587924071217187
+steps[8].joint_positions_rad[4]=1.3668870037171812
+steps[8].joint_positions_rad[5]=1.570894996913284
+steps[9].sequence_number=10
+steps[9].type=digital_output
+steps[9].parallel_slot=8
+steps[9].duration=0.0
+steps[9].port=0
+steps[9].value=True
+steps[9].weld_scenario_id=weld-15379464266827
+steps[9].weld_scenario_stage=touch_output_on
+hicomm_cyclic_period_ms=40.0
+arc_wait_recognition=True
+arc_wait_main_welding=True
+arc_wait_established=True
+arc_establishment_timeout_s=5.0
+
+[summary]
+rx_samples=459
+welding_samples=0
+wcr_seen=0
+current_a.min=None
+current_a.average=None
+current_a.max=None
+voltage_v.min=None
+voltage_v.average=None
+voltage_v.max=None
+wire_feed_m_min.min=None
+wire_feed_m_min.average=None
+wire_feed_m_min.max=None
+
+[production_metrics]
+arc_started_elapsed_s=None
+arc_completed_elapsed_s=None
+arc_on_time_s=0.0
+main_weld_arc_time_s=0.0
+crater_arc_time_s=0.0
+weld_motion_start_elapsed_s=0.07891616899905785
+weld_motion_complete_elapsed_s=18.37011097499999
+weld_motion_duration_s=18.29119480600093
+net_weld_arc_time_s=0.0
+wire_feed_average_m_min=0.0
+wire_consumable_base_mm=0.0
+wire_consumable_alpha_mm=0.0
+wire_consumable_mm=0.0
+wire_consumable_formula=integral(WFS*1000/60*dt)+alpha
+weld_motion_start_unix_time=1789553221.992141
+weld_motion_start_wall_time=2026-09-16 19:07:01.992
+weld_motion_complete_unix_time=1789553240.2833366
+weld_motion_complete_wall_time=2026-09-16 19:07:20.283
+
+[arc_off_control]
+
+[teaching_snapshot_yaml]
+robot_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.272090632984539
+    - 1.1319069796756747
+    - 2.106417676818249
+    - 3.6901007738119302
+    - 1.4686233526256796
+    - 1.4680081624138712
+  tcp_pose_world:
+    position_m:
+      x: 0.0593687026100857
+      y: -1.566580876666292
+      z: 0.8404797210507349
+    orientation_xyzw:
+      x: -0.435964943840794
+      y: 0.633785310019272
+      z: -0.5278153609885844
+      w: -0.36008567487496485
+weld_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.111201082049582
+    - 1.2219904009184224
+    - 1.8699643920617108
+    - 3.5370483733328584
+    - 1.2280996924590641
+    - 1.5031986404259603
+  tcp_pose_world:
+    position_m:
+      x: 0.03211587813862865
+      y: -1.7292014051809739
+      z: 0.7168392775681303
+    orientation_xyzw:
+      x: -0.4217018846382817
+      y: 0.6844048116959963
+      z: -0.5093506844611415
+      w: -0.3071147252393735
+weld_start_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1190877673017425
+    - 1.2564555670076283
+    - 1.8688746265436504
+    - 3.5404428384582736
+    - 1.2595273901669803
+    - 1.5180524214058773
+  tcp_pose_world:
+    position_m:
+      x: 0.031212466961125673
+      y: -1.7091327983089077
+      z: 0.6872469136320036
+    orientation_xyzw:
+      x: -0.4211740485252506
+      y: 0.6845358506649529
+      z: -0.5097955893494354
+      w: -0.3068086489705285
+weld_start:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1190835062439985
+    - 1.2628648636450677
+    - 1.8644929276021431
+    - 3.5402111434434365
+    - 1.2612511211825341
+    - 1.5187548301433857
+  tcp_pose_world:
+    position_m:
+      x: 0.031157721276056816
+      y: -1.7090406537320921
+      z: 0.6817607365790759
+    orientation_xyzw:
+      x: -0.4212326695268382
+      y: 0.6845517045409693
+      z: -0.5097211431047998
+      w: -0.3068164894611816
+weld_goal_wait:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.1800214256749735
+    - 1.2630736554745299
+    - 1.9929030985147118
+    - 3.5869293805500426
+    - 1.3774273958375511
+    - 1.5760057362032005
+  tcp_pose_world:
+    position_m:
+      x: 0.02894816753550461
+      y: -1.589299100339434
+      z: 0.6873185127882666
+    orientation_xyzw:
+      x: -0.421204911018874
+      y: 0.6845301132027344
+      z: -0.5097683613478978
+      w: -0.30682432240764973
+weld_end:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.180006511972869
+    - 1.268290788049995
+    - 1.9891022350069507
+    - 3.586807674088226
+    - 1.3786918647231208
+    - 1.5765183947130408
+  tcp_pose_world:
+    position_m:
+      x: 0.02898059317957552
+      y: -1.5894283664194135
+      z: 0.683055875915475
+    orientation_xyzw:
+      x: -0.4212381621473047
+      y: 0.6845145457086894
+      z: -0.5097444843612108
+      w: -0.30685307254011834
+weld_finish:
+  planning_group: right_manipulator
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.18003314358377
+    - 1.2271124586429718
+    - 2.0171164259876577
+    - 3.587924071217187
+    - 1.3668870037171812
+    - 1.570894996913284
+  tcp_pose_world:
+    position_m:
+      x: 0.02904971943048862
+      y: -1.5894499420784702
+      z: 0.716369205132813
+    orientation_xyzw:
+      x: -0.4211874360060486
+      y: 0.6845207085616676
+      z: -0.5098032632062242
+      w: -0.30681130377671645
+
+[touch_snapshot_yaml]
+{}
+
+[samples]
+elapsed_s raw0 state arc gas fwd wcr current_a voltage_v wire_feed_m_min set_current_a set_voltage_v error db collision
+0.009 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.036 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.135 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.159 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.194 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.235 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.273 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.310 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.353 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.391 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.429 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.470 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.513 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.551 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.590 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.631 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.670 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.709 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.749 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.830 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.871 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.909 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+0.988 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.069 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.159 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.193 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.229 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.269 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.309 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.348 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.389 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.434 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.479 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.508 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.548 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.592 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.633 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.673 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.711 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.748 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.789 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.831 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.868 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.950 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+1.991 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.031 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.072 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.155 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.198 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.272 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.352 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.393 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.430 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.474 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.510 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.592 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.630 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.669 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.708 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.752 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.797 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.830 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.873 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.912 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.951 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+2.994 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.031 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.069 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.111 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.152 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.195 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.235 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.271 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.309 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.351 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.390 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.429 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.472 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.511 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.593 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.632 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.673 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.715 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.750 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.789 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.828 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.873 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.913 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.951 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+3.993 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.035 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.068 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.117 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.152 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.192 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.280 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.350 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.389 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.430 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.470 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.508 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.590 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.628 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.670 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.710 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.755 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.791 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.828 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.947 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+4.988 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.030 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.068 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.108 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.148 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.188 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.228 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.270 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.351 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.393 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.432 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.477 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.509 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.551 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.600 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.631 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.671 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.709 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.750 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.791 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.835 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.873 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.911 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.952 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+5.995 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.073 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.111 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.151 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.192 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.272 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.351 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.392 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.434 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.471 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.513 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.550 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.592 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.629 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.668 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.709 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.749 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.791 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.832 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.909 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.949 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+6.990 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.069 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.148 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.191 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.230 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.271 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.350 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.390 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.430 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.471 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.515 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.553 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.594 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.633 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.674 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.711 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.749 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.789 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.830 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.909 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.949 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+7.992 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.040 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.076 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.114 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.152 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.198 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.271 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.315 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.352 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.397 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.429 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.475 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.512 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.551 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.591 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.632 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.674 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.710 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.753 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.793 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.832 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.870 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.912 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.958 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+8.997 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.030 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.075 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.153 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.198 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.235 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.271 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.310 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.350 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.391 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.433 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.471 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.513 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.550 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.588 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.631 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.669 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.708 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.750 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.788 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.830 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.909 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+9.989 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.028 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.072 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.148 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.190 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.230 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.270 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.312 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.350 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.396 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.430 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.478 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.512 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.558 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.593 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.643 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.670 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.711 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.747 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.789 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.831 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+10.988 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.028 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.068 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.149 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.189 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.231 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.269 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.308 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.348 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.389 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.428 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.472 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.508 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.589 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.629 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.669 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.710 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.754 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.791 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.828 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.871 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+11.989 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.069 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.109 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.150 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.188 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.227 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.267 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.348 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.391 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.432 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.469 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.508 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.551 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.593 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.629 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.668 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.710 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.752 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.834 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.872 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.950 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+12.989 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.069 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.110 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.151 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.190 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.269 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.351 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.393 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.432 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.472 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.509 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.552 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.588 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.636 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.670 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.711 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.757 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.830 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.910 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.950 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+13.991 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.030 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.068 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.109 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.150 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.188 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.229 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.276 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.307 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.348 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.388 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.428 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.472 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.509 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.552 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.598 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.637 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.669 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.709 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.749 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.831 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.868 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.909 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.949 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+14.990 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.068 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.111 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.149 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.192 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.232 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.270 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.352 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.392 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.431 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.472 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.510 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.550 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.590 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.632 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.676 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.710 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.751 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.831 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.871 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.915 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.950 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+15.998 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.029 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.070 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.108 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.149 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.190 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.231 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.269 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.348 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.388 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.429 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.470 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.509 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.590 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.630 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.668 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.708 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.748 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.791 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.828 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.869 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.908 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+16.989 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.030 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.071 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.107 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.148 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.188 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.228 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.267 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.310 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.352 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.390 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.430 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.473 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.509 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.549 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.590 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.630 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.668 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.709 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.756 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.790 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.829 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.871 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.911 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.948 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+17.991 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.028 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.071 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.111 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.155 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.191 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.229 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.270 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.311 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+18.351 0x00 idle 0 0 0 0 0 0.0 0.0 220 26.0 0 0 0
+
+[tcp_trajectory]
+elapsed_s x_m y_m z_m qx qy qz qw speed_m_s tf_stamp_s along_mm remaining_mm cross_track_mm progress waypoint phase
+0.0054 0.0311144 -1.7089207 0.6821264 -0.42137849 0.68454727 -0.50958756 -0.30684804 0.000000 1789553221.896242619 0.125 119.514 0.367 0.00000 -1 ACTUAL_TF
+0.0505 0.0311053 -1.7089310 0.6819383 -0.42137206 0.68454128 -0.50959790 -0.30685308 0.003371 1789553221.952206850 0.112 119.527 0.183 0.00000 -1 ACTUAL_TF
+0.1508 0.0311010 -1.7089415 0.6818535 -0.42136296 0.68453658 -0.50960985 -0.30685620 0.002815 1789553222.008588076 0.101 119.538 0.107 0.00000 -1 ACTUAL_TF
+0.1676 0.0311038 -1.7089574 0.6817971 -0.42135494 0.68453184 -0.50962164 -0.30685821 0.002286 1789553222.064437628 0.085 119.554 0.063 0.00000 -1 ACTUAL_TF
+0.2177 0.0311070 -1.7089628 0.6817728 -0.42135122 0.68452996 -0.50962741 -0.30685794 0.001734 1789553222.120472908 0.079 119.560 0.051 0.00000 -1 ACTUAL_TF
+0.2747 0.0311086 -1.7089735 0.6817597 -0.42134364 0.68452931 -0.50963494 -0.30685727 0.001305 1789553222.176426888 0.068 119.571 0.048 0.00000 -1 ACTUAL_TF
+0.3357 0.0311033 -1.7089735 0.6817485 -0.42133832 0.68453108 -0.50963691 -0.30685736 0.000980 1789553222.232353210 0.068 119.571 0.055 0.00000 -1 ACTUAL_TF
+0.3878 0.0311083 -1.7089774 0.6817405 -0.42133386 0.68453243 -0.50964123 -0.30685331 0.000741 1789553222.288356066 0.064 119.575 0.053 0.00000 -1 ACTUAL_TF
+0.4434 0.0311104 -1.7089804 0.6817403 -0.42132874 0.68453292 -0.50964559 -0.30685198 0.000538 1789553222.344374418 0.061 119.578 0.051 0.00000 -1 ACTUAL_TF
+0.5110 0.0311119 -1.7089824 0.6817386 -0.42132556 0.68453358 -0.50964803 -0.30685083 0.000393 1789553222.400636435 0.059 119.580 0.050 0.00000 -1 ACTUAL_TF
+0.5550 0.0311139 -1.7089844 0.6817369 -0.42132108 0.68453499 -0.50965109 -0.30684875 0.000293 1789553222.456406116 0.057 119.582 0.049 0.00000 -1 ACTUAL_TF
+0.6105 0.0311137 -1.7089823 0.6817338 -0.42131880 0.68453630 -0.50965205 -0.30684738 0.000225 1789553222.512278318 0.059 119.580 0.051 0.00000 -1 ACTUAL_TF
+0.6659 0.0311109 -1.7089844 0.6817353 -0.42131299 0.68453852 -0.50965456 -0.30684622 0.000178 1789553222.568289280 0.057 119.582 0.053 0.00000 -1 ACTUAL_TF
+0.7166 0.0311120 -1.7089844 0.6817353 -0.42131039 0.68454012 -0.50965573 -0.30684429 0.000130 1789553222.624328136 0.057 119.582 0.052 0.00000 -1 ACTUAL_TF
+0.7760 0.0311148 -1.7089894 0.6817382 -0.42130631 0.68454013 -0.50965965 -0.30684335 0.000126 1789553222.680273771 0.052 119.587 0.048 0.00000 -1 ACTUAL_TF
+0.8351 0.0311163 -1.7089914 0.6817365 -0.42130310 0.68454075 -0.50966214 -0.30684223 0.000104 1789553222.736332655 0.050 119.589 0.048 0.00000 -1 ACTUAL_TF
+0.8905 0.0311174 -1.7089914 0.6817365 -0.42130050 0.68454235 -0.50966331 -0.30684029 0.000079 1789553222.792534113 0.050 119.589 0.047 0.00000 -1 ACTUAL_TF
+0.9448 0.0311191 -1.7089924 0.6817379 -0.42129604 0.68454380 -0.50966632 -0.30683819 0.000068 1789553222.848315716 0.049 119.590 0.044 0.00000 -1 ACTUAL_TF
+1.0003 0.0311202 -1.7089923 0.6817379 -0.42129345 0.68454539 -0.50966749 -0.30683625 0.000054 1789553222.904338598 0.049 119.590 0.043 0.00000 -1 ACTUAL_TF
+1.0561 0.0311230 -1.7089974 0.6817409 -0.42128934 0.68454537 -0.50967146 -0.30683534 0.000072 1789553222.960335732 0.044 119.595 0.040 0.00000 -1 ACTUAL_TF
+1.1121 0.0311241 -1.7089973 0.6817409 -0.42128674 0.68454697 -0.50967262 -0.30683341 0.000056 1789553223.016229153 0.044 119.595 0.039 0.00000 -1 ACTUAL_TF
+1.1769 0.0311252 -1.7089984 0.6817424 -0.42128349 0.68454762 -0.50967513 -0.30683225 0.000051 1789553223.072497129 0.043 119.596 0.037 0.00000 -1 ACTUAL_TF
+1.2231 0.0311257 -1.7089984 0.6817424 -0.42128221 0.68454841 -0.50967571 -0.30683130 0.000039 1789553223.128350973 0.043 119.596 0.036 0.00000 -1 ACTUAL_TF
+1.2821 0.0311049 -1.7090005 0.6817316 -0.42129173 0.68454347 -0.50967838 -0.30682480 0.000153 1789553223.184339046 0.041 119.598 0.060 0.00000 -1 ACTUAL_TF
+1.3354 0.0305727 -1.7087466 0.6813914 -0.42130709 0.68453964 -0.50967800 -0.30681290 0.003762 1789553223.240216970 0.301 119.339 0.689 0.00000 -1 ACTUAL_TF
+1.3915 0.0297221 -1.7082967 0.6809447 -0.42133389 0.68454036 -0.50965389 -0.30681454 0.008319 1789553223.296200275 0.761 118.878 1.644 0.00000 -1 ACTUAL_TF
+1.4501 0.0287788 -1.7079095 0.6805643 -0.42127985 0.68455865 -0.50966101 -0.30683611 0.011652 1789553223.352214098 1.161 118.478 2.650 0.00000 -1 ACTUAL_TF
+1.5007 0.0283487 -1.7076167 0.6803137 -0.42129828 0.68455708 -0.50965559 -0.30682331 0.011249 1789553223.408237696 1.459 118.180 3.144 0.00000 -1 ACTUAL_TF
+1.5583 0.0280147 -1.7074462 0.6801728 -0.42128239 0.68454946 -0.50968157 -0.30681897 0.010020 1789553223.464253426 1.634 118.005 3.503 0.00000 -1 ACTUAL_TF
+1.6165 0.0278360 -1.7073596 0.6800909 -0.42127266 0.68456108 -0.50967709 -0.30681385 0.008164 1789553223.520281792 1.723 117.916 3.699 0.00000 -1 ACTUAL_TF
+1.6721 0.0277292 -1.7072292 0.6800649 -0.42125626 0.68457575 -0.50966488 -0.30682392 0.006628 1789553223.576263428 1.855 117.784 3.804 0.00000 -1 ACTUAL_TF
+1.7330 0.0278054 -1.7068586 0.6800105 -0.42123908 0.68463174 -0.50958881 -0.30684893 0.006686 1789553223.632311344 2.224 117.415 3.757 0.00000 -1 ACTUAL_TF
+1.7889 0.0287323 -1.7060610 0.6801595 -0.42132705 0.68466661 -0.50949088 -0.30681295 0.011284 1789553223.688271523 3.006 116.633 2.879 0.00000 -1 ACTUAL_TF
+1.8371 0.0302317 -1.7053467 0.6808651 -0.42133120 0.68465779 -0.50950804 -0.30679845 0.017574 1789553223.744222164 3.700 115.939 1.270 0.00000 -1 ACTUAL_TF
+1.8940 0.0314007 -1.7047145 0.6815443 -0.42129298 0.68467833 -0.50949984 -0.30681871 0.020295 1789553223.800241947 4.318 115.321 0.416 0.00000 -1 ACTUAL_TF
+1.9515 0.0326181 -1.7041020 0.6821987 -0.42129316 0.68466873 -0.50951714 -0.30681118 0.022307 1789553223.856230497 4.916 114.723 1.597 0.00000 -1 ACTUAL_TF
+2.0117 0.0333359 -1.7037066 0.6825300 -0.42133043 0.68464687 -0.50952873 -0.30678950 0.020350 1789553223.912235737 5.302 114.338 2.384 0.00000 -1 ACTUAL_TF
+2.0665 0.0337544 -1.7034516 0.6827442 -0.42131979 0.68465055 -0.50952439 -0.30680312 0.017109 1789553223.968258858 5.551 114.088 2.852 0.00000 -1 ACTUAL_TF
+2.1267 0.0339673 -1.7033373 0.6828964 -0.42130239 0.68465121 -0.50952994 -0.30681633 0.013505 1789553224.024301052 5.663 113.976 3.105 0.00000 -1 ACTUAL_TF
+2.1769 0.0341458 -1.7032194 0.6829707 -0.42131835 0.68464059 -0.50953382 -0.30681166 0.010666 1789553224.080332279 5.779 113.860 3.299 0.00000 -1 ACTUAL_TF
+2.2320 0.0340647 -1.7029963 0.6830067 -0.42133659 0.68460098 -0.50957012 -0.30681472 0.008754 1789553224.136261940 6.004 113.636 3.240 0.00000 -1 ACTUAL_TF
+2.2926 0.0337266 -1.7028580 0.6831212 -0.42128408 0.68450401 -0.50974712 -0.30680917 0.008178 1789553224.192273617 6.149 113.490 2.977 0.00000 -1 ACTUAL_TF
+2.3436 0.0326111 -1.7024381 0.6827682 -0.42123957 0.68444878 -0.50985082 -0.30682119 0.012386 1789553224.248255968 6.586 113.054 1.831 0.00000 -1 ACTUAL_TF
+2.4015 0.0312467 -1.7017550 0.6820486 -0.42125288 0.68451391 -0.50975248 -0.30682099 0.017670 1789553224.304493189 7.285 112.354 0.305 0.00000 -1 ACTUAL_TF
+2.4533 0.0298438 -1.7011106 0.6813599 -0.42123669 0.68451178 -0.50975737 -0.30683986 0.021470 1789553224.360216618 7.948 111.691 1.267 0.00000 -1 ACTUAL_TF
+2.5111 0.0290019 -1.7006653 0.6809690 -0.42123710 0.68449692 -0.50977875 -0.30683692 0.020540 1789553224.416255474 8.404 111.235 2.189 0.00000 -1 ACTUAL_TF
+2.5669 0.0283762 -1.7003152 0.6806729 -0.42123239 0.68448473 -0.50979930 -0.30683645 0.018532 1789553224.472275019 8.762 110.877 2.877 0.00000 -1 ACTUAL_TF
+2.6276 0.0280696 -1.7001853 0.6805593 -0.42121232 0.68446937 -0.50983417 -0.30684032 0.014860 1789553224.528202534 8.897 110.743 3.201 0.00000 -1 ACTUAL_TF
+2.6857 0.0278402 -1.7000699 0.6804546 -0.42120330 0.68447342 -0.50983717 -0.30683869 0.011887 1789553224.584246159 9.015 110.624 3.452 0.00000 -1 ACTUAL_TF
+2.7475 0.0277079 -1.6999425 0.6804127 -0.42118069 0.68449293 -0.50981991 -0.30685488 0.009330 1789553224.640241146 9.144 110.495 3.588 0.00000 -1 ACTUAL_TF
+2.7974 0.0278319 -1.6995620 0.6803457 -0.42119667 0.68454149 -0.50973649 -0.30686319 0.008706 1789553224.696204901 9.522 110.117 3.499 0.00000 -1 ACTUAL_TF
+2.8577 0.0286631 -1.6987274 0.6804395 -0.42128398 0.68459354 -0.50960757 -0.30684135 0.012426 1789553224.752191305 10.342 109.297 2.716 0.00000 -1 ACTUAL_TF
+2.9068 0.0297746 -1.6981641 0.6810587 -0.42123437 0.68461474 -0.50960346 -0.30686898 0.016155 1789553224.808174372 10.892 108.747 1.441 0.00000 -1 ACTUAL_TF
+2.9598 0.0314465 -1.6973516 0.6819009 -0.42128765 0.68457641 -0.50963743 -0.30682494 0.022233 1789553224.864213228 11.683 107.956 0.502 0.00000 -1 ACTUAL_TF
+3.0262 0.0323834 -1.6968368 0.6824129 -0.42125365 0.68459757 -0.50962228 -0.30684958 0.021915 1789553224.920197010 12.186 107.453 1.538 0.00000 -1 ACTUAL_TF
+3.0772 0.0331991 -1.6963491 0.6827744 -0.42127681 0.68460028 -0.50960684 -0.30683738 0.020792 1789553224.976153135 12.663 106.977 2.435 0.00000 -1 ACTUAL_TF
+3.1304 0.0336923 -1.6960821 0.6830227 -0.42128110 0.68459603 -0.50961029 -0.30683523 0.017832 1789553225.032289743 12.923 106.716 2.989 0.00000 -1 ACTUAL_TF
+3.1874 0.0339475 -1.6959448 0.6831399 -0.42128909 0.68459217 -0.50961368 -0.30682724 0.014159 1789553225.088224649 13.057 106.582 3.271 0.00000 -1 ACTUAL_TF
+3.2468 0.0341113 -1.6958353 0.6832177 -0.42129522 0.68459035 -0.50961318 -0.30682372 0.011044 1789553225.144344807 13.164 106.475 3.453 0.00000 -1 ACTUAL_TF
+3.2952 0.0340831 -1.6956575 0.6832398 -0.42129269 0.68457773 -0.50964167 -0.30680805 0.008703 1789553225.200334787 13.343 106.296 3.438 0.00000 -1 ACTUAL_TF
+3.3526 0.0336762 -1.6954300 0.6833002 -0.42125039 0.68452174 -0.50976221 -0.30679079 0.008615 1789553225.256229401 13.578 106.061 3.097 0.00000 -1 ACTUAL_TF
+3.4109 0.0328047 -1.6951124 0.6830302 -0.42121476 0.68447659 -0.50985815 -0.30678102 0.011201 1789553225.312275887 13.909 105.730 2.205 0.00000 -1 ACTUAL_TF
+3.4699 0.0312375 -1.6943891 0.6822811 -0.42123590 0.68448114 -0.50981821 -0.30680820 0.017925 1789553225.368255377 14.652 104.987 0.501 0.00000 -1 ACTUAL_TF
+3.5210 0.0299984 -1.6938307 0.6816787 -0.42119223 0.68449909 -0.50981714 -0.30682990 0.020508 1789553225.424280643 15.227 104.412 0.916 0.00000 -1 ACTUAL_TF
+3.5853 0.0289788 -1.6932388 0.6811492 -0.42122928 0.68448306 -0.50981130 -0.30682452 0.021290 1789553225.480191469 15.831 103.808 2.047 0.00000 -1 ACTUAL_TF
+3.6428 0.0283223 -1.6928798 0.6808257 -0.42122570 0.68447925 -0.50982320 -0.30681815 0.019266 1789553225.536239386 16.199 103.440 2.773 0.00000 -1 ACTUAL_TF
+3.6911 0.0279632 -1.6926946 0.6806326 -0.42122536 0.68449855 -0.50979856 -0.30681649 0.015884 1789553225.592290640 16.388 103.251 3.177 0.00000 -1 ACTUAL_TF
+3.7435 0.0277355 -1.6925678 0.6805221 -0.42122325 0.68450215 -0.50979905 -0.30681054 0.012634 1789553225.648308754 16.518 103.121 3.429 0.00000 -1 ACTUAL_TF
+3.8031 0.0276550 -1.6924859 0.6805026 -0.42121339 0.68450058 -0.50980581 -0.30681637 0.009468 1789553225.704293966 16.601 103.038 3.509 0.00000 -1 ACTUAL_TF
+3.8595 0.0276760 -1.6920599 0.6804257 -0.42120231 0.68457669 -0.50969306 -0.30684907 0.008950 1789553225.760275364 17.026 102.613 3.517 0.00000 -1 ACTUAL_TF
+3.9180 0.0283214 -1.6914130 0.6804600 -0.42128127 0.68460948 -0.50959840 -0.30682473 0.011166 1789553225.816250324 17.661 101.978 2.924 0.00000 -1 ACTUAL_TF
+3.9677 0.0296834 -1.6906713 0.6811769 -0.42124687 0.68463128 -0.50958029 -0.30685342 0.016958 1789553225.872318745 18.386 101.253 1.383 0.00000 -1 ACTUAL_TF
+4.0249 0.0312401 -1.6899045 0.6819792 -0.42126209 0.68461173 -0.50960137 -0.30684111 0.022110 1789553225.928331852 19.133 100.506 0.431 0.00000 -1 ACTUAL_TF
+4.0845 0.0323505 -1.6893482 0.6825311 -0.42130495 0.68458429 -0.50962303 -0.30680751 0.022763 1789553225.984295368 19.675 99.964 1.648 0.00000 -1 ACTUAL_TF
+4.1360 0.0331038 -1.6888905 0.6828825 -0.42129002 0.68460561 -0.50959901 -0.30682035 0.021022 1789553226.040242910 20.122 99.517 2.483 0.00000 -1 ACTUAL_TF
+4.1947 0.0335045 -1.6886491 0.6830908 -0.42128687 0.68461027 -0.50959465 -0.30682153 0.017457 1789553226.096269131 20.359 99.280 2.935 0.00000 -1 ACTUAL_TF
+4.2531 0.0338147 -1.6884735 0.6832471 -0.42129056 0.68460857 -0.50959644 -0.30681728 0.014305 1789553226.152269363 20.530 99.109 3.284 0.00000 -1 ACTUAL_TF
+4.3034 0.0339718 -1.6883936 0.6833177 -0.42129548 0.68460252 -0.50960327 -0.30681268 0.011030 1789553226.208311319 20.608 99.031 3.457 0.00000 -1 ACTUAL_TF
+4.3653 0.0339834 -1.6882120 0.6833602 -0.42129623 0.68457708 -0.50964719 -0.30679546 0.008724 1789553226.264201164 20.790 98.849 3.487 0.00000 -1 ACTUAL_TF
+4.4243 0.0336835 -1.6880290 0.6834389 -0.42125988 0.68451796 -0.50975744 -0.30679411 0.008033 1789553226.320266962 20.979 98.660 3.250 0.00000 -1 ACTUAL_TF
+4.4761 0.0325827 -1.6876334 0.6831251 -0.42118799 0.68448662 -0.50983869 -0.30682773 0.012114 1789553226.376240730 21.391 98.248 2.139 0.00000 -1 ACTUAL_TF
+4.5333 0.0310904 -1.6869603 0.6823895 -0.42118747 0.68449088 -0.50983472 -0.30682553 0.018091 1789553226.432259321 22.083 97.556 0.514 0.00000 -1 ACTUAL_TF
+4.5842 0.0299889 -1.6863368 0.6818070 -0.42122429 0.68448361 -0.50983319 -0.30679376 0.020123 1789553226.488296270 22.721 96.919 0.781 0.00000 -1 ACTUAL_TF
+4.6413 0.0288293 -1.6857300 0.6812154 -0.42120027 0.68451718 -0.50979686 -0.30681220 0.021781 1789553226.544291258 23.342 96.297 2.064 0.00000 -1 ACTUAL_TF
+4.6963 0.0282814 -1.6854632 0.6809727 -0.42119882 0.68448677 -0.50984363 -0.30680431 0.018755 1789553226.600399494 23.616 96.023 2.660 0.00000 -1 ACTUAL_TF
+4.7531 0.0278399 -1.6852458 0.6807703 -0.42119049 0.68448855 -0.50984083 -0.30681644 0.015980 1789553226.656369925 23.839 95.800 3.143 0.00000 -1 ACTUAL_TF
+4.8107 0.0276048 -1.6851389 0.6806732 -0.42118868 0.68449008 -0.50983212 -0.30682996 0.012664 1789553226.712374449 23.949 95.690 3.396 0.00000 -1 ACTUAL_TF
+4.8678 0.0274889 -1.6850305 0.6806233 -0.42118477 0.68449030 -0.50983178 -0.30683542 0.009756 1789553226.768371105 24.059 95.580 3.521 0.00000 -1 ACTUAL_TF
+4.9188 0.0275693 -1.6846403 0.6805707 -0.42118741 0.68453847 -0.50975020 -0.30685987 0.008984 1789553226.824318409 24.447 95.192 3.464 0.00000 -1 ACTUAL_TF
+4.9756 0.0281599 -1.6839707 0.6806216 -0.42126416 0.68457729 -0.50964433 -0.30684378 0.011085 1789553226.880253553 25.107 94.533 2.907 0.00000 -1 ACTUAL_TF
+5.0308 0.0295033 -1.6832655 0.6812875 -0.42122831 0.68459411 -0.50963166 -0.30687650 0.016632 1789553226.936281204 25.794 93.845 1.404 0.00000 -1 ACTUAL_TF
+5.0868 0.0308226 -1.6826353 0.6820082 -0.42122097 0.68457816 -0.50965569 -0.30688223 0.020377 1789553226.992265463 26.408 93.231 0.150 0.00000 -1 ACTUAL_TF
+5.1424 0.0321599 -1.6819595 0.6826586 -0.42124584 0.68455962 -0.50967432 -0.30685855 0.023017 1789553227.048251390 27.067 92.573 1.613 0.00000 -1 ACTUAL_TF
+5.1980 0.0329126 -1.6815281 0.6829859 -0.42127698 0.68455440 -0.50966975 -0.30683502 0.021064 1789553227.104421139 27.488 92.151 2.439 0.00000 -1 ACTUAL_TF
+5.2647 0.0333765 -1.6812225 0.6832334 -0.42126205 0.68457433 -0.50964936 -0.30684493 0.018004 1789553227.160403967 27.788 91.852 2.966 0.00000 -1 ACTUAL_TF
+5.3125 0.0336069 -1.6810622 0.6833670 -0.42125688 0.68458407 -0.50963829 -0.30684868 0.014270 1789553227.216325045 27.945 91.694 3.233 0.00000 -1 ACTUAL_TF
+5.3748 0.0338056 -1.6809533 0.6834610 -0.42126302 0.68458220 -0.50964033 -0.30684101 0.011302 1789553227.272367239 28.051 91.588 3.454 0.00000 -1 ACTUAL_TF
+5.4272 0.0337935 -1.6807456 0.6834861 -0.42128086 0.68456576 -0.50965733 -0.30682497 0.009033 1789553227.328434944 28.259 91.380 3.455 0.00000 -1 ACTUAL_TF
+5.4879 0.0335474 -1.6806109 0.6835942 -0.42123941 0.68448328 -0.50980718 -0.30681694 0.007937 1789553227.384338379 28.400 91.239 3.283 0.00000 -1 ACTUAL_TF
+5.5414 0.0325308 -1.6801757 0.6832490 -0.42122570 0.68444469 -0.50986927 -0.30681866 0.011766 1789553227.440299988 28.850 90.789 2.233 0.00000 -1 ACTUAL_TF
+5.5993 0.0312691 -1.6796250 0.6826594 -0.42119994 0.68447155 -0.50984644 -0.30683208 0.016268 1789553227.496238708 29.417 90.222 0.869 0.00000 -1 ACTUAL_TF
+5.6507 0.0299151 -1.6789262 0.6819736 -0.42121439 0.68444244 -0.50987576 -0.30682845 0.020331 1789553227.552289009 30.133 89.506 0.704 0.00000 -1 ACTUAL_TF
+5.7048 0.0288820 -1.6783923 0.6814504 -0.42120930 0.68445233 -0.50985893 -0.30684133 0.021057 1789553227.608337164 30.680 88.960 1.834 0.00000 -1 ACTUAL_TF
+5.7663 0.0281635 -1.6780139 0.6810870 -0.42120037 0.68446875 -0.50985216 -0.30682820 0.019505 1789553227.664355993 31.067 88.572 2.631 0.00000 -1 ACTUAL_TF
+5.8174 0.0276946 -1.6777694 0.6808507 -0.42119183 0.68448994 -0.50983260 -0.30682517 0.016753 1789553227.720402956 31.317 88.322 3.152 0.00000 -1 ACTUAL_TF
+5.8746 0.0275100 -1.6776740 0.6807601 -0.42119235 0.68447992 -0.50984573 -0.30682500 0.012940 1789553227.776495218 31.415 88.224 3.356 0.00000 -1 ACTUAL_TF
+5.9344 0.0273813 -1.6775578 0.6806950 -0.42118792 0.68449777 -0.50982745 -0.30682165 0.010052 1789553227.832403421 31.533 88.106 3.498 0.00000 -1 ACTUAL_TF
+5.9879 0.0273464 -1.6773015 0.6806692 -0.42115801 0.68454292 -0.50976997 -0.30685745 0.008431 1789553227.888307095 31.790 87.850 3.538 0.00000 -1 ACTUAL_TF
+6.0422 0.0280402 -1.6764816 0.6807029 -0.42125668 0.68459571 -0.50963188 -0.30683363 0.011648 1789553227.944408178 32.597 87.042 2.892 0.00000 -1 ACTUAL_TF
+6.0973 0.0291223 -1.6758995 0.6812112 -0.42124003 0.68460718 -0.50961606 -0.30685716 0.015282 1789553228.000370026 33.165 86.474 1.696 0.00000 -1 ACTUAL_TF
+6.1532 0.0307904 -1.6751027 0.6820905 -0.42127734 0.68456209 -0.50965905 -0.30683513 0.021586 1789553228.056770563 33.941 85.699 0.253 0.00000 -1 ACTUAL_TF
+6.2149 0.0318398 -1.6745757 0.6826538 -0.42123939 0.68457100 -0.50966725 -0.30685373 0.022146 1789553228.112300158 34.454 85.185 1.409 0.00000 -1 ACTUAL_TF
+6.2672 0.0327310 -1.6740080 0.6830447 -0.42126207 0.68458369 -0.50964434 -0.30683234 0.021542 1789553228.168261290 35.010 84.629 2.389 0.00000 -1 ACTUAL_TF
+6.3222 0.0332609 -1.6737248 0.6833117 -0.42125665 0.68458594 -0.50964615 -0.30683176 0.018597 1789553228.224346638 35.286 84.353 2.984 0.00000 -1 ACTUAL_TF
+6.3735 0.0335453 -1.6735661 0.6834497 -0.42126866 0.68458112 -0.50964822 -0.30682258 0.014913 1789553228.280337811 35.441 84.198 3.302 0.00000 -1 ACTUAL_TF
+6.4366 0.0337164 -1.6734627 0.6835440 -0.42126618 0.68458430 -0.50964607 -0.30682247 0.011624 1789553228.336282492 35.543 84.096 3.498 0.00000 -1 ACTUAL_TF
+6.4908 0.0337076 -1.6733230 0.6835541 -0.42127155 0.68458863 -0.50963846 -0.30681807 0.008888 1789553228.392366171 35.683 83.956 3.495 0.00000 -1 ACTUAL_TF
+6.5437 0.0334629 -1.6731211 0.6836435 -0.42123381 0.68452092 -0.50978097 -0.30678420 0.007990 1789553228.448291063 35.890 83.749 3.314 0.00000 -1 ACTUAL_TF
+6.6036 0.0326837 -1.6728144 0.6834390 -0.42120405 0.68445793 -0.50988417 -0.30679409 0.010210 1789553228.504306555 36.209 83.431 2.536 0.00000 -1 ACTUAL_TF
+6.6518 0.0312182 -1.6721207 0.6827245 -0.42122356 0.68445916 -0.50986509 -0.30679628 0.016650 1789553228.560239792 36.921 82.718 0.924 0.00000 -1 ACTUAL_TF
+6.7091 0.0297382 -1.6714340 0.6820155 -0.42118424 0.68447395 -0.50987293 -0.30680425 0.021181 1789553228.616262674 37.627 82.012 0.751 0.00000 -1 ACTUAL_TF
+6.7678 0.0286721 -1.6708795 0.6814592 -0.42118462 0.68451397 -0.50980363 -0.30682959 0.021907 1789553228.672373772 38.195 81.445 1.928 0.00000 -1 ACTUAL_TF
+6.8252 0.0280179 -1.6705054 0.6811250 -0.42120580 0.68449659 -0.50981789 -0.30681559 0.019750 1789553228.728376150 38.577 81.062 2.656 0.00000 -1 ACTUAL_TF
+6.8827 0.0276393 -1.6703002 0.6809412 -0.42120881 0.68448874 -0.50982351 -0.30681964 0.016334 1789553228.784368277 38.787 80.852 3.074 0.00000 -1 ACTUAL_TF
+6.9394 0.0273935 -1.6701771 0.6808267 -0.42120277 0.68448400 -0.50983573 -0.30681819 0.013029 1789553228.840371847 38.913 80.726 3.343 0.00000 -1 ACTUAL_TF
+6.9899 0.0272833 -1.6700994 0.6807837 -0.42119980 0.68448192 -0.50983656 -0.30682555 0.009879 1789553228.896317959 38.992 80.647 3.461 0.00000 -1 ACTUAL_TF
+7.0509 0.0272550 -1.6697941 0.6807397 -0.42119235 0.68452894 -0.50976683 -0.30684672 0.008574 1789553228.952335358 39.298 80.341 3.501 0.00000 -1 ACTUAL_TF
+7.1052 0.0277032 -1.6691509 0.6807363 -0.42125371 0.68457952 -0.50964767 -0.30684759 0.010199 1789553229.008377790 39.933 79.707 3.093 0.00000 -1 ACTUAL_TF
+7.1629 0.0290140 -1.6684356 0.6813131 -0.42127738 0.68457181 -0.50963926 -0.30684627 0.015720 1789553229.064346075 40.630 79.009 1.661 0.00000 -1 ACTUAL_TF
+7.2234 0.0305613 -1.6676610 0.6821415 -0.42124743 0.68456756 -0.50965389 -0.30687257 0.021296 1789553229.120267630 41.385 78.254 0.171 0.00000 -1 ACTUAL_TF
+7.2710 0.0317506 -1.6671501 0.6827817 -0.42125388 0.68453079 -0.50971020 -0.30685221 0.022633 1789553229.176337719 41.881 77.758 1.469 0.00000 -1 ACTUAL_TF
+7.3301 0.0326062 -1.6665758 0.6831445 -0.42127074 0.68455026 -0.50967211 -0.30684890 0.021690 1789553229.232395887 42.444 77.195 2.406 0.00000 -1 ACTUAL_TF
+7.3922 0.0330463 -1.6663113 0.6833782 -0.42126179 0.68455896 -0.50966416 -0.30685497 0.018205 1789553229.288397551 42.703 76.936 2.905 0.00000 -1 ACTUAL_TF
+7.4433 0.0333897 -1.6661290 0.6835597 -0.42126417 0.68455554 -0.50966818 -0.30685267 0.015040 1789553229.344434738 42.881 76.758 3.295 0.00000 -1 ACTUAL_TF
+7.5013 0.0335670 -1.6660284 0.6836337 -0.42127199 0.68455344 -0.50966852 -0.30684605 0.011690 1789553229.400419950 42.979 76.660 3.488 0.00000 -1 ACTUAL_TF
+7.5550 0.0335562 -1.6658383 0.6836200 -0.42128602 0.68458331 -0.50962816 -0.30682718 0.009208 1789553229.456316948 43.169 76.470 3.475 0.00000 -1 ACTUAL_TF
+7.6093 0.0334153 -1.6656973 0.6837356 -0.42125607 0.68450188 -0.50977152 -0.30681183 0.007681 1789553229.512270451 43.314 76.325 3.398 0.00000 -1 ACTUAL_TF
+7.6686 0.0325083 -1.6654084 0.6835801 -0.42117503 0.68444481 -0.50989626 -0.30684311 0.010538 1789553229.568335056 43.618 76.021 2.533 0.00000 -1 ACTUAL_TF
+7.7217 0.0310432 -1.6647101 0.6828474 -0.42118606 0.68448192 -0.50984623 -0.30682835 0.016916 1789553229.624334812 44.334 75.305 0.921 0.00000 -1 ACTUAL_TF
+7.7782 0.0298313 -1.6640667 0.6821859 -0.42118786 0.68449658 -0.50984266 -0.30679909 0.020005 1789553229.680312872 44.993 74.647 0.512 0.00000 -1 ACTUAL_TF
+7.8366 0.0286666 -1.6634042 0.6815695 -0.42119089 0.68450287 -0.50983715 -0.30679004 0.021909 1789553229.736283541 45.669 73.970 1.796 0.00000 -1 ACTUAL_TF
+7.8934 0.0280005 -1.6630909 0.6812754 -0.42117637 0.68449486 -0.50984549 -0.30681399 0.019565 1789553229.792513132 45.992 73.647 2.520 0.00000 -1 ACTUAL_TF
+7.9502 0.0275370 -1.6628554 0.6810613 -0.42117465 0.68448259 -0.50986291 -0.30681477 0.016718 1789553229.848329067 46.233 73.406 3.028 0.00000 -1 ACTUAL_TF
+8.0015 0.0273079 -1.6627221 0.6809332 -0.42118327 0.68448781 -0.50985182 -0.30680974 0.013278 1789553229.904375553 46.369 73.270 3.287 0.00000 -1 ACTUAL_TF
+8.0632 0.0271539 -1.6626202 0.6808637 -0.42117913 0.68449479 -0.50984422 -0.30681247 0.010352 1789553229.960353136 46.473 73.166 3.455 0.00000 -1 ACTUAL_TF
+8.1144 0.0271326 -1.6622976 0.6808172 -0.42117975 0.68454123 -0.50976807 -0.30683454 0.008996 1789553230.016375780 46.796 72.843 3.489 0.00000 -1 ACTUAL_TF
+8.1786 0.0275104 -1.6616937 0.6807961 -0.42121117 0.68461079 -0.50963617 -0.30685533 0.010121 1789553230.072277784 47.392 72.247 3.153 0.00000 -1 ACTUAL_TF
+8.2260 0.0287466 -1.6609770 0.6813596 -0.42121738 0.68461782 -0.50961223 -0.30687089 0.015303 1789553230.128346920 48.092 71.547 1.791 0.00000 -1 ACTUAL_TF
+8.2888 0.0301940 -1.6603945 0.6820926 -0.42125240 0.68455089 -0.50969080 -0.30684163 0.019944 1789553230.184366703 48.656 70.983 0.210 0.00000 -1 ACTUAL_TF
+8.3424 0.0314960 -1.6596472 0.6828004 -0.42122513 0.68456549 -0.50967674 -0.30686983 0.022859 1789553230.240324736 49.387 70.252 1.336 0.00000 -1 ACTUAL_TF
+8.3923 0.0323459 -1.6592161 0.6832026 -0.42125127 0.68454499 -0.50969675 -0.30684645 0.021542 1789553230.296325445 49.807 69.832 2.281 0.00000 -1 ACTUAL_TF
+8.4520 0.0328928 -1.6588504 0.6834708 -0.42125266 0.68455770 -0.50967493 -0.30685243 0.018889 1789553230.352284193 50.166 69.473 2.894 0.00000 -1 ACTUAL_TF
+8.5050 0.0331815 -1.6586931 0.6836240 -0.42124249 0.68456156 -0.50967541 -0.30685698 0.015154 1789553230.408605099 50.320 69.320 3.222 0.00000 -1 ACTUAL_TF
+8.5662 0.0334045 -1.6585658 0.6837277 -0.42124972 0.68455915 -0.50967621 -0.30685111 0.012098 1789553230.464373827 50.444 69.195 3.469 0.00000 -1 ACTUAL_TF
+8.6161 0.0334239 -1.6583742 0.6837037 -0.42127340 0.68458995 -0.50963314 -0.30682142 0.009510 1789553230.520292759 50.635 69.004 3.480 0.00000 -1 ACTUAL_TF
+8.6724 0.0332979 -1.6581967 0.6837986 -0.42126905 0.68451368 -0.50975667 -0.30679235 0.007928 1789553230.576331377 50.816 68.823 3.407 0.00000 -1 ACTUAL_TF
+8.7303 0.0324111 -1.6578331 0.6835514 -0.42124238 0.68448237 -0.50982490 -0.30678545 0.010855 1789553230.632300138 51.193 68.447 2.511 0.00000 -1 ACTUAL_TF
+8.7915 0.0311170 -1.6572420 0.6829516 -0.42121579 0.68451069 -0.50978987 -0.30681698 0.015865 1789553230.688332796 51.801 67.838 1.100 0.00000 -1 ACTUAL_TF
+8.8424 0.0296203 -1.6565205 0.6822136 -0.42120795 0.68450020 -0.50979773 -0.30683810 0.020848 1789553230.744313002 52.541 67.098 0.593 0.00000 -1 ACTUAL_TF
+8.9032 0.0287010 -1.6560121 0.6817298 -0.42123293 0.68447999 -0.50982056 -0.30681095 0.020787 1789553230.800333977 53.061 66.578 1.609 0.00000 -1 ACTUAL_TF
+8.9531 0.0278673 -1.6556091 0.6813590 -0.42122642 0.68447759 -0.50981930 -0.30682735 0.019891 1789553230.856374741 53.475 66.164 2.516 0.00000 -1 ACTUAL_TF
+9.0107 0.0273549 -1.6553484 0.6810947 -0.42121613 0.68449376 -0.50980649 -0.30682666 0.017323 1789553230.912224293 53.742 65.897 3.088 0.00000 -1 ACTUAL_TF
+9.0693 0.0271451 -1.6552165 0.6809837 -0.42122630 0.68449027 -0.50980812 -0.30681779 0.013578 1789553230.968329430 53.877 65.762 3.324 0.00000 -1 ACTUAL_TF
+9.1229 0.0269832 -1.6551322 0.6809272 -0.42120802 0.68449556 -0.50981114 -0.30682606 0.010528 1789553231.024334192 53.963 65.676 3.493 0.00000 -1 ACTUAL_TF
+9.1773 0.0269330 -1.6549175 0.6809034 -0.42119176 0.68453126 -0.50976815 -0.30684017 0.008559 1789553231.080284119 54.179 65.461 3.546 0.00000 -1 ACTUAL_TF
+9.2305 0.0274023 -1.6542013 0.6808781 -0.42126066 0.68458957 -0.50963000 -0.30684497 0.010577 1789553231.136327982 54.886 64.753 3.128 0.00000 -1 ACTUAL_TF
+9.2894 0.0283559 -1.6536215 0.6812952 -0.42124910 0.68460716 -0.50959779 -0.30687511 0.013783 1789553231.192363501 55.453 64.186 2.086 0.00000 -1 ACTUAL_TF
+9.3486 0.0298990 -1.6529014 0.6821278 -0.42123096 0.68457899 -0.50964032 -0.30689221 0.019833 1789553231.248193026 56.154 63.486 0.338 0.00000 -1 ACTUAL_TF
+9.3974 0.0311439 -1.6522447 0.6827420 -0.42124714 0.68456166 -0.50965697 -0.30688102 0.022078 1789553231.304408550 56.794 62.845 1.084 0.00000 -1 ACTUAL_TF
+9.4572 0.0321869 -1.6517582 0.6833150 -0.42125172 0.68453458 -0.50970500 -0.30685537 0.022345 1789553231.360388517 57.268 62.371 2.272 0.00000 -1 ACTUAL_TF
+9.5221 0.0327435 -1.6513754 0.6835688 -0.42124856 0.68455226 -0.50967656 -0.30686749 0.019505 1789553231.416419029 57.643 61.996 2.889 0.00000 -1 ACTUAL_TF
+9.5700 0.0330714 -1.6511866 0.6837055 -0.42126910 0.68454416 -0.50967656 -0.30685737 0.015811 1789553231.472362280 57.827 61.812 3.246 0.00000 -1 ACTUAL_TF
+9.6291 0.0332501 -1.6510803 0.6838197 -0.42125860 0.68454865 -0.50967489 -0.30686453 0.012339 1789553231.528367519 57.932 61.708 3.457 0.00000 -1 ACTUAL_TF
+9.6846 0.0332838 -1.6509449 0.6838079 -0.42127962 0.68456662 -0.50964402 -0.30684685 0.009387 1789553231.584347963 58.066 61.573 3.485 0.00000 -1 ACTUAL_TF
+9.7346 0.0331272 -1.6507180 0.6838780 -0.42125365 0.68453450 -0.50974016 -0.30679447 0.008094 1789553231.640372515 58.297 61.342 3.375 0.00000 -1 ACTUAL_TF
+9.7902 0.0324920 -1.6504322 0.6837290 -0.42120456 0.68450210 -0.50982559 -0.30679221 0.009487 1789553231.696304083 58.592 61.047 2.746 0.00000 -1 ACTUAL_TF
+9.8484 0.0310959 -1.6498244 0.6831268 -0.42118709 0.68447090 -0.50987746 -0.30679961 0.015403 1789553231.752368212 59.219 60.420 1.248 0.00000 -1 ACTUAL_TF
+9.9054 0.0296161 -1.6490816 0.6823240 -0.42119561 0.68448692 -0.50985630 -0.30678734 0.020641 1789553231.808357477 59.980 59.659 0.458 0.00000 -1 ACTUAL_TF
+9.9592 0.0285158 -1.6485291 0.6817984 -0.42119730 0.68450528 -0.50981270 -0.30681649 0.021614 1789553231.864405394 60.546 59.093 1.660 0.00000 -1 ACTUAL_TF
+10.0148 0.0277042 -1.6481636 0.6814463 -0.42117780 0.68448809 -0.50983994 -0.30683638 0.020266 1789553231.920321465 60.923 58.716 2.539 0.00000 -1 ACTUAL_TF
+10.0730 0.0273176 -1.6479457 0.6812623 -0.42118840 0.68446601 -0.50986090 -0.30683625 0.016756 1789553231.976411819 61.146 58.493 2.964 0.00000 -1 ACTUAL_TF
+10.1286 0.0270184 -1.6478006 0.6811317 -0.42117379 0.68446827 -0.50986813 -0.30683925 0.013644 1789553232.032367468 61.295 58.344 3.289 0.00000 -1 ACTUAL_TF
+10.1867 0.0268716 -1.6476905 0.6810452 -0.42117927 0.68447312 -0.50985814 -0.30683751 0.010640 1789553232.088242531 61.407 58.232 3.457 0.00000 -1 ACTUAL_TF
+10.2469 0.0267829 -1.6474870 0.6810201 -0.42115209 0.68451240 -0.50980838 -0.30686985 0.008643 1789553232.144330978 61.611 58.028 3.545 0.00000 -1 ACTUAL_TF
+10.2971 0.0271167 -1.6469151 0.6809648 -0.42121570 0.68456088 -0.50969510 -0.30686259 0.009609 1789553232.200347185 62.177 57.463 3.260 0.00000 -1 ACTUAL_TF
+10.3574 0.0283139 -1.6462153 0.6814429 -0.42125394 0.68455202 -0.50967821 -0.30685790 0.014574 1789553232.256420612 62.860 56.780 1.971 0.00000 -1 ACTUAL_TF
+10.4070 0.0298763 -1.6455096 0.6822871 -0.42124317 0.68451070 -0.50973198 -0.30687555 0.020460 1789553232.312303782 63.546 56.093 0.204 0.00000 -1 ACTUAL_TF
+10.4732 0.0310633 -1.6447775 0.6828113 -0.42127082 0.68451580 -0.50970745 -0.30686697 0.022294 1789553232.368374348 64.262 55.377 1.132 0.00000 -1 ACTUAL_TF
+10.5226 0.0320597 -1.6442856 0.6834323 -0.42124442 0.68450426 -0.50973761 -0.30687885 0.022422 1789553232.424397230 64.742 54.897 2.296 0.00000 -1 ACTUAL_TF
+10.5763 0.0325259 -1.6440187 0.6836937 -0.42121467 0.68451787 -0.50973276 -0.30689738 0.018896 1789553232.480409145 65.003 54.636 2.832 0.00000 -1 ACTUAL_TF
+10.6424 0.0329102 -1.6437743 0.6838518 -0.42123205 0.68451897 -0.50972124 -0.30689019 0.015813 1789553232.536325932 65.242 54.397 3.250 0.00000 -1 ACTUAL_TF
+10.6913 0.0331006 -1.6436558 0.6839407 -0.42124008 0.68451817 -0.50971850 -0.30688550 0.012358 1789553232.592459440 65.358 54.281 3.461 0.00000 -1 ACTUAL_TF
+10.7490 0.0331681 -1.6435045 0.6839429 -0.42125916 0.68453687 -0.50968986 -0.30686519 0.009539 1789553232.648432016 65.509 54.131 3.525 0.00000 -1 ACTUAL_TF
+10.7973 0.0330250 -1.6432666 0.6839728 -0.42126069 0.68452444 -0.50974320 -0.30680220 0.008175 1789553232.704376459 65.749 53.890 3.412 0.00000 -1 ACTUAL_TF
+10.8541 0.0322913 -1.6429435 0.6837809 -0.42122577 0.68450328 -0.50979843 -0.30680559 0.010126 1789553232.760540724 66.084 53.556 2.676 0.00000 -1 ACTUAL_TF
+10.9111 0.0308892 -1.6422655 0.6830713 -0.42123386 0.68452472 -0.50976568 -0.30680107 0.016282 1789553232.816385508 66.779 52.860 1.114 0.00000 -1 ACTUAL_TF
+10.9656 0.0297421 -1.6417164 0.6825070 -0.42122938 0.68448391 -0.50983027 -0.30679094 0.018852 1789553232.872380257 67.343 52.296 0.191 0.00000 -1 ACTUAL_TF
+11.0205 0.0284574 -1.6411242 0.6819443 -0.42120456 0.68446684 -0.50985265 -0.30682590 0.021347 1789553232.928415298 67.952 51.687 1.564 0.00000 -1 ACTUAL_TF
+11.0857 0.0277285 -1.6407184 0.6815398 -0.42120785 0.68450163 -0.50981023 -0.30681426 0.019911 1789553232.984398127 68.367 51.272 2.387 0.00000 -1 ACTUAL_TF
+11.1343 0.0271746 -1.6404638 0.6813028 -0.42119595 0.68450038 -0.50981579 -0.30682416 0.017444 1789553233.040364504 68.629 51.010 2.987 0.00000 -1 ACTUAL_TF
+11.1939 0.0269114 -1.6403144 0.6811704 -0.42120433 0.68449705 -0.50981490 -0.30682155 0.013978 1789553233.096434355 68.782 50.857 3.279 0.00000 -1 ACTUAL_TF
+11.2513 0.0267322 -1.6401989 0.6810825 -0.42120104 0.68449732 -0.50981737 -0.30682135 0.011020 1789553233.152420521 68.899 50.740 3.477 0.00000 -1 ACTUAL_TF
+11.3068 0.0266589 -1.6399838 0.6810554 -0.42118175 0.68453527 -0.50976914 -0.30684334 0.008942 1789553233.208358765 69.116 50.524 3.552 0.00000 -1 ACTUAL_TF
+11.3647 0.0269204 -1.6394305 0.6810057 -0.42120848 0.68459814 -0.50964710 -0.30686908 0.009548 1789553233.264373779 69.663 49.976 3.331 0.00000 -1 ACTUAL_TF
+11.4185 0.0280384 -1.6386969 0.6814467 -0.42123804 0.68460790 -0.50960297 -0.30688003 0.014229 1789553233.320356607 70.381 49.258 2.130 0.00000 -1 ACTUAL_TF
+11.4742 0.0294485 -1.6380991 0.6821239 -0.42127483 0.68454350 -0.50967518 -0.30685326 0.018931 1789553233.376358747 70.961 48.678 0.582 0.00000 -1 ACTUAL_TF
+11.5298 0.0307495 -1.6373581 0.6828384 -0.42124011 0.68455685 -0.50966833 -0.30688251 0.022148 1789553233.432301521 71.686 47.954 0.946 0.00000 -1 ACTUAL_TF
+11.5878 0.0317550 -1.6368305 0.6833456 -0.42126315 0.68453605 -0.50968965 -0.30686187 0.022155 1789553233.488393784 72.200 47.439 2.073 0.00000 -1 ACTUAL_TF
+11.6428 0.0324118 -1.6365132 0.6837394 -0.42124033 0.68453092 -0.50970973 -0.30687129 0.019953 1789553233.544351339 72.510 47.129 2.837 0.00000 -1 ACTUAL_TF
+11.6995 0.0327142 -1.6363332 0.6838944 -0.42123110 0.68453868 -0.50970387 -0.30687639 0.016022 1789553233.600484848 72.686 46.953 3.179 0.00000 -1 ACTUAL_TF
+11.7681 0.0329532 -1.6362070 0.6840177 -0.42123105 0.68453706 -0.50970608 -0.30687642 0.012794 1789553233.656933784 72.809 46.830 3.449 0.00000 -1 ACTUAL_TF
+11.8149 0.0330489 -1.6360500 0.6840316 -0.42125969 0.68454845 -0.50968241 -0.30685100 0.009952 1789553233.712450266 72.964 46.675 3.544 0.00000 -1 ACTUAL_TF
+11.8619 0.0329734 -1.6358372 0.6840303 -0.42127124 0.68455545 -0.50969785 -0.30679388 0.008174 1789553233.768575430 73.179 46.461 3.477 0.00000 -1 ACTUAL_TF
+11.9215 0.0322655 -1.6355377 0.6839325 -0.42122094 0.68446830 -0.50985735 -0.30679235 0.009893 1789553233.824298620 73.490 46.149 2.806 0.00000 -1 ACTUAL_TF
+11.9757 0.0310057 -1.6349231 0.6832903 -0.42121853 0.68450782 -0.50978729 -0.30682391 0.015177 1789553233.880352020 74.120 45.519 1.400 0.00000 -1 ACTUAL_TF
+12.0339 0.0295184 -1.6342136 0.6825445 -0.42122652 0.68450529 -0.50978371 -0.30682452 0.020323 1789553233.936299324 74.849 44.791 0.279 0.00000 -1 ACTUAL_TF
+12.0891 0.0285345 -1.6337034 0.6820792 -0.42125208 0.68446692 -0.50982106 -0.30681298 0.020660 1789553233.992349625 75.372 44.268 1.347 0.00000 -1 ACTUAL_TF
+12.1467 0.0275889 -1.6332100 0.6815872 -0.42124052 0.68451148 -0.50977765 -0.30680156 0.020760 1789553234.048300266 75.877 43.762 2.404 0.00000 -1 ACTUAL_TF
+12.2031 0.0270442 -1.6329521 0.6813564 -0.42120708 0.68451378 -0.50979399 -0.30681521 0.017950 1789553234.104932547 76.142 43.497 2.992 0.00000 -1 ACTUAL_TF
+12.2590 0.0267675 -1.6328183 0.6812334 -0.42120585 0.68450191 -0.50980602 -0.30682339 0.014355 1789553234.160438538 76.279 43.360 3.293 0.00000 -1 ACTUAL_TF
+12.3155 0.0266017 -1.6327201 0.6811516 -0.42119507 0.68449939 -0.50982308 -0.30681546 0.011160 1789553234.216933489 76.380 43.259 3.477 0.00000 -1 ACTUAL_TF
+12.3749 0.0265115 -1.6325647 0.6811283 -0.42118011 0.68452733 -0.50978670 -0.30683410 0.008794 1789553234.272304296 76.537 43.103 3.567 0.00000 -1 ACTUAL_TF
+12.4264 0.0268502 -1.6319878 0.6810976 -0.42122189 0.68457276 -0.50968344 -0.30684694 0.009728 1789553234.328544378 77.107 42.532 3.268 0.00000 -1 ACTUAL_TF
+12.4764 0.0276608 -1.6313318 0.6814088 -0.42124065 0.68460554 -0.50960774 -0.30687378 0.012654 1789553234.384400129 77.751 41.888 2.400 0.00000 -1 ACTUAL_TF
+12.5351 0.0292517 -1.6306537 0.6822493 -0.42125723 0.68453734 -0.50969262 -0.30686220 0.019166 1789553234.440359116 78.409 41.230 0.600 0.00000 -1 ACTUAL_TF
+12.5962 0.0305092 -1.6299707 0.6828743 -0.42126121 0.68452939 -0.50969927 -0.30686342 0.021788 1789553234.496315956 79.076 40.563 0.831 0.00000 -1 ACTUAL_TF
+12.6530 0.0315920 -1.6293617 0.6834228 -0.42124437 0.68453694 -0.50969495 -0.30687687 0.022535 1789553234.552258253 79.671 39.968 2.047 0.00000 -1 ACTUAL_TF
+12.7017 0.0322173 -1.6290160 0.6837636 -0.42122915 0.68454191 -0.50969462 -0.30688723 0.020014 1789553234.608268976 80.009 39.630 2.761 0.00000 -1 ACTUAL_TF
+12.7639 0.0325833 -1.6288567 0.6839671 -0.42123074 0.68452924 -0.50971578 -0.30687817 0.016409 1789553234.664287806 80.164 39.475 3.180 0.00000 -1 ACTUAL_TF
+12.8177 0.0328254 -1.6287271 0.6841034 -0.42122456 0.68453097 -0.50971852 -0.30687824 0.013125 1789553234.720430374 80.291 39.349 3.459 0.00000 -1 ACTUAL_TF
+12.8712 0.0329001 -1.6286045 0.6841216 -0.42124238 0.68454162 -0.50969593 -0.30686755 0.009966 1789553234.776213884 80.412 39.227 3.535 0.00000 -1 ACTUAL_TF
+12.9423 0.0328215 -1.6283536 0.6841185 -0.42126078 0.68454993 -0.50971105 -0.30679861 0.008381 1789553234.832364798 80.664 38.975 3.466 0.00000 -1 ACTUAL_TF
+12.9894 0.0323041 -1.6281337 0.6840820 -0.42122362 0.68446781 -0.50984897 -0.30680369 0.008883 1789553234.888388634 80.893 38.746 2.991 0.00000 -1 ACTUAL_TF
+13.0475 0.0309923 -1.6274630 0.6834048 -0.42124752 0.68448174 -0.50981759 -0.30679194 0.014915 1789553234.944325924 81.580 38.059 1.523 0.00000 -1 ACTUAL_TF
+13.0946 0.0295165 -1.6267697 0.6826706 -0.42125042 0.68448938 -0.50980868 -0.30678573 0.020034 1789553235.000244856 82.292 37.347 0.145 0.00000 -1 ACTUAL_TF
+13.1555 0.0283318 -1.6262075 0.6821057 -0.42123179 0.68450625 -0.50977891 -0.30682313 0.021676 1789553235.056218863 82.870 36.769 1.429 0.00000 -1 ACTUAL_TF
+13.2124 0.0274498 -1.6258059 0.6817556 -0.42119555 0.68448372 -0.50982947 -0.30683914 0.020684 1789553235.112321615 83.284 36.356 2.373 0.00000 -1 ACTUAL_TF
+13.2637 0.0269863 -1.6254906 0.6814699 -0.42121904 0.68450278 -0.50979516 -0.30682139 0.017847 1789553235.168357849 83.604 36.035 2.908 0.00000 -1 ACTUAL_TF
+13.3287 0.0266743 -1.6253370 0.6813246 -0.42121557 0.68449162 -0.50981731 -0.30681424 0.014514 1789553235.224309206 83.762 35.877 3.250 0.00000 -1 ACTUAL_TF
+13.3763 0.0264926 -1.6252325 0.6812241 -0.42121705 0.68449899 -0.50980694 -0.30681301 0.011405 1789553235.280318022 83.868 35.771 3.456 0.00000 -1 ACTUAL_TF
+13.4296 0.0263752 -1.6250882 0.6812090 -0.42117854 0.68452755 -0.50978391 -0.30684041 0.008985 1789553235.336224318 84.015 35.624 3.567 0.00000 -1 ACTUAL_TF
+13.4911 0.0265910 -1.6246454 0.6811610 -0.42121611 0.68456601 -0.50969357 -0.30685310 0.008940 1789553235.392231703 84.453 35.186 3.387 0.00000 -1 ACTUAL_TF
+13.5499 0.0275772 -1.6238584 0.6814388 -0.42129504 0.68458020 -0.50961541 -0.30684291 0.013178 1789553235.448240519 85.225 34.414 2.381 0.00000 -1 ACTUAL_TF
+13.5999 0.0291539 -1.6231956 0.6822821 -0.42128019 0.68452147 -0.50969674 -0.30685923 0.019447 1789553235.504206181 85.868 33.771 0.601 0.00000 -1 ACTUAL_TF
+13.6604 0.0302385 -1.6225673 0.6829305 -0.42122491 0.68453987 -0.50968725 -0.30690984 0.021167 1789553235.560247898 86.483 33.156 0.695 0.00000 -1 ACTUAL_TF
+13.7106 0.0314851 -1.6219068 0.6835228 -0.42127375 0.68450534 -0.50971272 -0.30687753 0.023024 1789553235.616177082 87.127 32.512 2.081 0.00000 -1 ACTUAL_TF
+13.7707 0.0320135 -1.6215884 0.6838100 -0.42125578 0.68451514 -0.50970334 -0.30689590 0.019757 1789553235.672260046 87.439 32.200 2.684 0.00000 -1 ACTUAL_TF
+13.8243 0.0324309 -1.6213502 0.6840182 -0.42125784 0.68451440 -0.50970274 -0.30689573 0.016633 1789553235.728311300 87.672 31.967 3.153 0.00000 -1 ACTUAL_TF
+13.8840 0.0326247 -1.6212260 0.6841167 -0.42125992 0.68451727 -0.50969743 -0.30689528 0.012986 1789553235.784248352 87.794 31.845 3.372 0.00000 -1 ACTUAL_TF
+13.9353 0.0327272 -1.6211152 0.6841697 -0.42126285 0.68452785 -0.50968481 -0.30688862 0.009947 1789553235.840303183 87.903 31.736 3.488 0.00000 -1 ACTUAL_TF
+13.9948 0.0326260 -1.6208226 0.6841305 -0.42128827 0.68456684 -0.50965936 -0.30680900 0.008638 1789553235.896175146 88.197 31.442 3.384 0.00000 -1 ACTUAL_TF
+14.0531 0.0321953 -1.6206158 0.6841123 -0.42124960 0.68448741 -0.50981058 -0.30678810 0.008601 1789553235.952324152 88.412 31.227 2.992 0.00000 -1 ACTUAL_TF
+14.1025 0.0308164 -1.6199512 0.6834424 -0.42123860 0.68451853 -0.50977143 -0.30679882 0.014991 1789553236.008204460 89.094 30.545 1.467 0.00000 -1 ACTUAL_TF
+14.1618 0.0296236 -1.6194482 0.6829261 -0.42122463 0.68446802 -0.50984026 -0.30681630 0.017935 1789553236.064390898 89.613 30.026 0.218 0.00000 -1 ACTUAL_TF
+14.2182 0.0282589 -1.6187558 0.6822305 -0.42124361 0.68449362 -0.50979505 -0.30680826 0.021574 1789553236.120303154 90.322 29.317 1.354 0.00000 -1 ACTUAL_TF
+14.2862 0.0274843 -1.6183866 0.6818908 -0.42120783 0.68448632 -0.50982570 -0.30682273 0.020044 1789553236.176315784 90.702 28.937 2.195 0.00000 -1 ACTUAL_TF
+14.3307 0.0268332 -1.6180285 0.6815473 -0.42121157 0.68450366 -0.50979807 -0.30682483 0.018411 1789553236.232392550 91.068 28.571 2.925 0.00000 -1 ACTUAL_TF
+14.3875 0.0265841 -1.6179013 0.6814446 -0.42120967 0.68448369 -0.50982891 -0.30682076 0.014485 1789553236.288336277 91.199 28.440 3.192 0.00000 -1 ACTUAL_TF
+14.4441 0.0263739 -1.6177877 0.6813456 -0.42121061 0.68447731 -0.50983310 -0.30682673 0.011523 1789553236.344414234 91.315 28.324 3.423 0.00000 -1 ACTUAL_TF
+14.5002 0.0262859 -1.6176513 0.6813303 -0.42118798 0.68449389 -0.50981685 -0.30684782 0.008940 1789553236.400402308 91.453 28.186 3.508 0.00000 -1 ACTUAL_TF
+14.5563 0.0263945 -1.6171919 0.6812782 -0.42119886 0.68455666 -0.50969773 -0.30689075 0.008806 1789553236.456308842 91.910 27.730 3.426 0.00000 -1 ACTUAL_TF
+14.6250 0.0273679 -1.6164272 0.6815688 -0.42128131 0.68456385 -0.50963124 -0.30687196 0.012962 1789553236.512424707 92.660 26.979 2.420 0.00000 -1 ACTUAL_TF
+14.6632 0.0287318 -1.6158482 0.6822978 -0.42127847 0.68450597 -0.50970293 -0.30688589 0.017930 1789553236.568360806 93.221 26.418 0.869 0.00000 -1 ACTUAL_TF
+14.7186 0.0301857 -1.6150912 0.6830683 -0.42127528 0.68448729 -0.50972367 -0.30689749 0.022271 1789553236.624263763 93.960 25.679 0.793 0.00000 -1 ACTUAL_TF
+14.7732 0.0311681 -1.6145340 0.6835478 -0.42127927 0.68448679 -0.50972082 -0.30689786 0.022139 1789553236.680467844 94.505 25.135 1.891 0.00000 -1 ACTUAL_TF
+14.8289 0.0319054 -1.6141434 0.6839294 -0.42126689 0.68448727 -0.50972666 -0.30690408 0.020434 1789553236.736219168 94.886 24.753 2.725 0.00000 -1 ACTUAL_TF
+14.8853 0.0322170 -1.6139163 0.6840855 -0.42125848 0.68450398 -0.50970567 -0.30691323 0.016531 1789553236.792243242 95.109 24.530 3.076 0.00000 -1 ACTUAL_TF
+14.9424 0.0324862 -1.6137697 0.6842194 -0.42125730 0.68450499 -0.50970592 -0.30691216 0.013363 1789553236.848291397 95.252 24.387 3.379 0.00000 -1 ACTUAL_TF
+15.0047 0.0326084 -1.6136448 0.6842661 -0.42126705 0.68451481 -0.50969296 -0.30689841 0.010323 1789553236.904269457 95.375 24.264 3.511 0.00000 -1 ACTUAL_TF
+15.0608 0.0325518 -1.6134043 0.6842306 -0.42129778 0.68454700 -0.50966314 -0.30683395 0.008562 1789553236.960333109 95.616 24.023 3.447 0.00000 -1 ACTUAL_TF
+15.1178 0.0320167 -1.6131334 0.6841819 -0.42125212 0.68449211 -0.50978653 -0.30681411 0.009224 1789553237.016218424 95.896 23.743 2.949 0.00000 -1 ACTUAL_TF
+15.1658 0.0309192 -1.6126409 0.6836892 -0.42123604 0.68448315 -0.50980465 -0.30682606 0.013418 1789553237.072239637 96.403 23.236 1.755 0.00000 -1 ACTUAL_TF
+15.2248 0.0294333 -1.6119716 0.6829305 -0.42121955 0.68450984 -0.50978740 -0.30681782 0.019030 1789553237.128193617 97.091 22.548 0.126 0.00000 -1 ACTUAL_TF
+15.2863 0.0283245 -1.6113812 0.6823879 -0.42123241 0.68452158 -0.50977697 -0.30679132 0.020650 1789553237.184205055 97.696 21.943 1.140 0.00000 -1 ACTUAL_TF
+15.3432 0.0273293 -1.6108843 0.6819308 -0.42119492 0.68451688 -0.50979929 -0.30681619 0.020895 1789553237.240225077 98.206 21.433 2.228 0.00000 -1 ACTUAL_TF
+15.3955 0.0267945 -1.6106220 0.6817047 -0.42118216 0.68447380 -0.50986965 -0.30681289 0.018041 1789553237.296214342 98.475 21.164 2.806 0.00000 -1 ACTUAL_TF
+15.4550 0.0264562 -1.6104446 0.6815377 -0.42118012 0.68448344 -0.50985264 -0.30682243 0.014862 1789553237.352227211 98.657 20.982 3.180 0.00000 -1 ACTUAL_TF
+15.5036 0.0262514 -1.6103278 0.6814293 -0.42118090 0.68448414 -0.50985486 -0.30681613 0.011793 1789553237.408229589 98.776 20.863 3.410 0.00000 -1 ACTUAL_TF
+15.5642 0.0261575 -1.6102256 0.6814026 -0.42117139 0.68449834 -0.50983537 -0.30682988 0.009012 1789553237.464230299 98.880 20.759 3.505 0.00000 -1 ACTUAL_TF
+15.6217 0.0263453 -1.6097350 0.6813527 -0.42119915 0.68455192 -0.50972931 -0.30684846 0.009135 1789553237.520233393 99.367 20.273 3.351 0.00000 -1 ACTUAL_TF
+15.6821 0.0270136 -1.6090791 0.6815383 -0.42126185 0.68457919 -0.50963914 -0.30685134 0.011504 1789553237.576284170 100.012 19.627 2.666 0.00000 -1 ACTUAL_TF
+15.7292 0.0284716 -1.6084196 0.6823493 -0.42120447 0.68454680 -0.50969154 -0.30691531 0.017680 1789553237.632190228 100.654 18.985 0.991 0.00000 -1 ACTUAL_TF
+15.7904 0.0298375 -1.6077339 0.6830333 -0.42125294 0.68449961 -0.50973424 -0.30688313 0.021333 1789553237.688269377 101.322 18.317 0.552 0.00000 -1 ACTUAL_TF
+15.8369 0.0309885 -1.6071027 0.6836269 -0.42124080 0.68450001 -0.50974037 -0.30688872 0.022653 1789553237.744256735 101.938 17.701 1.850 0.00000 -1 ACTUAL_TF
+15.8995 0.0317308 -1.6066872 0.6840145 -0.42121755 0.68450819 -0.50973835 -0.30690573 0.020872 1789553237.800179243 102.344 17.295 2.692 0.00000 -1 ACTUAL_TF
+15.9518 0.0321432 -1.6064652 0.6841883 -0.42123656 0.68449924 -0.50974453 -0.30688934 0.017285 1789553237.856216192 102.561 17.078 3.142 0.00000 -1 ACTUAL_TF
+16.0072 0.0323645 -1.6063111 0.6843173 -0.42122613 0.68451142 -0.50973202 -0.30689727 0.013699 1789553237.912293196 102.712 16.927 3.398 0.00000 -1 ACTUAL_TF
+16.0649 0.0324904 -1.6062112 0.6843708 -0.42123671 0.68451339 -0.50972513 -0.30688979 0.010497 1789553237.968215466 102.810 16.829 3.536 0.00000 -1 ACTUAL_TF
+16.1231 0.0324551 -1.6059610 0.6843347 -0.42126396 0.68455013 -0.50969955 -0.30681291 0.008712 1789553238.024343014 103.061 16.578 3.492 0.00000 -1 ACTUAL_TF
+16.1814 0.0320736 -1.6057241 0.6843054 -0.42125218 0.68451921 -0.50976622 -0.30678733 0.008510 1789553238.080335140 103.304 16.335 3.139 0.00000 -1 ACTUAL_TF
+16.2340 0.0308866 -1.6051797 0.6837861 -0.42126374 0.68447863 -0.50980968 -0.30678978 0.013488 1789553238.136315823 103.865 15.775 1.853 0.00000 -1 ACTUAL_TF
+16.2961 0.0293545 -1.6044823 0.6830264 -0.42125841 0.68450186 -0.50977814 -0.30679767 0.019333 1789553238.192332506 104.581 15.058 0.167 0.00000 -1 ACTUAL_TF
+16.3427 0.0281584 -1.6039960 0.6825693 -0.42118698 0.68447510 -0.50983591 -0.30685944 0.020875 1789553238.248295546 105.084 14.555 1.136 0.00000 -1 ACTUAL_TF
+16.4003 0.0271861 -1.6034039 0.6820083 -0.42122853 0.68449145 -0.50979355 -0.30683630 0.021411 1789553238.304296970 105.688 13.951 2.236 0.00000 -1 ACTUAL_TF
+16.4569 0.0266892 -1.6031168 0.6817380 -0.42123728 0.68448882 -0.50980076 -0.30681817 0.018391 1789553238.360222816 105.981 13.658 2.797 0.00000 -1 ACTUAL_TF
+16.5111 0.0263126 -1.6029108 0.6815455 -0.42123502 0.68449512 -0.50979871 -0.30681063 0.015391 1789553238.416285515 106.192 13.447 3.217 0.00000 -1 ACTUAL_TF
+16.5661 0.0261237 -1.6028133 0.6814541 -0.42122784 0.68450138 -0.50979583 -0.30681130 0.012014 1789553238.472251415 106.292 13.347 3.426 0.00000 -1 ACTUAL_TF
+16.6330 0.0259931 -1.6026861 0.6814151 -0.42120976 0.68452216 -0.50977570 -0.30682321 0.009409 1789553238.528237581 106.421 13.218 3.559 0.00000 -1 ACTUAL_TF
+16.6780 0.0260332 -1.6023596 0.6813877 -0.42119532 0.68457627 -0.50969447 -0.30685724 0.008353 1789553238.584299088 106.746 12.893 3.530 0.00000 -1 ACTUAL_TF
+16.7349 0.0268771 -1.6015351 0.6815449 -0.42129691 0.68460053 -0.50959147 -0.30683473 0.012216 1789553238.640358686 107.557 12.082 2.703 0.00000 -1 ACTUAL_TF
+16.7898 0.0283772 -1.6009012 0.6823870 -0.42126378 0.68454533 -0.50967761 -0.30686031 0.018378 1789553238.696328402 108.173 11.467 0.978 0.00000 -1 ACTUAL_TF
+16.8456 0.0295720 -1.6002940 0.6830562 -0.42121461 0.68454555 -0.50969545 -0.30689769 0.020896 1789553238.752288103 108.765 10.874 0.411 0.00000 -1 ACTUAL_TF
+16.9004 0.0307573 -1.5996232 0.6836467 -0.42121454 0.68454820 -0.50969376 -0.30689468 0.022584 1789553238.808253288 109.421 10.219 1.739 0.00000 -1 ACTUAL_TF
+16.9600 0.0314605 -1.5992676 0.6840165 -0.42121479 0.68453612 -0.50971185 -0.30689124 0.020444 1789553238.864593983 109.767 9.872 2.536 0.00000 -1 ACTUAL_TF
+17.0183 0.0319813 -1.5989766 0.6842400 -0.42124287 0.68452353 -0.50971641 -0.30687322 0.017739 1789553238.920339108 110.051 9.588 3.106 0.00000 -1 ACTUAL_TF
+17.0759 0.0321956 -1.5988407 0.6843646 -0.42123461 0.68452926 -0.50971081 -0.30688105 0.013933 1789553238.976309538 110.185 9.455 3.354 0.00000 -1 ACTUAL_TF
+17.1314 0.0323588 -1.5987243 0.6844383 -0.42124356 0.68453133 -0.50970641 -0.30687147 0.010899 1789553239.032226562 110.299 9.340 3.535 0.00000 -1 ACTUAL_TF
+17.1896 0.0323036 -1.5984733 0.6844003 -0.42126573 0.68457196 -0.50967273 -0.30680633 0.009014 1789553239.088498354 110.550 9.089 3.472 0.00000 -1 ACTUAL_TF
+17.2360 0.0319797 -1.5982893 0.6844175 -0.42125202 0.68450177 -0.50979092 -0.30678539 0.008312 1789553239.144376278 110.740 8.899 3.190 0.00000 -1 ACTUAL_TF
+17.2954 0.0308107 -1.5977180 0.6838721 -0.42126440 0.68449642 -0.50979063 -0.30678080 0.013372 1789553239.200408220 111.327 8.312 1.908 0.00000 -1 ACTUAL_TF
+17.3565 0.0294899 -1.5971548 0.6832595 -0.42123376 0.68449309 -0.50980370 -0.30680861 0.017739 1789553239.256307125 111.907 7.732 0.467 0.00000 -1 ACTUAL_TF
+17.4146 0.0280800 -1.5964448 0.6825792 -0.42123924 0.68450118 -0.50977714 -0.30682714 0.021616 1789553239.312366009 112.635 7.004 1.104 0.00000 -1 ACTUAL_TF
+17.4738 0.0271739 -1.5959496 0.6820883 -0.42124978 0.68451640 -0.50975310 -0.30681867 0.021254 1789553239.368381023 113.142 6.497 2.124 0.00000 -1 ACTUAL_TF
+17.5178 0.0265423 -1.5956433 0.6818232 -0.42122545 0.68449863 -0.50979245 -0.30682634 0.018901 1789553239.424336195 113.457 6.182 2.805 0.00000 -1 ACTUAL_TF
+17.5764 0.0262185 -1.5954885 0.6816854 -0.42122099 0.68448866 -0.50980928 -0.30682675 0.015281 1789553239.480580330 113.616 6.023 3.155 0.00000 -1 ACTUAL_TF
+17.6318 0.0259857 -1.5953838 0.6815906 -0.42121051 0.68448041 -0.50982563 -0.30683236 0.012162 1789553239.536335945 113.724 5.915 3.405 0.00000 -1 ACTUAL_TF
+17.6887 0.0258508 -1.5952597 0.6815421 -0.42120667 0.68449104 -0.50980275 -0.30685194 0.009527 1789553239.592476845 113.850 5.789 3.546 0.00000 -1 ACTUAL_TF
+17.7482 0.0258910 -1.5949165 0.6815255 -0.42117788 0.68454774 -0.50972527 -0.30689369 0.008515 1789553239.648686409 114.192 5.447 3.512 0.00000 -1 ACTUAL_TF
+17.8035 0.0266407 -1.5941191 0.6816693 -0.42124720 0.68458891 -0.50960410 -0.30690795 0.011915 1789553239.704294920 114.977 4.662 2.769 0.00000 -1 ACTUAL_TF
+17.8636 0.0279430 -1.5935527 0.6823293 -0.42128124 0.68451354 -0.50968332 -0.30689778 0.016732 1789553239.760284185 115.527 4.112 1.305 0.00000 -1 ACTUAL_TF
+17.9135 0.0295029 -1.5928251 0.6831774 -0.42126694 0.68447672 -0.50973942 -0.30690634 0.021982 1789553239.816337824 116.235 3.404 0.487 0.00000 -1 ACTUAL_TF
+17.9659 0.0304528 -1.5922999 0.6836996 -0.42123099 0.68449030 -0.50972962 -0.30694167 0.021834 1789553239.872390509 116.748 2.891 1.572 0.00000 -1 ACTUAL_TF
+18.0291 0.0312977 -1.5918237 0.6840994 -0.42123799 0.68449282 -0.50973167 -0.30692306 0.020905 1789553239.928380489 117.213 2.426 2.512 0.00000 -1 ACTUAL_TF
+18.0807 0.0318008 -1.5915619 0.6843706 -0.42123782 0.68448650 -0.50974112 -0.30692168 0.018003 1789553239.984353542 117.469 2.170 3.086 0.00000 -1 ACTUAL_TF
+18.1432 0.0320495 -1.5913940 0.6844723 -0.42124999 0.68449023 -0.50972834 -0.30691790 0.014297 1789553240.040418148 117.633 2.006 3.356 0.00000 -1 ACTUAL_TF
+18.1929 0.0321971 -1.5912633 0.6845348 -0.42125977 0.68449767 -0.50971921 -0.30690304 0.011106 1789553240.096916676 117.762 1.877 3.518 0.00000 -1 ACTUAL_TF
+18.2487 0.0320943 -1.5910077 0.6845035 -0.42127286 0.68453764 -0.50970525 -0.30681909 0.009276 1789553240.152282000 118.019 1.620 3.415 0.00000 -1 ACTUAL_TF
+18.3057 0.0313732 -1.5906856 0.6843301 -0.42121272 0.68448724 -0.50982432 -0.30681627 0.010833 1789553240.208181858 118.352 1.287 2.697 0.00000 -1 ACTUAL_TF
+18.3678 0.0306050 -1.5902318 0.6839215 -0.42124231 0.68452035 -0.50976843 -0.30679464 0.012812 1789553240.264487028 118.816 0.823 1.832 0.00000 -1 ACTUAL_TF
