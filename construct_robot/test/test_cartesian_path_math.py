@@ -1,3 +1,4 @@
+import copy
 import math
 import threading
 import time
@@ -19,6 +20,7 @@ from construct_robot.cartesian_path_common import (
     retime_trajectory_constant_velocity,
     scale_trajectory_speed,
     scale_trajectory_to_tcp_speed,
+    sine_weaving_with_dwell,
     slerp_quaternion,
     straight_waypoints,
     tip_link_for_group,
@@ -51,8 +53,13 @@ from construct_robot.hicomm_welder import (
 from construct_robot.weld_action_gui import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
     FASTECH_TOUCH_BACKEND,
+    KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S,
     TOUCH_GUARDED_TEACHING_POSES,
+    WAIT_FIXED_TILT_ORIENTATION_MODE,
+    TCP_POSE_TEACHING_POSES,
+    JOINT_RECALL_TEACHING_POSES,
     WeldGuiNode,
+    WeldActionGui,
     taught_wait_approach_steps,
     aligned_wait_pose,
     corner_seam_from_touches,
@@ -67,6 +74,7 @@ from construct_robot.weld_action_gui import (
     compute_surface_plane,
     digital_weld_recipe,
     fixed_tilt_wait_reference_poses,
+    apply_sensed_seam_orientation,
     keyboard_jog_velocity,
     keyboard_velocity_vector,
     next_keyboard_speed,
@@ -79,6 +87,8 @@ from construct_robot.weld_action_gui import (
     read_last_execution_settings,
     tcp_pose_goal_constraints,
     save_seam_touch_yaml,
+    save_initial_state_yaml,
+    load_initial_state_yaml,
     save_weld_feedback_log,
     seam_yaw,
     translated_wait_pose,
@@ -88,6 +98,7 @@ from construct_robot.weld_action_gui import (
     validate_digital_weld_settings,
     validate_managed_weld_sequence,
     weld_current_profile,
+    weld_weave_geometry,
     wide_sensing_path_poses,
     yaw_corrected_seam_poses,
 )
@@ -95,6 +106,44 @@ from construct_robot.weld_feedback_plot import (
     parse_weld_feedback_log,
     parse_weld_trajectory_log,
 )
+
+
+def test_software_crater_settings_are_opt_in_and_not_recipe_fields():
+    settings = validate_digital_weld_settings({
+        "current_a": 220, "voltage_tenths": 260,
+        "software_crater_enabled": True,
+    })
+    assert round(settings["current_a"] * settings["software_crater_ratio_percent"] / 100) == 66
+    assert settings["software_crater_voltage_v"] == 25.0
+    assert settings["software_crater_hold_s"] == 0.5
+    assert not any(key.startswith("software_crater") for key in digital_weld_recipe(settings))
+    assert not validate_digital_weld_settings({})["software_crater_enabled"]
+    with pytest.raises(ValueError, match="30..400"):
+        validate_digital_weld_settings({"current_a": 100, "software_crater_enabled": True,
+                                        "software_crater_ratio_percent": 20})
+
+
+def test_crescent_weave_has_forward_bulged_half_moons_and_peak_dwell():
+    start, goal = Pose(), Pose()
+    start.orientation.w = goal.orientation.w = 1.0
+    goal.position.x = 0.024
+    points, holds, cycles, pitch_mm = weld_weave_geometry(
+        start, goal, "crescent", 2.0, 6.0, "world_y", 0.1, 0.2,
+    )
+    sine, _ = sine_weaving_with_dwell((start, goal), 0.002, cycles,
+                                      transverse_axis="world_y")
+    assert cycles == 4
+    assert pitch_mm == pytest.approx(6.0)
+    assert len(points) == 49
+    assert points[0].position.x == pytest.approx(0.0)
+    assert points[-1].position.x == pytest.approx(0.024)
+    assert points[3].position.y == pytest.approx(0.002)
+    assert points[9].position.y == pytest.approx(-0.002)
+    assert points[3].position.x > sine[3].position.x
+    assert all(a.position.x < b.position.x for a, b in zip(points[:-1], points[1:]))
+    assert holds[3] == pytest.approx(0.1)
+    assert holds[9] == pytest.approx(0.2)
+    assert sum(value > 0 for value in holds) == 2 * cycles
 
 
 def managed_weld_steps(base_slot=1):
@@ -146,6 +195,119 @@ def managed_weld_steps(base_slot=1):
             step["value"] = True
         result.append(step)
     return result
+
+
+def test_managed_software_crater_is_serial_after_motion_before_arc_off():
+    steps = managed_weld_steps()
+    settings = validate_digital_weld_settings({"current_a": 220, "voltage_tenths": 260,
+                                               "software_crater_enabled": True})
+    crater = {"type": "software_crater", "parallel_slot": 5,
+              "weld_scenario_id": "test-weld", "weld_scenario_stage": "software_crater",
+              "settings": settings}
+    for row in steps:
+        if row["weld_scenario_stage"] in ("arc_off", "goal_wait", "finish", "touch_output_on"):
+            row["parallel_slot"] += 1
+    steps.insert(5, crater)
+    assert validate_managed_weld_sequence(steps, require_complete=True)
+    steps[6]["parallel_slot"] = steps[5]["parallel_slot"]
+    with pytest.raises(ValueError, match="order|follow"):
+        validate_managed_weld_sequence(steps, require_complete=True)
+
+
+def test_custom_hot_start_is_independent_of_native_current_boost():
+    settings = validate_digital_weld_settings({
+        "hot_start_enabled": False,
+        "custom_hot_start_enabled": True,
+        "custom_hot_start_hold_s": 0.15,
+    })
+    assert settings["custom_hot_start_enabled"]
+    assert not settings["hot_start_enabled"]
+    assert not any(key.startswith("custom_hot_start")
+                   for key in digital_weld_recipe(settings))
+
+
+def test_custom_hot_start_fake_hold_waits_without_motion_commands():
+    pose = make_pose()
+    session = {"started_monotonic": time.monotonic(),
+               "arc_off_control": {"arc_established_elapsed_s": 0.0},
+               "custom_hot_start": {}}
+    established = threading.Event()
+    established.set()
+    gui = SimpleNamespace(
+        fake_arc_enabled=SimpleNamespace(get=lambda: True),
+        hicomm_client=None,
+        weld_arc_established_event=established,
+        weld_arc_on_success=True,
+        sequence_stop_requested=False,
+        node=SimpleNamespace(_current_tcp_pose=lambda _group: pose),
+        weld_feedback_lock=threading.Lock(),
+        active_weld_feedback_session=session,
+        post=lambda callback, *args: callback(*args),
+        log=lambda _message: None,
+    )
+    gui._custom_hot_start_record = lambda **values: session["custom_hot_start"].update(values)
+    step = {"type": "custom_hot_start", "planning_group": "right_manipulator",
+            "settings": {"custom_hot_start_hold_s": 0.01}}
+    success, _message = WeldActionGui._execute_custom_hot_start(gui, step)
+    assert success, _message
+    assert session["custom_hot_start"]["status"] == "COMPLETED"
+    assert session["custom_hot_start"]["actual_hold_s"] >= 0.01
+    assert session["custom_hot_start"]["max_tcp_drift_mm"] == 0.0
+
+
+def test_managed_custom_hot_start_must_be_between_arc_and_motion():
+    steps = managed_weld_steps()
+    settings = validate_digital_weld_settings({
+        "custom_hot_start_enabled": True,
+        "custom_hot_start_hold_s": 0.15,
+    })
+    steps[3]["settings"] = settings
+    for row in steps[4:]:
+        row["parallel_slot"] += 2
+    steps.insert(4, {
+        "type": "custom_hot_start", "parallel_slot": steps[3]["parallel_slot"] + 1,
+        "weld_scenario_id": "test-weld", "weld_scenario_stage": "custom_hot_start",
+        "settings": settings,
+    })
+    assert validate_managed_weld_sequence(steps, require_complete=True)
+    unsafe = copy.deepcopy(steps)
+    unsafe[4]["parallel_slot"] = unsafe[5]["parallel_slot"]
+    with pytest.raises(ValueError, match="order|precede"):
+        validate_managed_weld_sequence(unsafe, require_complete=True)
+    steps[1]["interpolation_step"] = 0.005
+    steps[5]["points"] = (make_pose(), make_pose(x=0.1))
+    wait_start = make_pose(z=0.1)
+    wait_goal = make_pose(x=0.1, z=0.1)
+    result = taught_wait_approach_steps(steps, wait_start, wait_goal)
+    slots = {row["weld_scenario_stage"]: row["parallel_slot"] for row in result}
+    assert slots["arc_on"] < slots["custom_hot_start"] < slots["weld_motion"]
+    assert validate_managed_weld_sequence(result, require_complete=True)
+
+
+def test_taught_wait_software_crater_uses_three_serial_weld_slots():
+    steps = managed_weld_steps(base_slot=9)
+    start, goal = Pose(), Pose()
+    start.orientation.w = goal.orientation.w = 1.0
+    goal.position.x = 0.03
+    steps[4]["points"] = (start, goal)
+    steps[1]["interpolation_step"] = 0.005
+    steps[5]["trigger_before_goal"] = False
+    steps.insert(5, {
+        "type": "software_crater", "parallel_slot": 13,
+        "weld_scenario_id": "test-weld", "weld_scenario_stage": "software_crater",
+        "settings": validate_digital_weld_settings({
+            "current_a": 220, "software_crater_enabled": True,
+        }),
+    })
+    wait_start, wait_goal = Pose(), Pose()
+    wait_start.orientation.w = wait_goal.orientation.w = 1.0
+    wait_start.position.z = wait_goal.position.z = 0.1
+    result = taught_wait_approach_steps(steps, wait_start, wait_goal)
+    slots = {step["weld_scenario_stage"]: step["parallel_slot"] for step in result}
+    assert slots["arc_on"] == slots["weld_motion"]
+    assert slots["software_crater"] == slots["weld_motion"] + 1
+    assert slots["arc_off"] == slots["software_crater"] + 1
+    assert validate_managed_weld_sequence(result, require_complete=True)
 
 
 def test_weld_scenario_uses_slots_after_existing_sequence():
@@ -513,6 +675,28 @@ def test_sensed_seam_yaw_rotates_taught_orientations_and_uses_sensed_xyz():
     assert corrected_goal.position == sensed_goal.position
     assert math.isclose(corrected_start.orientation.z, math.sqrt(0.5))
     assert math.isclose(corrected_start.orientation.w, math.sqrt(0.5))
+
+
+def test_fixed_tilt_correction_keeps_wait_attitudes_despite_wait_heading():
+    wait_start = make_pose(0.0, 0.0, 0.2)
+    wait_goal = make_pose(1.0, 0.2, 0.2)
+    fixed_start, fixed_goal = fixed_tilt_wait_reference_poses(
+        wait_start, wait_goal, tilt_y_deg=-15.0
+    )
+    sensed_start = make_pose(0.01, -0.01, 0.19)
+    sensed_goal = make_pose(1.01, -0.01, 0.19)
+    corrected_start, corrected_goal, applied_yaw, label = (
+        apply_sensed_seam_orientation(
+            fixed_start, fixed_goal, sensed_start, sensed_goal,
+            WAIT_FIXED_TILT_ORIENTATION_MODE,
+        )
+    )
+    assert corrected_start.position == sensed_start.position
+    assert corrected_goal.position == sensed_goal.position
+    assert corrected_start.orientation == fixed_start.orientation
+    assert corrected_goal.orientation == fixed_goal.orientation
+    assert applied_yaw == 0.0
+    assert "yaw not applied" in label
 
 
 def test_fixed_tilt_wait_references_apply_the_same_world_y_rotation():
@@ -1009,13 +1193,12 @@ def test_digital_weld_defaults_match_current_production_recipe():
     assert settings["hot_start_enabled"] is True
     assert settings["hot_start_percent"] == 20.0
     assert settings["hot_start_hold_adjustment"] == 0
-    assert settings["crater_enabled"] is True
-    assert settings["crater_percent"] == 30.0
-    assert settings["crater_current_a"] == 60.0
-    assert settings["crater_voltage_v"] == 25.0
-    assert settings["crater_seconds"] == 1.0
+    assert settings["expect_native_crater"] is True
+    assert settings["crater_panel_current_ref_a"] == 60.0
+    assert settings["crater_panel_voltage_ref_v"] == 25.0
+    assert settings["crater_panel_time_ref_s"] == 1.0
     assert weld_current_profile(settings) == {
-        "nominal": 200, "hot": 240, "crater": 60,
+        "nominal": 200, "hot": 240,
     }
     frame = build_request(TxState(**digital_weld_recipe(settings)))
     assert int.from_bytes(frame[3:5], "little") == 200
@@ -1024,6 +1207,23 @@ def test_digital_weld_defaults_match_current_production_recipe():
     assert int.from_bytes(frame[10:12], "little") == 0
     assert int.from_bytes(frame[14:16], "little") == 240
     assert frame[16] == 15
+
+
+def test_named_teaching_recall_policy_and_yaml_provenance(tmp_path):
+    assert TCP_POSE_TEACHING_POSES == {"weld_start", "weld_end"}
+    assert JOINT_RECALL_TEACHING_POSES == {
+        "robot_start", "weld_wait", "weld_start_wait",
+        "weld_goal_wait", "weld_finish",
+    }
+    pose = Pose()
+    pose.orientation.w = 1.0
+    names = [f"right_manipulator_joint{i}" for i in range(1, 7)]
+    path = tmp_path / "teaching.yaml"
+    provenance = {"capture_source": "measured_joint_fk", "tcp_source": "moveit_fk"}
+    save_initial_state_yaml(path, "right_manipulator", names, [0.0]*6,
+                            pose, provenance)
+    assert yaml.safe_load(path.read_text())["capture_provenance"] == provenance
+    assert load_initial_state_yaml(path)[2] == (0.0,)*6
 
 
 def test_weld_production_metrics_integrate_arc_wire_and_motion_window():
@@ -1068,13 +1268,30 @@ def test_hot_start_and_crater_ranges_are_validated():
     for override in (
         {"hot_start_percent": -0.1},
         {"hot_start_hold_adjustment": 16},
-        {"crater_percent": 19.9},
-        {"crater_percent": 40.1},
-        {"crater_seconds": 0.49},
-        {"crater_seconds": 1.51},
+        {"crater_panel_current_ref_a": -0.1},
+        {"crater_panel_current_ref_a": 600.1},
+        {"crater_panel_time_ref_s": -0.1},
+        {"crater_panel_time_ref_s": 30.1},
     ):
         with pytest.raises(ValueError):
             validate_digital_weld_settings(override)
+
+
+def test_crater_panel_reference_never_changes_hicomm_main_or_hot_command():
+    settings = validate_digital_weld_settings({
+        "current_a": 220,
+        "hot_start_percent": 5.0,
+        "hot_start_hold_adjustment": 2,
+        "crater_panel_current_ref_a": 600.0,
+        "crater_panel_voltage_ref_v": 80.0,
+        "crater_panel_time_ref_s": 30.0,
+    })
+    assert weld_current_profile(settings) == {"nominal": 220, "hot": 231}
+    frame = build_request(TxState(**digital_weld_recipe(settings)))
+    assert int.from_bytes(frame[3:5], "little") == 220
+    assert int.from_bytes(frame[14:16], "little") == 231
+    assert frame[16] == 17
+    assert not any(key.startswith("crater") for key in digital_weld_recipe(settings))
 
 
 def test_hicomm_inching_directions_are_mutually_exclusive():
@@ -1906,6 +2123,49 @@ def test_keyboard_global_rotation_all_axes_and_signs_ignore_tcp_attitude():
                     orientation, selection, direction, 0.005, 0.1, frame
                 )
                 assert actual == expected
+
+
+def test_keyboard_velocity_is_edge_published_and_deadman_sends_zero():
+    class Publisher:
+        def __init__(self):
+            self.messages = []
+
+        def publish(self, message):
+            self.messages.append(tuple(message.data))
+
+    class Logger:
+        def warning(self, _message):
+            pass
+
+    node = object.__new__(WeldGuiNode)
+    publisher = Publisher()
+    deadman_events = []
+    node.keyboard_velocity_publishers = {"right": publisher}
+    node.keyboard_velocity_lock = threading.Lock()
+    node.keyboard_velocity_command = {
+        "arm": None,
+        "values": (0.0,) * 6,
+        "refreshed_monotonic": time.monotonic(),
+    }
+    node.ui = SimpleNamespace(
+        keyboard_velocity_deadman_stopped=lambda arm: deadman_events.append(arm),
+        post=lambda callback, *args: callback(*args),
+    )
+    node.get_logger = lambda: Logger()
+
+    node.set_keyboard_velocity("right", (0.005, 0, 0, 0, 0, 0))
+    assert publisher.messages == [(0.005, 0, 0, 0, 0, 0)]
+    node._publish_keyboard_velocity()
+    assert len(publisher.messages) == 1
+
+    node.keyboard_velocity_command["refreshed_monotonic"] = (
+        time.monotonic() - KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S - 0.01
+    )
+    node._publish_keyboard_velocity()
+    assert publisher.messages[-1] == (0.0,) * 6
+    assert deadman_events == ["right"]
+    node._publish_keyboard_velocity()
+    assert len(publisher.messages) == 2
 
 
 class _TestLogger:

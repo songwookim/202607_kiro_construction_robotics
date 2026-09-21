@@ -216,3 +216,117 @@ def test_pass_through_lead_is_not_planned_as_a_tiny_separate_leg():
     response = CartesianPathActionServer.plan_with_holds(server, request, publish=False)
     assert len(calls) == 2
     assert len(response.solution.joint_trajectory.points) == 4
+
+
+# --------------------------------------------------------------------------
+# preview / execution agreement on the weave plane
+# --------------------------------------------------------------------------
+def _sensed_fillet_geometry():
+    """A touch-corrected fillet joint: wall plane + floor plane, 4 deg tilt."""
+    from construct_robot.weld_action_gui import (
+        compute_corrected_seam_geometry, compute_surface_plane,
+    )
+
+    taught_start, taught_goal = Pose(), Pose()
+    taught_start.orientation.w = taught_goal.orientation.w = 1.0
+    taught_goal.position.x = 0.186
+
+    tilt = math.tan(math.radians(4.0))
+    wall = compute_surface_plane(
+        (0.0, 1.0, 0.0),
+        [(0.03, 0.003, 0.02), (0.15, 0.003 + 0.12 * tilt, 0.02)])
+    floor = compute_surface_plane(
+        (0.0, 0.0, 1.0), [(0.03, 0.03, -0.002), (0.15, 0.05, -0.002)])
+    return compute_corrected_seam_geometry(taught_start, taught_goal,
+                                           wall, floor)
+
+
+def _gui_with(geometry, touches):
+    from construct_robot.weld_action_gui import WeldActionGui
+
+    gui = object.__new__(WeldActionGui)
+    gui.corrected_seam_geometry = geometry
+    gui.seam_probe_touches = touches
+    return gui
+
+
+def test_sensed_weave_direction_is_the_geometry_axis_not_a_tool_axis():
+    """The weave plane of a touch-corrected seam comes from the sensed planes.
+
+    e_w lies in the wall/floor bisecting plane, which on a fillet joint is 45
+    degrees away from any tool/world axis.  Previewing the weave about a
+    generic axis and welding it about e_w puts the peaks millimetres apart, so
+    both paths have to read this one accessor.
+    """
+    geometry = _sensed_fillet_geometry()
+    gui = _gui_with(geometry, dict.fromkeys(
+        ("start_wall", "start_floor", "goal_wall", "goal_floor"), object()))
+
+    assert gui.sensed_weave_transverse_vector() == geometry.e_w
+
+    generic = (0.0, 1.0, 0.0)
+    tangent = geometry.d_real
+    projected = [generic[i] - sum(a * b for a, b in zip(generic, tangent)) * tangent[i]
+                 for i in range(3)]
+    norm = math.sqrt(sum(v * v for v in projected))
+    projected = [v / norm for v in projected]
+    angle = math.degrees(math.acos(
+        abs(sum(a * b for a, b in zip(projected, geometry.e_w)))))
+    assert angle == pytest.approx(45.0, abs=1.0)
+
+
+@pytest.mark.parametrize("touches, expected_none", [
+    ({"start_wall": 1, "start_floor": 1, "goal_wall": 1, "goal_floor": 1}, False),
+    ({"start_wall": 1, "start_floor": 1, "goal_wall": None, "goal_floor": None}, False),
+    ({"start_wall": 1, "start_floor": None, "goal_wall": 1, "goal_floor": None}, True),
+    ({"start_wall": None, "start_floor": None, "goal_wall": None, "goal_floor": None}, True),
+])
+def test_sensed_weave_direction_requires_a_complete_endpoint(touches, expected_none):
+    """One endpoint needs *both* surfaces before its geometry means anything."""
+    gui = _gui_with(_sensed_fillet_geometry(), touches)
+    assert (gui.sensed_weave_transverse_vector() is None) is expected_none
+
+
+def test_sensed_weave_direction_is_dropped_without_corrected_geometry():
+    gui = _gui_with(None, dict.fromkeys(
+        ("start_wall", "start_floor", "goal_wall", "goal_floor"), object()))
+    assert gui.sensed_weave_transverse_vector() is None
+
+
+def test_weave_preview_accepts_the_sensed_direction():
+    """The preview entry point must be able to weave about e_w.
+
+    It previously had no transverse_vector parameter at all, so the preview
+    could only ever draw a generic-axis weave while the sequence builder ran
+    the sensed one.
+    """
+    import inspect
+
+    from construct_robot.weld_action_gui import WeldGuiNode
+
+    signature = inspect.signature(WeldGuiNode.generate_weave)
+    assert "transverse_vector" in signature.parameters
+
+
+def test_sensed_and_generic_weaves_actually_differ():
+    """Guards the claim above with numbers rather than trust."""
+    from construct_robot.cartesian_path_common import (
+        linear_pose_waypoints, weaving_from_path,
+    )
+
+    geometry = _sensed_fillet_geometry()
+    base = linear_pose_waypoints(geometry.start, geometry.goal, 2)
+    amplitude = 0.002
+
+    generic = weaving_from_path(base, amplitude, 7, 12, "world_y")
+    sensed = weaving_from_path(base, amplitude, 7, 12, "world_y",
+                               tuple(geometry.e_w))
+    worst = max(
+        math.dist(
+            (a.position.x, a.position.y, a.position.z),
+            (b.position.x, b.position.y, b.position.z),
+        )
+        for a, b in zip(generic, sensed)
+    )
+    # Nearly twice the amplitude itself -- not a rounding difference.
+    assert worst * 1000 > 3.0

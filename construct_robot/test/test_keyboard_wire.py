@@ -26,11 +26,15 @@ def wire_gui():
     gui.root = FakeRoot()
     gui.keyboard_jog_enabled = SimpleNamespace(get=lambda: True)
     gui.keyboard_velocity_switching = False
-    gui.keyboard_velocity_arm = "right_manipulator"
+    # "right", not "right_manipulator": this is what the real _selected_arm()
+    # returns and what keyboard_velocity_arm is assigned from.  The fixture
+    # used to fake the planning-group name here, which made the guard in
+    # keyboard_wire_key_press pass in tests while it could never pass live.
+    gui.keyboard_velocity_arm = "right"
     gui.keyboard_wire_active_key = None
     gui.keyboard_wire_release_after_id = None
     gui.keyboard_jog_status = SimpleNamespace(set=Mock())
-    gui._selected_arm = lambda: "right_manipulator"
+    gui.planning_group = SimpleNamespace(get=lambda: "right_manipulator")
     gui.node = SimpleNamespace(active_motion_goal=None)
     gui.sequence_running = False
     gui.hicomm_connected = True

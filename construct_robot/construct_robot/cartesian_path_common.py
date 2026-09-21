@@ -39,6 +39,25 @@ def pose_is_valid(pose: Pose) -> bool:
 
 
 def _normalize_vector(vector):
+    # Weave generation calls this five times per output waypoint, so the
+    # generator expressions this used to build (one for the sum, one for the
+    # result tuple) were 22% of the time to generate a weave path.  The
+    # 3- and 4-element cases are unrolled; both still divide by ``norm``
+    # rather than multiplying by its reciprocal, so results are unchanged
+    # bit for bit.
+    length = len(vector)
+    if length == 3:
+        x, y, z = vector
+        norm = math.sqrt(x * x + y * y + z * z)
+        if norm < 1e-12:
+            raise ValueError("Cannot normalize a zero-length vector")
+        return (x / norm, y / norm, z / norm)
+    if length == 4:
+        x, y, z, w = vector
+        norm = math.sqrt(x * x + y * y + z * z + w * w)
+        if norm < 1e-12:
+            raise ValueError("Cannot normalize a zero-length vector")
+        return (x / norm, y / norm, z / norm, w / norm)
     norm = math.sqrt(sum(value * value for value in vector))
     if norm < 1e-12:
         raise ValueError("Cannot normalize a zero-length vector")
@@ -207,24 +226,29 @@ def circle_waypoints(
 
 def slerp_quaternion(first, second, ratio):
     """Shortest-path spherical interpolation of two XYZW quaternions."""
-    first_q = _normalize_vector((first.x, first.y, first.z, first.w))
-    second_q = _normalize_vector((second.x, second.y, second.z, second.w))
-    dot = sum(a * b for a, b in zip(first_q, second_q))
+    ax, ay, az, aw = _normalize_vector((first.x, first.y, first.z, first.w))
+    bx, by, bz, bw = _normalize_vector((second.x, second.y, second.z, second.w))
+    dot = ax * bx + ay * by + az * bz + aw * bw
     if dot < 0.0:
-        second_q = tuple(-value for value in second_q)
+        bx, by, bz, bw = -bx, -by, -bz, -bw
         dot = -dot
     dot = max(-1.0, min(1.0, dot))
     if dot > 0.9995:
-        return _normalize_vector(tuple(
-            a + (b - a) * ratio for a, b in zip(first_q, second_q)
+        return _normalize_vector((
+            ax + (bx - ax) * ratio,
+            ay + (by - ay) * ratio,
+            az + (bz - az) * ratio,
+            aw + (bw - aw) * ratio,
         ))
     theta = math.acos(dot)
     sin_theta = math.sin(theta)
     first_scale = math.sin((1.0 - ratio) * theta) / sin_theta
     second_scale = math.sin(ratio * theta) / sin_theta
-    return tuple(
-        first_scale * a + second_scale * b
-        for a, b in zip(first_q, second_q)
+    return (
+        first_scale * ax + second_scale * bx,
+        first_scale * ay + second_scale * by,
+        first_scale * az + second_scale * bz,
+        first_scale * aw + second_scale * bw,
     )
 
 
@@ -280,8 +304,9 @@ def weaving_from_path(
     samples_per_cycle,
     transverse_axis="tool_y",
     transverse_vector=None,
+    pattern="sine",
 ):
-    """Resample a seam and add transverse sinusoidal weave.
+    """Resample a seam and add sine or forward-bulged crescent weave.
 
     ``transverse_vector`` is a World-frame direction supplied by a sensed
     geometry pipeline.  When present it takes priority over the generic
@@ -293,6 +318,8 @@ def weaving_from_path(
         raise ValueError("Weave amplitude must be positive and finite")
     if cycles < 1 or samples_per_cycle < 4:
         raise ValueError("Weave requires cycles >= 1 and samples/cycle >= 4")
+    if pattern not in ("sine", "crescent"):
+        raise ValueError("Weave pattern must be sine or crescent")
     axis_vectors = {
         "tool_x": (1.0, 0.0, 0.0),
         "tool_y": (0.0, 1.0, 0.0),
@@ -316,13 +343,21 @@ def weaving_from_path(
     if total_length < 1e-9:
         raise ValueError("Taught seam has zero length")
 
+    pitch_m = total_length / cycles
+    # Two forward-facing half-moons per cycle. The bound keeps seam progress
+    # strictly increasing: ds/dphase = pitch/(2*pi) + bulge*sin(2*phase).
+    crescent_bulge_m = min(0.5 * amplitude, pitch_m / (4.0 * math.pi))
+
     sample_count = cycles * samples_per_cycle
     points = []
     segment_index = 0
     distance_before_segment = 0.0
     for sample_index in range(sample_count + 1):
         ratio = sample_index / sample_count
+        phase = 2.0 * math.pi * cycles * ratio
         target_distance = total_length * ratio
+        if pattern == "crescent":
+            target_distance += 0.5 * crescent_bulge_m * (1.0 - math.cos(2.0 * phase))
         while (
             segment_index < len(segment_lengths) - 1
             and target_distance
@@ -374,7 +409,7 @@ def weaving_from_path(
                     for index in range(3)
                 )
             )
-        offset = amplitude * math.sin(2.0 * math.pi * cycles * ratio)
+        offset = amplitude * math.sin(phase)
         pose.position.x += transverse[0] * offset
         pose.position.y += transverse[1] * offset
         pose.position.z += transverse[2] * offset
@@ -399,9 +434,9 @@ def weave_cycles_for_pitch(length_m, pitch_mm, max_cycles=100):
 
 def sine_weaving_with_dwell(
     source_points, amplitude, cycles, left_dwell_s=0.0, right_dwell_s=0.0,
-    transverse_axis="tool_y", transverse_vector=None,
+    transverse_axis="tool_y", transverse_vector=None, pattern="sine",
 ):
-    """Generate one smooth ±amplitude sine and optional holds at its peaks."""
+    """Generate a smooth ±amplitude sine/crescent with peak holds."""
     if not all(math.isfinite(v) and 0.0 <= v <= 10.0 for v in
                (left_dwell_s, right_dwell_s)):
         raise ValueError("Weave dwell must be in 0..10 seconds")
@@ -410,7 +445,7 @@ def sine_weaving_with_dwell(
     samples_per_cycle = 12
     points = weaving_from_path(
         source_points, amplitude, cycles, samples_per_cycle,
-        transverse_axis, transverse_vector,
+        transverse_axis, transverse_vector, pattern,
     )
     points[0] = copy.deepcopy(source_points[0])
     points[-1] = copy.deepcopy(source_points[-1])

@@ -188,10 +188,15 @@ def launch_setup(_context):
         executable="robot_state_publisher",
         name="robot_state_publisher",
         output="both",
-        parameters=[moveit_config.robot_description],
+        parameters=[
+            moveit_config.robot_description,
+            {
+                "publish_frequency": 200.0,
+            },
+        ],
     )
 
-    # ros2_control: left/right RB hardware plus a MoveIt-only fake head.
+    # Start controllers for all registered arm and Kaiser head interfaces.
     ros2_controllers_path = os.path.join(
         get_package_share_directory("construct_moveit_config"),
         "config",

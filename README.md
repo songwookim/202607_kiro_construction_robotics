@@ -7,13 +7,24 @@ in [`docs/ROS_GRAPH.md`](docs/ROS_GRAPH.md). Path-generation equations, MoveIt
 conversion, speed scaling, and ros2_control diagrams are in
 [`docs/MOTION_MATH_AND_CONTROL_FLOW.md`](docs/MOTION_MATH_AND_CONTROL_FLOW.md).
 
+[`docs/WELD_MATH_VISUAL.md`](docs/WELD_MATH_VISUAL.md) covers the maths that
+document does not — crescent and circular weaving, dwell placement, weave speed
+conversion, constant-velocity retiming, touch-based seam correction, and the
+imitation-learning seam frame — as equations with plots. Every plot is produced
+by calling the production functions, so regenerating them after a change is how
+you check the document still matches the code:
+
+```bash
+source src/construct_robot_ros2/scripts/use_ros_python.bash
+python3 src/construct_robot_ros2/docs/make_weld_math_figures.py
+```
+
 ## Packages
 
 - `construct_description`: URDF, ros2_control, and optimized mesh assets
 - `construct_moveit_config`: MoveIt 2, ros2_control and RViz configuration
 - `construct_msgs`: Cartesian 6D pose path action
 - `construct_robot`: welding GUI, hardware launch, and Cartesian motion server
-- `construct_tesseract`: Tesseract Robotics model validation and pinned setup
 
 ## Build and test
 
@@ -47,10 +58,6 @@ ros2 launch construct_robot weld_action_gui.launch.py
 This command is **not a fake-hardware test**. It targets LEFT
 `192.168.1.11` and RIGHT `192.168.1.12` and activates the arm trajectory
 controllers. Do not start it unattended around a motion-enabled robot.
-
-The pinned Tesseract dependency overlay lives at
-`/home/irs/ros2_ws/src/tesseract_ws`. Its `COLCON_IGNORE` keeps it out of the
-main workspace build; build it explicitly with `--base-paths src`.
 
 Use **Acquire weld points**, inspect the three live TCP-relative poses, then
 use **1 · Plan Preview**, inspect the trajectory in RViz, then use
@@ -123,6 +130,3 @@ The goal is an ordered `geometry_msgs/Pose[]`. Feedback contains the current
 interpolated 6D pose, waypoint index and progress. The result contains the
 final pose and sampled path. Keep `execute_motion:=false` for visualization
 without controller execution.
-
-See `construct_tesseract/README.md` for the ARM64/Humble Tesseract setup and
-model-validation command.
