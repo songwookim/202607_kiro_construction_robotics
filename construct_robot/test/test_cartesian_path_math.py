@@ -2158,14 +2158,20 @@ def test_keyboard_velocity_is_edge_published_and_deadman_sends_zero():
     node._publish_keyboard_velocity()
     assert len(publisher.messages) == 1
 
+    node.keyboard_velocity_command["deadman_timeout_s"] = (
+        KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S
+    )
     node.keyboard_velocity_command["refreshed_monotonic"] = (
         time.monotonic() - KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S - 0.01
     )
     node._publish_keyboard_velocity()
     assert publisher.messages[-1] == (0.0,) * 6
     assert deadman_events == ["right"]
-    node._publish_keyboard_velocity()
-    assert len(publisher.messages) == 2
+    for _ in range(10):
+        node._publish_keyboard_velocity()
+    # One start plus a five-message zero burst. No stale non-zero is streamed.
+    assert len(publisher.messages) == 6
+    assert all(message == (0.0,) * 6 for message in publisher.messages[1:])
 
 
 class _TestLogger:

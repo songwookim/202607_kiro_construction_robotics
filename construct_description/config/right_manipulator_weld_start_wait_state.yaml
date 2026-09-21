@@ -9,27 +9,28 @@ joint_state:
   - right_manipulator_joint5
   - right_manipulator_joint6
   positions_rad:
-  - 5.178377190017959
-  - 1.3217826422311632
-  - 1.8713122178894
-  - 3.6003668924622554
-  - 1.43199010709304
-  - 1.4408484466689162
+  - 5.129567306191205
+  - 1.2920447202349024
+  - 1.7701947876182358
+  - 3.562848811657437
+  - 1.2017220139682108
+  - 1.3833013970958845
 tcp_pose_world:
   position_m:
-    x: 0.04121428311305797
-    y: -1.6801558671093046
-    z: 0.6793747469756954
+    x: 0.04933451947648172
+    y: -1.7658891193112665
+    z: 0.6605416162068616
   orientation_xyzw:
-    x: -0.4356288838861696
-    y: 0.6341689556213048
-    z: -0.5277814887885134
-    w: -0.35986651878502846
+    x: -0.4564297019727657
+    y: 0.6616221265152331
+    z: -0.49204626482620073
+    w: -0.3343928260789974
 capture_provenance:
   capture_source: measured_joint_fk
   tcp_source: moveit_fk
-  joint_state_timestamp: 1789731414.7031765
-  joint_state_age_ms: 2.13127100141719
-  tf_age_ms: 9.433507919311523
-  tf_fk_position_error_mm: 1.3911054626160788e-12
-  tf_fk_orientation_error_deg: 0.0
+  joint_state_timestamp: 1789980489.3889525
+  joint_state_age_ms: 9.3144989987195
+  tf_age_ms: 675.4276752471924
+  tf_fresh: false
+  tf_fk_position_error_mm: 0.010664775109493353
+  tf_fk_orientation_error_deg: 0.00027916701077270947

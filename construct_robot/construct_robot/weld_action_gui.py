@@ -37,7 +37,7 @@ from rbpodo_msgs.msg import SystemState
 from rbpodo_msgs.srv import MoveStop, SetDigitalOutput, SetRobotPower
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
-from std_msgs.msg import Bool, Empty, Float64MultiArray
+from std_msgs.msg import Bool, Empty, Float64MultiArray, UInt8
 from std_srvs.srv import SetBool, Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -140,7 +140,8 @@ KEYBOARD_VELOCITY_CONTROLLER_NAMES = {
 # deadman independent of Tk so a delayed/missed KeyRelease cannot leave it
 # running.  Tk refreshes this lease only while a direction key is held.
 KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S = 0.25
-KEYBOARD_VELOCITY_HEARTBEAT_MS = 50
+KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S = 0.80
+KEYBOARD_ZERO_BURST_COUNT = 5
 KEYBOARD_TF_LOOKUP_TIMEOUT_S = 0.05
 
 KEYBOARD_LINEAR_SPEEDS_MM_S = (5.0, 15.0, 45.0)
@@ -2569,6 +2570,46 @@ def correct_four_pass_references(references, corrected_root_start, corrected_roo
     return corrected, math.degrees(angle)
 
 
+def correct_seam_from_measured_start(predicted_start, predicted_goal, measured_start):
+    """Translate a predicted seam by one physically measured START.
+
+    A START-only measurement cannot observe seam yaw or length. Preserve the
+    predicted START-to-GOAL vector and both logged welding attitudes, and apply
+    only the measured XYZ translation to the complete seam.
+    """
+    if not all(
+        pose is not None and pose_is_valid(pose)
+        for pose in (predicted_start, predicted_goal, measured_start)
+    ):
+        raise ValueError("Predicted START/GOAL and measured START are required")
+    if math.dist(
+        _pose_position_tuple(predicted_start),
+        _pose_position_tuple(predicted_goal),
+    ) < 0.001:
+        raise ValueError("Predicted seam is shorter than 1 mm")
+    delta = tuple(
+        measured - predicted
+        for measured, predicted in zip(
+            _pose_position_tuple(measured_start),
+            _pose_position_tuple(predicted_start),
+        )
+    )
+    corrected_start = copy.deepcopy(predicted_start)
+    corrected_goal = copy.deepcopy(predicted_goal)
+    for index, axis in enumerate(("x", "y", "z")):
+        setattr(
+            corrected_start.position,
+            axis,
+            getattr(measured_start.position, axis),
+        )
+        setattr(
+            corrected_goal.position,
+            axis,
+            getattr(predicted_goal.position, axis) + delta[index],
+        )
+    return corrected_start, corrected_goal, delta
+
+
 def save_seam_touch_yaml(
     path,
     planning_group,
@@ -2893,6 +2934,8 @@ class WeldGuiNode(Node):
             "arm": None,
             "values": (0.0,) * 6,
             "refreshed_monotonic": time.monotonic(),
+            "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
+            "zero_burst_remaining": 0,
         }
         self.create_timer(0.02, self._publish_keyboard_velocity)
         self.joint_trajectory_cancel_clients = {
@@ -3060,6 +3103,12 @@ class WeldGuiNode(Node):
             10,
         )
         self.create_subscription(
+            UInt8,
+            "/keyboard_teaching/arrow_state",
+            self._keyboard_arrow_state,
+            10,
+        )
+        self.create_subscription(
             WideSensingResult,
             str(self.get_parameter("wide_sensing_result_topic").value),
             self._wide_sensing_result,
@@ -3095,6 +3144,30 @@ class WeldGuiNode(Node):
             self.get_parameter("fastech_ip").value,
             self.get_parameter("fastech_board_id").value,
             self.get_parameter("fastech_poll_period_s").value,
+        )
+
+    def _keyboard_arrow_state(self, message):
+        mask = int(message.data) & 0x0F
+        # Safety path stays entirely in the ROS executor: do not wait for the
+        # Tk queue to notice a physical release before publishing velocity
+        # zero. Multiple simultaneous arrows are also treated as STOP.
+        valid_single_arrow = mask in (0x01, 0x02, 0x04, 0x08)
+        if not valid_single_arrow:
+            with self.keyboard_velocity_lock:
+                moving = any(
+                    abs(value) > 1e-12
+                    for value in self.keyboard_velocity_command["values"]
+                )
+            if moving:
+                self.clear_keyboard_velocity()
+                self.get_logger().info(
+                    "KEYBOARD PHYSICAL RELEASE · immediate ROS velocity zero"
+                )
+        # Do not coalesce physical edges: a short release between two presses
+        # is precisely the safety event that must never be discarded.
+        self.ui.post(
+            self.ui.keyboard_arrow_state_received,
+            mask,
         )
 
     def _wide_sensing_result(self, message):
@@ -3188,6 +3261,8 @@ class WeldGuiNode(Node):
                 "arm": arm,
                 "values": values,
                 "refreshed_monotonic": time.monotonic(),
+                "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
+                "zero_burst_remaining": 0,
             }
         # jog_robot_l is latched; publish once on start/direction/speed change.
         # Re-streaming identical non-zero messages can queue stale motion ahead
@@ -3204,6 +3279,7 @@ class WeldGuiNode(Node):
             ):
                 return False
             command["refreshed_monotonic"] = time.monotonic()
+            command["deadman_timeout_s"] = KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S
             return True
 
     def clear_keyboard_velocity(self):
@@ -3213,6 +3289,8 @@ class WeldGuiNode(Node):
                 "arm": arm,
                 "values": (0.0,) * 6,
                 "refreshed_monotonic": time.monotonic(),
+                "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
+                "zero_burst_remaining": KEYBOARD_ZERO_BURST_COUNT,
             }
         if arm in self.keyboard_velocity_publishers:
             self._publish_keyboard_velocity(force=True)
@@ -3242,19 +3320,33 @@ class WeldGuiNode(Node):
             refreshed = float(self.keyboard_velocity_command.get(
                 "refreshed_monotonic", 0.0
             ))
+            timeout_s = float(self.keyboard_velocity_command.get(
+                "deadman_timeout_s", KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S
+            ))
             if (
                 arm in self.keyboard_velocity_publishers
                 and any(abs(value) > 1e-12 for value in values)
                 and time.monotonic() - refreshed
-                > KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S
+                > timeout_s
             ):
                 values = (0.0,) * 6
                 self.keyboard_velocity_command["values"] = values
                 self.keyboard_velocity_command["refreshed_monotonic"] = time.monotonic()
+                self.keyboard_velocity_command["zero_burst_remaining"] = (
+                    KEYBOARD_ZERO_BURST_COUNT
+                )
                 expired_arm = arm
+            zero_burst = int(self.keyboard_velocity_command.get(
+                "zero_burst_remaining", 0
+            ))
+            if not any(abs(value) > 1e-12 for value in values) and zero_burst > 0:
+                self.keyboard_velocity_command["zero_burst_remaining"] = zero_burst - 1
+                publish_zero_burst = True
+            else:
+                publish_zero_burst = False
         if arm not in self.keyboard_velocity_publishers:
             return
-        if not force and expired_arm is None:
+        if not force and expired_arm is None and not publish_zero_burst:
             return
         message = Float64MultiArray()
         message.data = list(values)
@@ -4342,14 +4434,27 @@ class WeldGuiNode(Node):
         if (position_error_mm > float(self.get_parameter("teaching_fk_tf_position_tolerance_mm").value)
                 or orientation_error_deg > float(self.get_parameter("teaching_fk_tf_orientation_tolerance_deg").value)):
             raise RuntimeError(f"FK/TF mismatch = {position_error_mm:.2f} mm / {orientation_error_deg:.2f} deg")
-        if tf_age_ms > float(self.get_parameter("teaching_tf_max_age_ms").value):
-            raise RuntimeError(f"TF is stale ({tf_age_ms:.1f} ms)")
+        tf_max_age_ms = float(
+            self.get_parameter("teaching_tf_max_age_ms").value
+        )
+        tf_fresh = tf_age_ms <= tf_max_age_ms
+        if not tf_fresh:
+            # FK from the fresh, complete six-joint snapshot is the canonical
+            # saved TCP.  robot_state_publisher may publish the matching TF at
+            # a lower cadence; once FK/TF geometry agrees above, timestamp age
+            # alone must not silently keep an older WAIT teaching active.
+            self.get_logger().warning(
+                f"TEACH CAPTURE · {pose_name} · TF timestamp is stale "
+                f"({tf_age_ms:.1f} ms), accepted because fresh-joint FK and "
+                "observed TF agree"
+            )
         provenance = {
             "capture_source": "measured_joint_fk",
             "tcp_source": "moveit_fk",
             "joint_state_timestamp": snapshot["stamp_sec"],
             "joint_state_age_ms": age_ms,
             "tf_age_ms": tf_age_ms,
+            "tf_fresh": tf_fresh,
             "tf_fk_position_error_mm": position_error_mm,
             "tf_fk_orientation_error_deg": orientation_error_deg,
         }
@@ -4798,9 +4903,11 @@ class WeldGuiNode(Node):
             time.sleep(0.05)
         return False
 
-    def wait_until_arm_stopped(self, arm, timeout=3.0):
+    def wait_until_arm_stopped(self, arm, timeout=3.0, stable_duration_s=0.30):
         """Confirm measured joints remain still before capturing the touch."""
-        return self.wait_until_device_stopped(arm, timeout)
+        return self.wait_until_device_stopped(
+            arm, timeout, stable_duration_s=stable_duration_s
+        )
 
     def wait_for_robot_idle(self, arm, timeout=2.5):
         """Wait until the RB motion task has fully left its moving state."""
@@ -4819,7 +4926,9 @@ class WeldGuiNode(Node):
             time.sleep(0.02)
         return False
 
-    def wait_until_device_stopped(self, device, timeout=3.0):
+    def wait_until_device_stopped(
+        self, device, timeout=3.0, stable_duration_s=0.30
+    ):
         """Confirm a controlled arm or head remains measurably stationary."""
         names = tuple(sorted(CONTROLLED_JOINT_NAMES[device]))
         deadline = time.monotonic() + timeout
@@ -4846,7 +4955,7 @@ class WeldGuiNode(Node):
                 )
                 if maximum_delta <= 2e-5:
                     stable_since = stable_since or now
-                    if now - stable_since >= 0.30:
+                    if now - stable_since >= float(stable_duration_s):
                         return True
                 else:
                     stable_since = None
@@ -5662,11 +5771,18 @@ class WeldGuiNode(Node):
         goal.planning_options.replan = False
         touch_guarded = bool(
             execute_requested
+            and step.get("pose_name") != "weld_goal_wait"
             and (
                 step.get("touch_guard", False)
                 or step.get("pose_name") in TOUCH_GUARDED_TEACHING_POSES
             )
         )
+        if execute_requested and step.get("pose_name") == "weld_goal_wait":
+            self.ui.post(
+                self.ui.log,
+                "GOAL WAIT retract · Fastech touch guard disabled; "
+                "DI contact will not cancel this motion",
+            )
         arm = step["planning_group"].removesuffix("_manipulator")
         if touch_guarded:
             if self.node_touch_input_states.get(arm) is None:
@@ -5980,9 +6096,15 @@ class WeldActionGui:
         self.keyboard_velocity_switching = False
         self.keyboard_velocity_active_key = None
         self.keyboard_release_after_id = None
-        self.keyboard_velocity_heartbeat_after_id = None
+        self.keyboard_stop_generation = 0
+        self.keyboard_ros_input_last_at = 0.0
+        self.keyboard_ros_physical_key = None
+        self.keyboard_ros_physical_mask = 0
+        self.keyboard_ros_zero_seen = False
+        self.keyboard_ros_dispatching = False
         self.keyboard_shortcut_active_keys = set()
         self.keyboard_shortcut_release_ids = {}
+        self.keyboard_teaching_capture_in_progress = False
         self.fake_head_hardware = False
         self.plan_approved = False
         self.linear_tcp_endpoints = [None, None]
@@ -7469,8 +7591,17 @@ class WeldActionGui:
             variable=self.auto_seam_move_to_end_pose,
         ).pack(side=tk.LEFT, padx=(12, 0))
 
+        # Multi-pass alignment is a separate production workflow.  Keeping it
+        # inside the single-seam touch panel made the root correction and the
+        # per-pass verification controls look like part of one operation.
+        multi_pass = self._create_toggle_section(
+            outer,
+            "multi_pass_correction",
+            "Multi-pass Seam Correction · 1G root/pass alignment",
+            expanded=False,
+        )
         four_pass = ttk.LabelFrame(
-            touch_corner, text="4-pass seam correction · root=1.log"
+            multi_pass, text="4-pass reference set · root=1.log"
         )
         four_pass.pack(fill=tk.X, pady=3)
         four_pass_row = ttk.Frame(four_pass)
@@ -7502,7 +7633,7 @@ class WeldActionGui:
             values=(2, 3, 4), width=4, state="readonly",
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            pass_probe_row, text="Touch selected pass → re-correct",
+            pass_probe_row, text="Touch selected pass START → translate seam",
             command=self.run_selected_pass_correction,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
@@ -7515,9 +7646,12 @@ class WeldActionGui:
         ttk.Label(
             four_pass,
             text=(
-                "START/GOAL WAIT: teach once for root. Pass TCP orientations come "
-                "from their logs. Generated poses are predictions; re-probe each "
-                "pass before welding when bead buildup can shift the seam."
+                "Recommended teaching: root START WAIT + GOAL WAIT once. The four "
+                "TCP START/GOAL poses and orientations come from 1.log..4.log. "
+                "Root senses START+GOAL to correct fixture direction. Pass 2–4 then "
+                "re-probe START only and translate their logged START/GOAL together. "
+                "All touch probing keeps the taught upright WAIT attitude; each logged "
+                "welding attitude is applied later at safe clearance."
             ),
             foreground="#b3261e",
         ).pack(anchor=tk.W, padx=3)
@@ -10300,6 +10434,12 @@ class WeldActionGui:
                     "root seam direction change and anchored to sensed root endpoint"
                 ),
                 "orientation_policy": "preserve each pass log orientation_xyzw",
+                "root_sensing_orientation_policy": (
+                    "common taught upright START/GOAL WAIT orientations"
+                ),
+                "selected_pass_reprobe_policy": (
+                    "START wall/base only; translate predicted START/GOAL equally"
+                ),
                 "verification_required": True,
                 "common_start_wait": pose_dict(self.taught_robot_poses["weld_start_wait"][3]),
                 "common_goal_wait": pose_dict(self.taught_robot_poses["weld_goal_wait"][3]),
@@ -10400,20 +10540,24 @@ class WeldActionGui:
                             getattr(saved_wait[3].position, axis)
                             + getattr(pass_pose.position, axis)
                             - getattr(root_pose.position, axis))
-                translated.orientation = copy.deepcopy(pass_pose.orientation)
+                # Keep one common neutral/upright sensing attitude for every
+                # pass. The pass-specific welding attitude remains in the
+                # corrected START/GOAL record and is applied later by the safe
+                # weld-approach sequence.
+                translated.orientation = copy.deepcopy(saved_wait[3].orientation)
                 waits[wait_name] = translated
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
             self.error(f"Cannot prepare selected-pass touch: {error}")
             return
         if not messagebox.askyesno(
             "Physical 1G pass re-probe",
-            f"Probe pass {number} with four DI4 contacts (wall/base at START/GOAL)?\n\n"
+            f"Probe pass {number} START with two DI4 contacts (wall/base)?\n\n"
             "Root correction is only an initial estimate. The root WAIT offsets "
-            "will be translated to this pass (at least 20 mm World +Z clearance). "
-            "Verify both elevated WAIT paths and the probe direction/max travel "
-            "against the actual bead and fixture. The two touched surfaces "
-            "must define the intended pass centerline; bead-top contact alone "
-            "does not determine TCP offset. Keep STOP accessible.\n\n"
+            "will be translated to this pass while the common upright sensing "
+            "attitude is retained (at least 20 mm World +Z clearance). The measured "
+            "START translation is applied equally to logged START and GOAL; yaw and "
+            "length remain the root-corrected prediction. Verify probe direction and "
+            "actual tip contact against the bead/fixture. Keep STOP accessible.\n\n"
             "No welding will start. Root teaching and source logs stay unchanged.",
             parent=self.root,
         ):
@@ -10436,8 +10580,9 @@ class WeldActionGui:
         if session is None:
             raise ValueError("No selected-pass touch session")
         number, folder = session["number"], session["folder"]
-        if any(self.seam_probe_touches[name] is None for name in CORNER_TOUCH_NAMES):
-            raise ValueError("All four DI4 contacts are required")
+        start_touch_names = ("start_wall", "start_floor")
+        if any(self.seam_probe_touches[name] is None for name in start_touch_names):
+            raise ValueError("START wall/base DI4 contacts are required")
         reference = session["reference"]
         _, wall_normal, floor_normal, wall_label, floor_label = (
             self._seam_geometry_settings(require_teaching=True)
@@ -10448,34 +10593,50 @@ class WeldActionGui:
             reference, wall_normal, floor_normal, 0.0, 0.0, log_debug=True
         )
         predicted = (reference["weld_start"][3], reference["weld_end"][3])
-        measured = (geometry.start, geometry.goal)
-        errors_mm = [1000.0 * math.dist(_pose_position_tuple(a), _pose_position_tuple(b))
-                     for a, b in zip(predicted, measured)]
-        if max(errors_mm) > 20.0:
+        corrected_start, corrected_goal, translation = (
+            correct_seam_from_measured_start(
+                predicted[0], predicted[1], geometry.start
+            )
+        )
+        measured = (corrected_start, corrected_goal)
+        translation_mm = tuple(value * 1000.0 for value in translation)
+        translation_norm_mm = math.sqrt(
+            sum(value * value for value in translation_mm)
+        )
+        if translation_norm_mm > 20.0:
             raise ValueError(
-                f"Pass {number} touch differs from prediction by {max(errors_mm):.1f} mm "
+                f"Pass {number} START touch differs from prediction by "
+                f"{translation_norm_mm:.1f} mm "
                 "(limit 20 mm); inspect contact geometry before retrying"
             )
-        angle = math.degrees(math.acos(max(-1.0, min(1.0, _vector_dot(
-            seam_direction(*predicted), seam_direction(*measured)
-        )))))
-        if angle > 5.0:
-            raise ValueError(f"Pass {number} seam direction changed {angle:.1f}° (>5°)")
         path = folder / f"pass_{number}.yaml"
         record = yaml.safe_load(path.read_text())
-        record["status"] = "pass_physically_probed_unverified_for_weld"
+        record["status"] = "pass_start_probed_translation_unverified_for_weld"
         record["corrected_start"] = self._pose_execution_conditions(measured[0])
         record["corrected_goal"] = self._pose_execution_conditions(measured[1])
         record["touch_provenance"] = {
-            "method": "1G four-contact wall/base at each endpoint; plane intersection",
+            "method": (
+                "1G START-only wall/base contact; measured START translation "
+                "applied equally to predicted START/GOAL"
+            ),
             "wall_normal": list(wall_normal), "base_normal": list(floor_normal),
             "wall_axis": wall_label, "base_axis": floor_label,
             "wall_sign": self.wall_probe_sign.get(),
             "base_sign": self.floor_probe_sign.get(),
-            "predicted_delta_mm": errors_mm,
-            "direction_change_deg": angle,
-            "contacts": {name: self._pose_execution_conditions(self.seam_probe_touches[name])
-                         for name in CORNER_TOUCH_NAMES},
+            "translation_xyz_mm": list(translation_mm),
+            "translation_norm_mm": translation_norm_mm,
+            "direction_policy": "preserve root-corrected logged seam vector",
+            "length_policy": "preserve root-corrected logged seam length",
+            "sensing_orientation_policy": "common taught WAIT orientation",
+            "welding_orientation_policy": (
+                "preserve source-log START/GOAL orientations"
+            ),
+            "contacts": {
+                name: self._pose_execution_conditions(
+                    self.seam_probe_touches[name]
+                )
+                for name in start_touch_names
+            },
         }
         temporary_path = None
         try:
@@ -10511,11 +10672,14 @@ class WeldActionGui:
             "start": copy.deepcopy(measured[0]), "goal": copy.deepcopy(measured[1])
         }
         self.four_pass_status.set(
-            f"Pass {number} physically re-probed · {path} · load source log separately for welding"
+            f"Pass {number} START re-probed/translated · {path} · "
+            "load source log separately for welding"
         )
         self.pipeline_result(
-            f"1G PASS {number} TOUCH RE-CORRECTED · START/GOAL saved · "
-            f"Δ={errors_mm[0]:.1f}/{errors_mm[1]:.1f} mm · no welding started"
+            f"1G PASS {number} START TOUCH RE-CORRECTED · "
+            f"START/GOAL translated · ΔXYZ=({translation_mm[0]:+.1f}, "
+            f"{translation_mm[1]:+.1f}, {translation_mm[2]:+.1f}) mm · "
+            "no welding started"
         )
 
     def apply_selected_pass_correction(self):
@@ -10541,7 +10705,11 @@ class WeldActionGui:
                     )
             start = _pose_from_yaml_dict(record["corrected_start"], "corrected START")
             goal = _pose_from_yaml_dict(record["corrected_goal"], "corrected GOAL")
-            if record.get("status") != "pass_physically_probed_unverified_for_weld":
+            if record.get("status") not in (
+                "pass_start_probed_translation_unverified_for_weld",
+                # Backward compatibility with existing correction folders.
+                "pass_physically_probed_unverified_for_weld",
+            ):
                 raise ValueError(f"Pass {number} has not been physically re-probed")
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
             self.error(f"Cannot apply pass correction: {error}")
@@ -10575,7 +10743,10 @@ class WeldActionGui:
         if self.planning_group.get() != "right_manipulator":
             self.error("Automatic seam correction currently supports right arm")
             return
-        fixed_tilt_mode = self._wait_fixed_tilt_mode_enabled() and not pass_mode
+        multi_pass_sensing_mode = bool(pass_mode or self.four_pass_auto_pending)
+        fixed_tilt_mode = (
+            self._wait_fixed_tilt_mode_enabled() and not multi_pass_sensing_mode
+        )
         required = (
             ("weld_start_wait", "weld_goal_wait")
             if fixed_tilt_mode
@@ -10611,13 +10782,18 @@ class WeldActionGui:
             self.error("Fastech DI4 is already ON; release it before auto correction")
             return
         orientation_note = (
-            "START/GOAL orientation = each WAIT orientation + fixed World XYZ "
-            f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
-            f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
-            f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)\n"
-            "Separate Weld START/GOAL teaching is not required."
-            if fixed_tilt_mode
-            else "START/GOAL orientation = existing Weld START/GOAL teaching."
+            "Touch orientation = taught upright START/GOAL WAIT orientation; "
+            "logged welding orientations are preserved for later safe approach."
+            if multi_pass_sensing_mode
+            else (
+                "START/GOAL orientation = each WAIT orientation + fixed World XYZ "
+                f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
+                f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
+                f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)\n"
+                "Separate Weld START/GOAL teaching is not required."
+                if fixed_tilt_mode
+                else "START/GOAL orientation = existing Weld START/GOAL teaching."
+            )
         )
         if not pass_mode and not messagebox.askyesno(
             "Automatic Seam Correction",
@@ -10663,26 +10839,31 @@ class WeldActionGui:
                 )
             elif pass_mode:
                 endpoint_tcp = self.active_pass_probe["reference"][endpoint_name][3]
-                orientation_source = f"pass {self.active_pass_probe['number']} source log"
+                orientation_source = TEACHING_POSES[wait_name]
+            elif self.four_pass_auto_pending:
+                endpoint_tcp = self.taught_robot_poses[endpoint_name][3]
+                orientation_source = TEACHING_POSES[wait_name]
             else:
                 endpoint_tcp = self.taught_robot_poses[endpoint_name][3]
                 orientation_source = TEACHING_POSES[endpoint_name]
 
-            # IMPORTANT for tilted welding:
-            # The Fastech DI0 wall/floor contact is recorded as the robot TCP pose. If
-            # probing is done with the WAIT attitude while the welded endpoint
-            # uses a different (tilted) attitude, any TCP-to-wire/contact lever
-            # arm rotates and appears as a false Y/Z seam correction. Probe with
-            # exactly the endpoint welding attitude so that this fixed tool
-            # geometry cancels between teaching and sensing. Keep the WAIT XYZ
-            # stand-off unchanged; only its temporary AUTO-probe orientation is
-            # replaced. The stored WAIT teaching itself is never modified.
+            # Single-seam correction retains the historical endpoint-attitude
+            # probe behavior. Multi-pass correction instead uses one common
+            # upright WAIT attitude so pass-specific torch tilt cannot change
+            # the physical contact feature or sweep the torch body into the
+            # trapezoid. Its TCP must therefore be calibrated at the wire tip.
             probe_wait_tcp = copy.deepcopy(
                 self.active_pass_probe["waits"][wait_name] if pass_mode else tcp
             )
-            probe_wait_tcp.orientation = copy.deepcopy(endpoint_tcp.orientation)
+            if multi_pass_sensing_mode:
+                # Root and selected-pass probing share the same upright WAIT
+                # attitude. Pass welding attitudes remain in the corrected TCP
+                # records and are acquired later at safe clearance.
+                probe_wait_tcp.orientation = copy.deepcopy(tcp.orientation)
+            else:
+                probe_wait_tcp.orientation = copy.deepcopy(endpoint_tcp.orientation)
             orientation_delta = quaternion_angular_distance(
-                tcp.orientation, endpoint_tcp.orientation
+                tcp.orientation, probe_wait_tcp.orientation
             )
             self.log(
                 f"AUTO probe orientation · {TEACHING_POSES[wait_name]} XYZ kept · "
@@ -10702,8 +10883,7 @@ class WeldActionGui:
                     min(1.0, self.velocity_percent.get() / 100.0),
                 ),
                 "probe_orientation_source": (
-                    WAIT_FIXED_TILT_ORIENTATION_MODE
-                    if fixed_tilt_mode else endpoint_name
+                    orientation_source
                 ),
                 # These are already taught TCP targets. Keep automatic seam
                 # correction responsive instead of allowing 5 s × 5 attempts.
@@ -10715,11 +10895,12 @@ class WeldActionGui:
                 wait_steps["weld_start_wait"],
                 ("start_wall", "start_floor"),
             ),
-            (
+        ]
+        if not pass_mode:
+            workflow.append((
                 wait_steps["weld_goal_wait"],
                 ("goal_wall", "goal_floor"),
-            ),
-        ]
+            ))
         # Every AUTO run is a new measurement session.  Clear *all* derived
         # seam state, including computed endpoints from the previous run.
         self._invalidate_seam_correction_runtime(
@@ -10961,7 +11142,7 @@ class WeldActionGui:
                         f"{kind} completed, but Fastech DI0 remained ON",
                     )
                     return
-            if group_index == 1:
+            if group_index == 1 and group_total > 1:
                 self.post(
                     self._set_auto_seam_status,
                     "START wall/base complete · next: moving to "
@@ -11426,6 +11607,24 @@ class WeldActionGui:
         """Return immutable TCP1/TCP2 seam references used for geometry/yaw."""
         if self.active_pass_probe is not None:
             return self.active_pass_probe["reference"]
+        if self.four_pass_auto_pending and 1 in self.four_pass_references:
+            # Multi-pass root sensing is anchored to 1.log. START/GOAL WAIT
+            # are elevated neutral sensing poses, not the nominal seam
+            # endpoints, so fixed-WAIT orientation mode must not replace the
+            # root log's endpoint geometry here.
+            root = self.four_pass_references[1]
+            self.log(
+                "Multi-pass root reference ready from 1.log · "
+                "WAIT poses supply sensing approach only"
+            )
+            return {
+                "weld_start": (
+                    "right_manipulator", (), (), copy.deepcopy(root["start"])
+                ),
+                "weld_end": (
+                    "right_manipulator", (), (), copy.deepcopy(root["goal"])
+                ),
+            }
         if self._wait_fixed_tilt_mode_enabled():
             reference = self._wait_fixed_tilt_seam_reference(require_complete)
             if reference is not None:
@@ -14652,6 +14851,19 @@ class WeldActionGui:
             (tk.Entry, tk.Listbox, tk.Text, ttk.Entry, ttk.Spinbox, ttk.Combobox),
         )
 
+    def _keyboard_focus_allows_jog(self):
+        """Return False for text widgets, external focus, and Tk modal windows."""
+        try:
+            widget = self.root.focus_get()
+        except (KeyError, tk.TclError):
+            # Native Tk dialogs such as .__tk__messagebox are not registered
+            # in root.children, so focus_get() can raise while resolving them.
+            return False
+        return (
+            widget is not None
+            and not self._keyboard_focus_accepts_arrows(widget)
+        )
+
     def keyboard_jog_enable_changed(self):
         enable = bool(self.keyboard_jog_enabled.get())
         if not enable:
@@ -14789,53 +15001,81 @@ class WeldActionGui:
             pass
         self.keyboard_release_after_id = None
 
-    def _cancel_keyboard_velocity_heartbeat(self):
-        timer = self.keyboard_velocity_heartbeat_after_id
-        self.keyboard_velocity_heartbeat_after_id = None
-        if timer is None:
-            return
-        try:
-            self.root.after_cancel(timer)
-        except tk.TclError:
-            pass
-
-    def _schedule_keyboard_velocity_heartbeat(self):
-        self._cancel_keyboard_velocity_heartbeat()
-        self.keyboard_velocity_heartbeat_after_id = self.root.after(
-            KEYBOARD_VELOCITY_HEARTBEAT_MS,
-            self._keyboard_velocity_heartbeat,
-        )
-
-    def _keyboard_velocity_heartbeat(self):
-        self.keyboard_velocity_heartbeat_after_id = None
-        arm = self.keyboard_velocity_arm
-        if (
-            self.keyboard_velocity_active_key is None
-            or arm is None
-            or not self.keyboard_jog_enabled.get()
-            or not self.node.refresh_keyboard_velocity(arm)
-        ):
-            return
-        self._schedule_keyboard_velocity_heartbeat()
-
     def _stop_keyboard_jog_command(self, status=None):
         """Publish zero now and cancel every Tk-side continuation."""
         self._cancel_keyboard_release_timer()
-        self._cancel_keyboard_velocity_heartbeat()
         active_key = self.keyboard_velocity_active_key
+        arm = self.keyboard_velocity_arm
         self.keyboard_velocity_active_key = None
+        self.keyboard_stop_generation += 1
+        generation = self.keyboard_stop_generation
         self.node.clear_keyboard_velocity()
         if status is not None and active_key is not None:
             self.keyboard_jog_status.set(status)
+        if active_key is not None and arm is not None:
+            threading.Thread(
+                target=self._verify_keyboard_jog_stop_worker,
+                args=(arm, generation),
+                daemon=True,
+            ).start()
+
+    def _verify_keyboard_jog_stop_worker(self, arm, generation):
+        stopped = self.node.wait_until_arm_stopped(
+            arm, timeout=0.22, stable_duration_s=0.08
+        )
+        self.post(
+            self._keyboard_jog_stop_verified,
+            arm, generation, stopped,
+        )
+
+    def _keyboard_jog_stop_verified(self, arm, generation, stopped):
+        if (
+            generation != self.keyboard_stop_generation
+            or self.keyboard_velocity_active_key is not None
+            or arm != self.keyboard_velocity_arm
+            or not self.keyboard_jog_enabled.get()
+        ):
+            return
+        if stopped:
+            self.log(f"Keyboard jog STOP CONFIRMED · {arm.upper()} measured standstill")
+            return
+        self.keyboard_jog_status.set(
+            f"STOP FALLBACK · {arm.upper()} controlled move_stop"
+        )
+        self.log(
+            f"Keyboard jog zero not stationary within 0.22 s · "
+            f"requesting {arm.upper()} controlled move_stop"
+        )
+        threading.Thread(
+            target=self._keyboard_jog_direct_stop_worker,
+            args=(arm, generation),
+            daemon=True,
+        ).start()
+
+    def _keyboard_jog_direct_stop_worker(self, arm, generation):
+        success, message = self.node.request_direct_motion_stop(arm)
+        self.post(
+            self._keyboard_jog_direct_stop_result,
+            arm, generation, success, message,
+        )
+
+    def _keyboard_jog_direct_stop_result(
+        self, arm, generation, success, message
+    ):
+        if generation != self.keyboard_stop_generation:
+            return
+        callback = self.log if success else self.error
+        callback(
+            f"Keyboard jog STOP FALLBACK · {arm.upper()} · "
+            f"{'OK' if success else 'FAILED'} · {message}"
+        )
 
     def keyboard_velocity_deadman_stopped(self, arm):
         """Synchronize UI state after the ROS-thread deadman sent zero."""
         if arm != self.keyboard_velocity_arm:
             return
         key = self.keyboard_velocity_active_key
-        self._cancel_keyboard_release_timer()
-        self._cancel_keyboard_velocity_heartbeat()
-        self.keyboard_velocity_active_key = None
+        self._stop_keyboard_jog_command()
         self.keyboard_jog_status.set(
             f"STOPPED · {arm.upper()} deadman zero · press direction again"
         )
@@ -14863,7 +15103,7 @@ class WeldActionGui:
     def keyboard_wire_key_press(self, event):
         if not self.keyboard_jog_enabled.get():
             return None
-        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+        if not self._keyboard_focus_allows_jog():
             return None
         key = str(event.keysym).lower()
         if key not in ("f", "r"):
@@ -14932,11 +15172,66 @@ class WeldActionGui:
                 f"Keyboard jog STOP · {(arm or 'robot').upper()} focus lost"
             )
 
+    def _keyboard_ros_input_online(self):
+        return time.monotonic() - self.keyboard_ros_input_last_at < 0.35
+
+    def keyboard_arrow_state_received(self, mask):
+        """Consume unambiguous physical arrow state from the ROS2 X11 node."""
+        mask = int(mask) & 0x0F
+        previous_key = self.keyboard_ros_physical_key
+        self.keyboard_ros_input_last_at = time.monotonic()
+        self.keyboard_ros_physical_mask = mask
+        if mask == 0:
+            self.keyboard_ros_zero_seen = True
+        key = {
+            0x01: "Left",
+            0x02: "Right",
+            0x04: "Up",
+            0x08: "Down",
+        }.get(mask)
+        self.keyboard_ros_physical_key = key
+
+        # Multiple arrows are treated as STOP. The selected teaching planes
+        # already map one arrow to a deterministic Cartesian vector.
+        has_focus = self._keyboard_focus_allows_jog()
+        usable = (
+            self.keyboard_ros_zero_seen
+            and has_focus
+            and self.keyboard_jog_enabled.get()
+        )
+        if not usable:
+            if self.keyboard_velocity_active_key is not None:
+                self._stop_keyboard_jog_command("STOPPED · keyboard input inactive")
+            return
+        if key == previous_key:
+            if key is not None and key == self.keyboard_velocity_active_key:
+                self.node.refresh_keyboard_velocity(self.keyboard_velocity_arm)
+            return
+
+        # A physical release reaches this path directly; unlike Tk auto-repeat,
+        # it is not delayed to guess whether a synthetic release will be
+        # followed by another press.
+        if self.keyboard_velocity_active_key is not None:
+            arm = self.keyboard_velocity_arm
+            self._stop_keyboard_jog_command()
+            self.log(
+                f"Keyboard jog PHYSICAL RELEASE · "
+                f"{(arm or 'robot').upper()} velocity zero"
+            )
+        if key is None:
+            return
+        self.keyboard_ros_dispatching = True
+        try:
+            event = type("PhysicalKeyEvent", (), {"keysym": key})()
+            self.keyboard_jog_key_press(event)
+        finally:
+            self.keyboard_ros_dispatching = False
+
     def keyboard_teaching_shortcut_key(self, event):
         """Handle speed cycling and current-pose saves in teaching mode."""
         if not self.keyboard_jog_enabled.get():
             return None
-        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+        if not self._keyboard_focus_allows_jog():
             return None
         key = str(event.keysym).lower()
         pending_release = self.keyboard_shortcut_release_ids.pop(key, None)
@@ -14977,6 +15272,10 @@ class WeldActionGui:
         if arm != self.keyboard_velocity_arm or self.keyboard_velocity_switching:
             self.error("Enable keyboard velocity mode for the selected arm first")
             return "break"
+        if self.keyboard_teaching_capture_in_progress:
+            self.error("Wait for the current keyboard teaching capture to finish")
+            return "break"
+        self.keyboard_teaching_capture_in_progress = True
         self.keyboard_jog_status.set(f"Stopping before {key.upper()} pose capture...")
         threading.Thread(
             target=self._keyboard_teaching_capture_worker,
@@ -15007,7 +15306,26 @@ class WeldActionGui:
         self.keyboard_shortcut_active_keys.discard(key)
 
     def _keyboard_teaching_capture_worker(self, arm, key):
+        pose_name = KEYBOARD_TEACHING_POSE_SHORTCUTS.get(key)
+        if pose_name is not None:
+            planning_group = f"{arm}_manipulator"
+            try:
+                captured = self.node.capture_measured_teaching_snapshot(
+                    planning_group, pose_name
+                )
+            except Exception as error:
+                self.post(
+                    self._finish_keyboard_named_pose_capture,
+                    key, pose_name, planning_group, None, str(error),
+                )
+                return
+            self.post(
+                self._finish_keyboard_named_pose_capture,
+                key, pose_name, planning_group, captured, None,
+            )
+            return
         if not self.node.wait_until_arm_stopped(arm, timeout=2.0):
+            self.post(setattr, self, "keyboard_teaching_capture_in_progress", False)
             self.post(
                 self.error,
                 f"{key.upper()} teaching capture blocked: arm did not reach standstill",
@@ -15015,7 +15333,36 @@ class WeldActionGui:
             return
         self.post(self._capture_keyboard_teaching_shortcut, arm, key)
 
+    def _finish_keyboard_named_pose_capture(
+        self, key, pose_name, planning_group, captured, error
+    ):
+        self.keyboard_teaching_capture_in_progress = False
+        if error is not None:
+            self.keyboard_jog_status.set(f"{key.upper()} · capture rejected")
+            self.error(
+                f"Keyboard {TEACHING_POSES[pose_name]} capture rejected: {error}"
+            )
+            return
+        joint_names, positions, tcp, provenance = captured
+        self.apply_initial_state(
+            pose_name,
+            planning_group,
+            joint_names,
+            positions,
+            tcp,
+            save_to_yaml=True,
+            provenance=provenance,
+        )
+        self.keyboard_jog_status.set(
+            f"{key.upper()} · SAVED {TEACHING_POSES[pose_name]}"
+        )
+        self.log(
+            f"Keyboard teaching shortcut {key.upper()} · "
+            f"SAVED {TEACHING_POSES[pose_name]}"
+        )
+
     def _capture_keyboard_teaching_shortcut(self, arm, key):
+        self.keyboard_teaching_capture_in_progress = False
         if (
             not self.keyboard_jog_enabled.get()
             or arm != self.keyboard_velocity_arm
@@ -15032,18 +15379,14 @@ class WeldActionGui:
             self.capture_linear_tcp(1)
             description = "Reference TCP 2"
         else:
-            pose_name = KEYBOARD_TEACHING_POSE_SHORTCUTS.get(key)
-            if pose_name is None:
-                return
-            self.quick_capture_teaching_pose(pose_name)
-            description = TEACHING_POSES[pose_name]
+            return
         self.keyboard_jog_status.set(f"{key.upper()} · saving {description}")
         self.log(f"Keyboard teaching shortcut {key.upper()} · {description}")
 
     def keyboard_jog_selection_key(self, event):
         if not self.keyboard_jog_enabled.get():
             return None
-        if self._keyboard_focus_accepts_arrows(self.root.focus_get()):
+        if not self._keyboard_focus_allows_jog():
             return None
         selection = {
             "1": "X",
@@ -15069,12 +15412,17 @@ class WeldActionGui:
 
     def keyboard_jog_key_press(self, event):
         pressed_at = time.monotonic()
+        if self._keyboard_ros_input_online() and not self.keyboard_ros_dispatching:
+            return "break"
         if not self.keyboard_jog_enabled.get():
             return None
         if event.keysym not in ("Left", "Right", "Up", "Down"):
             return None
         if self.sequence_running or self.node.active_motion_goal is not None:
             self.error("Keyboard teaching is unavailable during another motion")
+            return "break"
+        if self.keyboard_teaching_capture_in_progress:
+            self.error("Keyboard motion is locked until pose capture finishes")
             return "break"
         arm = self._selected_arm()
         if arm != self.keyboard_velocity_arm or self.keyboard_velocity_switching:
@@ -15107,9 +15455,9 @@ class WeldActionGui:
         except Exception as error:
             self.error(f"Keyboard velocity TF failed · {error}")
             return "break"
+        self.keyboard_stop_generation += 1
         self.node.set_keyboard_velocity(arm, velocity)
         self.keyboard_velocity_active_key = event.keysym
-        self._schedule_keyboard_velocity_heartbeat()
         resolve_ms = (time.monotonic() - pressed_at) * 1000.0
         self.log(
             f"Keyboard jog START · {arm.upper()} "
@@ -15124,6 +15472,8 @@ class WeldActionGui:
         return "break"
 
     def keyboard_jog_key_release(self, event):
+        if self._keyboard_ros_input_online() and not self.keyboard_ros_dispatching:
+            return "break"
         if event.keysym != self.keyboard_velocity_active_key:
             return None
         self._cancel_keyboard_release_timer()
@@ -17358,7 +17708,12 @@ class WeldActionGui:
         if not rclpy.ok():
             self.root.destroy()
             return
-        self.root.after(50, self.check_ros)
+        # Physical keyboard edges arrive on the ROS executor.  A 50 ms Tk
+        # bridge interval added directly to jog start latency (plus one
+        # ros2_control cycle).  High-rate telemetry is already coalesced and
+        # _drain_ui_queue() has a strict time/item budget, so a 10 ms bridge is
+        # responsive without allowing ROS callbacks to starve Tk.
+        self.root.after(10, self.check_ros)
 
     def mainloop(self):
         self.root.mainloop()

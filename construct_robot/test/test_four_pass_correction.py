@@ -9,7 +9,8 @@ import pytest
 import yaml
 
 from construct_robot.weld_action_gui import (
-    WeldActionGui, correct_four_pass_references, read_weld_pass_reference,
+    WeldActionGui, correct_four_pass_references,
+    correct_seam_from_measured_start, read_weld_pass_reference,
 )
 
 
@@ -61,6 +62,26 @@ def test_four_pass_correction_rejects_missing_pass_and_large_root_rotation():
         correct_four_pass_references({1: references[1]}, pose(0, 0, 0), pose(.1, 0, 0))
     with pytest.raises(ValueError, match="over 30 degrees"):
         correct_four_pass_references(references, pose(0, 0, 0), pose(0, .1, 0))
+
+
+def test_start_only_pass_correction_translates_both_ends_and_keeps_attitudes():
+    start = pose(0.0, 0.01, 0.005)
+    goal = pose(0.1, 0.02, 0.006)
+    start.orientation.x, start.orientation.w = 0.1, math.sqrt(0.99)
+    goal.orientation.y, goal.orientation.w = 0.2, math.sqrt(0.96)
+    measured_start = pose(0.003, 0.006, 0.007)
+
+    corrected_start, corrected_goal, delta = correct_seam_from_measured_start(
+        start, goal, measured_start
+    )
+
+    assert delta == pytest.approx((0.003, -0.004, 0.002))
+    assert corrected_start.position.x == pytest.approx(0.003)
+    assert corrected_goal.position.x == pytest.approx(0.103)
+    assert corrected_goal.position.y == pytest.approx(0.016)
+    assert corrected_goal.position.z == pytest.approx(0.008)
+    assert corrected_start.orientation == start.orientation
+    assert corrected_goal.orientation == goal.orientation
 
 
 def test_completed_log_reference_reads_tcp_pose_and_provenance(tmp_path):
@@ -160,8 +181,10 @@ def test_selected_pass_touch_saves_only_its_own_result(tmp_path):
         },
     }
     gui.seam_probe_touches = {
-        name: pose(0, 0, 0) for name in
-        ("start_wall", "start_floor", "goal_wall", "goal_floor")
+        "start_wall": pose(0, 0, 0),
+        "start_floor": pose(0, 0, 0),
+        "goal_wall": None,
+        "goal_floor": None,
     }
     gui.wall_probe_sign = SimpleNamespace(get=lambda: "-")
     gui.floor_probe_sign = SimpleNamespace(get=lambda: "-")
@@ -179,9 +202,14 @@ def test_selected_pass_touch_saves_only_its_own_result(tmp_path):
     gui._save_selected_pass_touch_result()
 
     saved = yaml.safe_load(result_path.read_text())
-    assert saved["status"] == "pass_physically_probed_unverified_for_weld"
+    assert saved["status"] == "pass_start_probed_translation_unverified_for_weld"
     assert saved["corrected_start"]["position_m"]["x"] == pytest.approx(.001)
-    assert set(saved["touch_provenance"]["contacts"]) == set(gui.seam_probe_touches)
+    assert set(saved["touch_provenance"]["contacts"]) == {
+        "start_wall", "start_floor",
+    }
+    assert saved["touch_provenance"]["translation_xyz_mm"] == pytest.approx(
+        [1.0, 1.0, 1.0]
+    )
     assert source.read_text() == "original log"
     assert gui.four_pass_corrected[2]["goal"].position.x == pytest.approx(.101)
     manifest = yaml.safe_load((tmp_path / "manifest.yaml").read_text())

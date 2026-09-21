@@ -154,6 +154,12 @@ def generate_launch_description():
             ),
         }],
     )
+    keyboard_teaching = Node(
+        package="construct_robot",
+        executable="keyboard_teaching_node",
+        output="screen",
+        parameters=[{"poll_period_s": 0.01}],
+    )
     gui = Node(
         package="construct_robot",
         executable="weld_action_gui",
@@ -223,6 +229,7 @@ def generate_launch_description():
             moveit,
             cartesian_server,
             fastech_io,
+            keyboard_teaching,
             gui,
         ]
     )

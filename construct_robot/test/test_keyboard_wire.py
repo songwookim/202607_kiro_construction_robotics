@@ -8,9 +8,10 @@ class FakeRoot:
     def __init__(self):
         self.callbacks = {}
         self.next_id = 0
+        self.focused_widget = object()
 
     def focus_get(self):
-        return None
+        return self.focused_widget
 
     def after(self, _delay, callback):
         self.next_id += 1
@@ -75,3 +76,10 @@ def test_keyboard_wire_requires_connected_idle_right_arm():
     gui.sequence_running = True
     assert gui.keyboard_wire_key_press(SimpleNamespace(keysym="r")) == "break"
     gui.request_hicomm_inching.assert_not_called()
+
+
+def test_keyboard_jog_focus_rejects_native_tk_messagebox():
+    gui = wire_gui()
+    gui.root.focus_get = Mock(side_effect=KeyError(".__tk__messagebox"))
+
+    assert gui._keyboard_focus_allows_jog() is False
