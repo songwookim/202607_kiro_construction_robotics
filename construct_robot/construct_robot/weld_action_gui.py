@@ -2472,7 +2472,7 @@ def read_teaching_and_touch_snapshot(path):
 
 
 def read_weld_pass_reference(path):
-    """Read the executed START/GOAL TCP reference from one completed log."""
+    """Read one pass's WAIT/START/GOAL WAIT/GOAL set from a completed log."""
     path = Path(path)
     if not path.is_file():
         raise ValueError(f"Pass reference log is missing: {path}")
@@ -2482,7 +2482,13 @@ def read_weld_pass_reference(path):
         raise ValueError(f"Pass reference must be a completed weld: {path.name}")
     teaching, _touches = read_teaching_and_touch_snapshot(path)
     poses = {}
-    for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
+    joint_states = {}
+    for endpoint, name in (
+        ("start_wait", "weld_start_wait"),
+        ("start", "weld_start"),
+        ("goal_wait", "weld_goal_wait"),
+        ("goal", "weld_end"),
+    ):
         entry = teaching.get(name)
         if not isinstance(entry, dict) or entry.get("planning_group") != "right_manipulator":
             raise ValueError(f"{path.name} has no right-arm {name} reference")
@@ -2490,84 +2496,224 @@ def read_weld_pass_reference(path):
         if not pose_is_valid(pose):
             raise ValueError(f"{path.name} has an invalid {name} TCP pose")
         poses[endpoint] = pose
+        joint_state = entry.get("joint_state")
+        if isinstance(joint_state, dict):
+            names = tuple(joint_state.get("names", ()))
+            positions = tuple(float(value) for value in
+                              joint_state.get("positions_rad", ()))
+            if (
+                len(names) == 6
+                and len(positions) == 6
+                and all(math.isfinite(value) for value in positions)
+            ):
+                joint_states[endpoint] = (names, positions)
     if math.dist(_pose_position_tuple(poses["start"]),
                  _pose_position_tuple(poses["goal"])) < 0.001:
         raise ValueError(f"{path.name} seam is shorter than 1 mm")
     return {
         "path": str(path.resolve()),
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "start": poses["start"],
-        "goal": poses["goal"],
+        "reference_kind": "completed_weld_log",
+        **poses,
+        "joint_states": joint_states,
     }
 
 
-def correct_four_pass_references(references, corrected_root_start, corrected_root_goal):
-    """Carry one measured root correction into four distinct logged seams.
+def read_pass_teaching_reference(path, expected_pass):
+    """Read one independently saved pass teaching YAML as a reference."""
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"Pass teaching reference is missing: {path}")
+    raw = path.read_bytes()
+    document = yaml.safe_load(raw.decode("utf-8")) or {}
+    if document.get("schema") != "construct_robot_pass_teaching_v1":
+        raise ValueError(f"Unsupported pass teaching schema: {path.name}")
+    if int(document.get("pass", 0)) != int(expected_pass):
+        raise ValueError(
+            f"{path.name} contains Pass {document.get('pass')}, "
+            f"expected Pass {expected_pass}"
+        )
+    entries = document.get("poses")
+    if not isinstance(entries, dict):
+        raise ValueError(f"{path.name} has no poses mapping")
+    poses = {}
+    joint_states = {}
+    for endpoint, pose_name in (
+        ("start_wait", "weld_start_wait"),
+        ("start", "weld_start"),
+        ("goal_wait", "weld_goal_wait"),
+        ("goal", "weld_end"),
+    ):
+        group, names, positions, tcp = parse_teaching_snapshot_entry(
+            pose_name, entries.get(pose_name)
+        )
+        if group != "right_manipulator":
+            raise ValueError(f"{path.name} {pose_name} is not a right-arm pose")
+        poses[endpoint] = copy.deepcopy(tcp)
+        joint_states[endpoint] = (tuple(names), tuple(positions))
+    if math.dist(
+        _pose_position_tuple(poses["start"]),
+        _pose_position_tuple(poses["goal"]),
+    ) < 0.001:
+        raise ValueError(f"{path.name} seam is shorter than 1 mm")
+    return {
+        "path": str(path.resolve()),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "reference_kind": "saved_pass_teaching",
+        **poses,
+        "joint_states": joint_states,
+    }
 
-    Rotate each pass's endpoint offset with the change in root seam direction,
-    then anchor it at the independently sensed root START or GOAL. Preserve
-    every pass's logged TCP attitude; this is a prediction, not a re-probe.
+
+def _minimal_direction_rotation(old_direction, new_direction, maximum_degrees=30.0):
+    """Return the unique minimal rotation quaternion from old to new direction."""
+    old_direction = _unit_vector(old_direction, "old seam direction")
+    new_direction = _unit_vector(new_direction, "measured seam direction")
+    cosine = max(-1.0, min(1.0, _vector_dot(old_direction, new_direction)))
+    angle = math.acos(cosine)
+    if angle > math.radians(float(maximum_degrees)):
+        raise ValueError(
+            f"Seam direction changed {math.degrees(angle):.1f}° "
+            f"(limit {float(maximum_degrees):.1f}°)"
+        )
+    cross = _vector_cross(old_direction, new_direction)
+    sine = math.sqrt(_vector_dot(cross, cross))
+    if sine <= 1e-12:
+        return (0.0, 0.0, 0.0, 1.0), math.degrees(angle)
+    axis = tuple(value / sine for value in cross)
+    half = angle * 0.5
+    scale = math.sin(half)
+    return (
+        axis[0] * scale,
+        axis[1] * scale,
+        axis[2] * scale,
+        math.cos(half),
+    ), math.degrees(angle)
+
+
+def _rotate_vector_by_quaternion(vector, quaternion):
+    qx, qy, qz, qw = (float(value) for value in quaternion)
+    vx, vy, vz = (float(value) for value in vector)
+    tx = 2.0 * (qy * vz - qz * vy)
+    ty = 2.0 * (qz * vx - qx * vz)
+    tz = 2.0 * (qx * vy - qy * vx)
+    return (
+        vx + qw * tx + qy * tz - qz * ty,
+        vy + qw * ty + qz * tx - qx * tz,
+        vz + qw * tz + qx * ty - qy * tx,
+    )
+
+
+def _rotate_pose_orientation_left(pose, rotation):
+    """Apply q_rotation * q_pose without introducing seam-axis roll."""
+    rx, ry, rz, rw = rotation
+    px = float(pose.orientation.x)
+    py = float(pose.orientation.y)
+    pz = float(pose.orientation.z)
+    pw = float(pose.orientation.w)
+    values = (
+        rw * px + rx * pw + ry * pz - rz * py,
+        rw * py - rx * pz + ry * pw + rz * px,
+        rw * pz + rx * py - ry * px + rz * pw,
+        rw * pw - rx * px - ry * py - rz * pz,
+    )
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm < 1e-12:
+        raise ValueError("Rotated welding orientation is invalid")
+    result = copy.deepcopy(pose)
+    (
+        result.orientation.x,
+        result.orientation.y,
+        result.orientation.z,
+        result.orientation.w,
+    ) = (value / norm for value in values)
+    return result
+
+
+def correct_remaining_passes(
+    passes, anchor_pass, measured_start, measured_goal, maximum_degrees=30.0
+):
+    """Cumulatively register one pass and propagate only to later passes.
+
+    ``passes`` is the current working state, not the immutable source logs.
+    Earlier passes remain byte-for-byte independent deep copies. START and
+    GOAL offsets use their respective measured anchor, while one minimal
+    direction rotation updates offsets and welding attitudes.
     """
-    if set(references) != {1, 2, 3, 4}:
-        raise ValueError("Exactly four pass references (1.log..4.log) are required")
+    if set(passes) != {1, 2, 3, 4}:
+        raise ValueError("Exactly four current pass states are required")
+    anchor_pass = int(anchor_pass)
+    if anchor_pass not in passes:
+        raise ValueError("Anchor pass must be 1, 2, 3, or 4")
     if not all(
         pose is not None and pose_is_valid(pose)
-        for pose in (corrected_root_start, corrected_root_goal)
+        for pose in (measured_start, measured_goal)
     ):
-        raise ValueError("Fresh corrected root START and GOAL are required")
-    root = references[1]
-    original_direction = seam_direction(root["start"], root["goal"])
-    corrected_direction = seam_direction(corrected_root_start, corrected_root_goal)
-    cosine = max(-1.0, min(1.0, _vector_dot(original_direction, corrected_direction)))
-    angle = math.acos(cosine)
-    if angle > math.radians(30.0):
-        raise ValueError("Root seam rotated over 30 degrees; verify logs and teaching")
-    cross = (
-        original_direction[1] * corrected_direction[2] - original_direction[2] * corrected_direction[1],
-        original_direction[2] * corrected_direction[0] - original_direction[0] * corrected_direction[2],
-        original_direction[0] * corrected_direction[1] - original_direction[1] * corrected_direction[0],
+        raise ValueError("Measured START and GOAL are required")
+    current = passes[anchor_pass]
+    old_start = current["start"]
+    old_goal = current["goal"]
+    old_direction = seam_direction(old_start, old_goal)
+    new_direction = seam_direction(measured_start, measured_goal)
+    rotation, angle_degrees = _minimal_direction_rotation(
+        old_direction, new_direction, maximum_degrees
     )
-    sine = math.sqrt(_vector_dot(cross, cross))
-    axis = tuple(value / sine for value in cross) if sine > 1e-12 else (1.0, 0.0, 0.0)
+    corrected = copy.deepcopy(passes)
+    old_start_xyz = _pose_position_tuple(old_start)
+    old_goal_xyz = _pose_position_tuple(old_goal)
+    measured_start_xyz = _pose_position_tuple(measured_start)
+    measured_goal_xyz = _pose_position_tuple(measured_goal)
 
-    def rotate(vector):
-        if sine <= 1e-12:
-            return vector
-        cross_vector = (
-            axis[1] * vector[2] - axis[2] * vector[1],
-            axis[2] * vector[0] - axis[0] * vector[2],
-            axis[0] * vector[1] - axis[1] * vector[0],
-        )
-        projection = _vector_dot(axis, vector)
-        return tuple(
-            cosine * vector[index] + sine * cross_vector[index]
-            + (1.0 - cosine) * projection * axis[index]
-            for index in range(3)
-        )
-
-    corrected = {}
-    for number in range(1, 5):
-        source = references[number]
-        endpoints = {}
-        for endpoint in ("start", "goal"):
-            root_reference = _pose_position_tuple(root[endpoint])
-            root_measured = _pose_position_tuple(
-                corrected_root_start if endpoint == "start" else corrected_root_goal
-            )
+    for number in range(anchor_pass, 5):
+        for endpoint, old_anchor_xyz, new_anchor_xyz in (
+            ("start_wait", old_start_xyz, measured_start_xyz),
+            ("start", old_start_xyz, measured_start_xyz),
+            ("goal_wait", old_goal_xyz, measured_goal_xyz),
+            ("goal", old_goal_xyz, measured_goal_xyz),
+        ):
+            current_pose = passes[number][endpoint]
             offset = tuple(
-                value - root_reference[index]
-                for index, value in enumerate(_pose_position_tuple(source[endpoint]))
+                value - old_anchor_xyz[index]
+                for index, value in enumerate(_pose_position_tuple(current_pose))
             )
-            rotated_offset = rotate(offset)
-            xyz = tuple(
-                root_measured[index] + rotated_offset[index]
+            rotated_offset = _rotate_vector_by_quaternion(offset, rotation)
+            result = _rotate_pose_orientation_left(current_pose, rotation)
+            result.position.x, result.position.y, result.position.z = tuple(
+                new_anchor_xyz[index] + rotated_offset[index]
                 for index in range(3)
             )
-            pose = copy.deepcopy(source[endpoint])
-            pose.position.x, pose.position.y, pose.position.z = xyz
-            endpoints[endpoint] = pose
-        corrected[number] = endpoints
-    return corrected, math.degrees(angle)
+            corrected[number][endpoint] = result
+
+    metadata = {
+        "anchor_pass": anchor_pass,
+        "direction_change_deg": angle_degrees,
+        "rotation_xyzw": tuple(float(value) for value in rotation),
+        "start_translation_m": tuple(
+            measured_start_xyz[index] - old_start_xyz[index]
+            for index in range(3)
+        ),
+        "goal_translation_m": tuple(
+            measured_goal_xyz[index] - old_goal_xyz[index]
+            for index in range(3)
+        ),
+        "later_passes_updated": list(range(anchor_pass + 1, 5)),
+    }
+    return corrected, metadata
+
+
+def correct_four_pass_references(references, corrected_root_start, corrected_root_goal):
+    """Compatibility wrapper for a Pass-1 sequential registration."""
+    current = {
+        number: {
+            endpoint: copy.deepcopy(reference[endpoint])
+            for endpoint in ("start_wait", "start", "goal_wait", "goal")
+        }
+        for number, reference in references.items()
+    }
+    corrected, metadata = correct_remaining_passes(
+        current, 1, corrected_root_start, corrected_root_goal
+    )
+    return corrected, metadata["direction_change_deg"]
 
 
 def correct_seam_from_measured_start(predicted_start, predicted_goal, measured_start):
@@ -6304,14 +6450,16 @@ class WeldActionGui:
         self.four_pass_folder = tk.StringVar(
             value=str(self._weld_feedback_directory() / "test_shimen_gth")
         )
-        self.four_pass_status = tk.StringVar(value="Load 1.log..4.log (1 = root)")
+        self.four_pass_status = tk.StringVar(
+            value="Load 1.log..4.log · WAIT/START/GOAL WAIT/GOAL come from each log"
+        )
         self.four_pass_references = {}
         self.four_pass_loaded_folder = None
         self.four_pass_corrected = {}
-        self.four_pass_auto_pending = False
         self.four_pass_output_folder = None
-        self.selected_pass_number = tk.IntVar(value=2)
-        self.active_pass_probe = None
+        self.four_pass_history = []
+        self.selected_pass_number = tk.IntVar(value=1)
+        self.multi_pass_registration = None
         self.pass_probe_touch_yaml_target = None
         self.seam_teaching_reference = None
         self.automatic_probe_kind = None
@@ -7601,7 +7749,7 @@ class WeldActionGui:
             expanded=False,
         )
         four_pass = ttk.LabelFrame(
-            multi_pass, text="4-pass reference set · root=1.log"
+            multi_pass, text="4-pass reference set · cumulative selected-pass anchor"
         )
         four_pass.pack(fill=tk.X, pady=3)
         four_pass_row = ttk.Frame(four_pass)
@@ -7615,30 +7763,43 @@ class WeldActionGui:
         ttk.Button(
             four_pass_row, text="Load 4 references", command=self.load_four_pass_references
         ).pack(side=tk.LEFT, padx=3)
-        four_pass_action_row = ttk.Frame(four_pass)
-        four_pass_action_row.pack(fill=tk.X, pady=2)
+        ttk.Label(
+            four_pass,
+            text=(
+                "Browse the work folder: pass_teaching/pass_N_teaching.yaml "
+                "overrides N.log for each pass"
+            ),
+        ).pack(anchor=tk.W, padx=3, pady=(0, 2))
+        pass_probe_row = ttk.Frame(four_pass)
+        pass_probe_row.pack(fill=tk.X, pady=2)
+        ttk.Label(pass_probe_row, text="Pass").pack(side=tk.LEFT, padx=3)
+        ttk.Combobox(
+            pass_probe_row, textvariable=self.selected_pass_number,
+            values=(1, 2, 3, 4), width=4, state="readonly",
+        ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            four_pass_action_row, text="AUTO root touch → correct 4 passes",
+            pass_probe_row, text="Load Selected Pass",
+            command=self.apply_selected_pass_correction,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            pass_probe_row, text="Save Pass Teaching YAML",
+            command=self.save_teaching_to_selected_pass,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            pass_probe_row, text="Load Saved Teaching",
+            command=self.load_saved_teaching_for_selected_pass,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            pass_probe_row, text="Multi-pass Seam Correction",
             command=self.run_four_pass_correction,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            four_pass_action_row, text="Apply current root correction",
-            command=self.apply_four_pass_correction,
-        ).pack(side=tk.LEFT, padx=3)
-        pass_probe_row = ttk.Frame(four_pass)
-        pass_probe_row.pack(fill=tk.X, pady=2)
-        ttk.Label(pass_probe_row, text="1G pass").pack(side=tk.LEFT, padx=3)
-        ttk.Combobox(
-            pass_probe_row, textvariable=self.selected_pass_number,
-            values=(2, 3, 4), width=4, state="readonly",
+            pass_probe_row, text="Go Corrected START",
+            command=lambda: self.go_to_corrected_pass_endpoint("start"),
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            pass_probe_row, text="Touch selected pass START → translate seam",
-            command=self.run_selected_pass_correction,
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            pass_probe_row, text="Apply selected pass after loading its log",
-            command=self.apply_selected_pass_correction,
+            pass_probe_row, text="Go Corrected GOAL",
+            command=lambda: self.go_to_corrected_pass_endpoint("goal"),
         ).pack(side=tk.LEFT, padx=3)
         ttk.Label(four_pass, textvariable=self.four_pass_status).pack(
             anchor=tk.W, padx=3
@@ -7646,12 +7807,10 @@ class WeldActionGui:
         ttk.Label(
             four_pass,
             text=(
-                "Recommended teaching: root START WAIT + GOAL WAIT once. The four "
-                "TCP START/GOAL poses and orientations come from 1.log..4.log. "
-                "Root senses START+GOAL to correct fixture direction. Pass 2–4 then "
-                "re-probe START only and translate their logged START/GOAL together. "
-                "All touch probing keeps the taught upright WAIT attitude; each logged "
-                "welding attitude is applied later at safe clearance."
+                "Each N.log supplies that pass's START WAIT, START, GOAL WAIT and GOAL. "
+                "Select Pass N, move from its corrected START WAIT, jog to the real START "
+                "and press I; then use its corrected GOAL WAIT, jog to GOAL and press J. "
+                "All four poses for N..4 are corrected cumulatively. No welding starts."
             ),
             foreground="#b3261e",
         ).pack(anchor=tk.W, padx=3)
@@ -10301,7 +10460,7 @@ class WeldActionGui:
 
     def browse_four_pass_folder(self):
         folder = filedialog.askdirectory(
-            title="Select folder with 1.log..4.log",
+            title="Select 4-pass work folder (logs + pass_teaching YAML)",
             initialdir=self.four_pass_folder.get(),
             parent=self.root,
         )
@@ -10311,32 +10470,63 @@ class WeldActionGui:
             self.four_pass_loaded_folder = None
             self.four_pass_output_folder = None
             self.four_pass_corrected = {}
+            self.four_pass_history = []
+            self.multi_pass_registration = None
             self.four_pass_status.set("Folder changed · load four references")
 
     def load_four_pass_references(self):
         folder = Path(self.four_pass_folder.get()).expanduser().resolve()
         try:
             if not folder.is_dir():
-                raise ValueError(f"Pass log folder does not exist: {folder}")
-            references = {
-                number: read_weld_pass_reference(folder / f"{number}.log")
-                for number in range(1, 5)
-            }
-            # The sensed root must be measured against the same root teaching
-            # that anchors 1.log. Reject a different loaded workpiece/log.
-            for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
-                stored = self.taught_robot_poses.get(name)
-                if stored is None or stored[0] != "right_manipulator":
-                    raise ValueError("Load 1.log teaching before 4-pass correction")
-                mismatch_mm = 1000.0 * math.dist(
-                    _pose_position_tuple(stored[3]),
-                    _pose_position_tuple(references[1][endpoint]),
+                raise ValueError(f"4-pass work folder does not exist: {folder}")
+
+            # Feedback logs are immutable execution evidence.  Editable pass
+            # teaching is stored as YAML beside them.  Let operators browse
+            # either the work root or pass_teaching itself, and resolve each
+            # pass independently so a newly taught pass can coexist with log
+            # fallbacks for the other passes.
+            if folder.name == "pass_teaching":
+                teaching_folder = folder
+                log_folder = folder.parent
+            else:
+                teaching_folder = folder / "pass_teaching"
+                log_folder = folder
+
+            references = {}
+            yaml_count = 0
+            log_count = 0
+            missing = []
+            for number in range(1, 5):
+                teaching_path = (
+                    teaching_folder / f"pass_{number}_teaching.yaml"
                 )
-                if mismatch_mm > 5.0:
-                    raise ValueError(
-                        f"Current {name} differs from 1.log by {mismatch_mm:.1f} mm; "
-                        "load the root log first"
+                log_path = log_folder / f"{number}.log"
+                if teaching_path.is_file():
+                    references[number] = read_pass_teaching_reference(
+                        teaching_path, number
                     )
+                    yaml_count += 1
+                elif log_path.is_file():
+                    references[number] = read_weld_pass_reference(log_path)
+                    log_count += 1
+                else:
+                    missing.append(
+                        f"Pass {number}: {teaching_path} or {log_path}"
+                    )
+            if missing:
+                raise ValueError(
+                    "No teaching YAML or fallback weld log for "
+                    + " · ".join(missing)
+                )
+            if yaml_count == 4:
+                reference_set_kind = "4 pass-teaching YAML overrides"
+            elif log_count == 4:
+                reference_set_kind = "4 completed weld logs"
+            else:
+                reference_set_kind = (
+                    f"{yaml_count} pass-teaching YAML override(s) + "
+                    f"{log_count} weld-log fallback(s)"
+                )
         except (OSError, ValueError, yaml.YAMLError) as error:
             self.four_pass_references = {}
             self.four_pass_loaded_folder = None
@@ -10344,28 +10534,150 @@ class WeldActionGui:
             return False
         self.four_pass_references = references
         self.four_pass_loaded_folder = folder
-        self.four_pass_corrected = {}
-        self.four_pass_output_folder = None
+        self.four_pass_corrected = {
+            number: {
+                endpoint: copy.deepcopy(reference[endpoint])
+                for endpoint in ("start_wait", "start", "goal_wait", "goal")
+            }
+            for number, reference in references.items()
+        }
+        restored = self._load_latest_sequential_four_pass_state(
+            folder, references
+        )
+        if restored is None:
+            self.four_pass_output_folder = None
+            self.four_pass_history = []
+        else:
+            (
+                self.four_pass_corrected,
+                self.four_pass_output_folder,
+                self.four_pass_history,
+            ) = restored
+        self.multi_pass_registration = None
         lengths = [
             1000.0 * math.dist(
                 _pose_position_tuple(references[number]["start"]),
                 _pose_position_tuple(references[number]["goal"]),
             ) for number in range(1, 5)
         ]
+        restore_note = (
+            f" · resumed corrections from {self.four_pass_output_folder.name}"
+            if self.four_pass_output_folder is not None
+            else " · no saved cumulative correction; using loaded reference set"
+        )
         self.four_pass_status.set(
-            "Loaded pass 1–4 · seam lengths "
+            f"Loaded {reference_set_kind} for pass 1–4 · seam lengths "
             + "/".join(f"{length:.1f}" for length in lengths)
-            + " mm · root touch correction required"
+            + f" mm{restore_note}"
         )
         self.log(
-            f"4-PASS REFERENCES LOADED · {folder} · root=1.log · "
+            f"4-PASS REFERENCES LOADED · {folder} · {reference_set_kind} · "
+            "logs immutable / teaching editable in YAML · "
             f"lengths={lengths} mm"
         )
         return True
 
+    def _load_latest_sequential_four_pass_state(self, folder, references):
+        """Restore the newest valid cumulative correction for these source logs."""
+        candidates = sorted(
+            folder.glob("sequential_corrected_*/manifest.yaml"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for manifest_path in candidates:
+            try:
+                manifest = yaml.safe_load(
+                    manifest_path.read_text(encoding="utf-8")
+                ) or {}
+                schema = manifest.get("schema")
+                if schema not in (
+                    "construct_robot_sequential_four_pass_correction_v2",
+                    "construct_robot_sequential_four_pass_correction_v3",
+                ):
+                    continue
+                entries = {
+                    int(entry["pass"]): entry["file"]
+                    for entry in manifest.get("passes", ())
+                }
+                if set(entries) != {1, 2, 3, 4}:
+                    raise ValueError("manifest does not list exactly Pass 1..4")
+                records = {}
+                for number in range(1, 5):
+                    record = yaml.safe_load(
+                        (manifest_path.parent / entries[number]).read_text(
+                            encoding="utf-8"
+                        )
+                    ) or {}
+                    if record.get("source_log_sha256") != references[number]["sha256"]:
+                        raise ValueError(
+                            f"Pass {number} source hash no longer matches"
+                        )
+                    records[number] = record
+                history = manifest.get("history", [])
+                if not isinstance(history, list):
+                    raise ValueError("manifest history is not a list")
+                if schema.endswith("_v3"):
+                    corrected = {
+                        number: {
+                            endpoint: _pose_from_yaml_dict(
+                                records[number][f"current_{endpoint}"],
+                                f"Pass {number} current {endpoint}",
+                            )
+                            for endpoint in (
+                                "start_wait", "start", "goal_wait", "goal"
+                            )
+                        }
+                        for number in range(1, 5)
+                    }
+                else:
+                    # v2 stored corrected START/GOAL only. Replay its measured
+                    # anchor events on today's full log references so the
+                    # pass-specific WAIT poses receive identical transforms.
+                    corrected = {
+                        number: {
+                            endpoint: copy.deepcopy(references[number][endpoint])
+                            for endpoint in (
+                                "start_wait", "start", "goal_wait", "goal"
+                            )
+                        }
+                        for number in range(1, 5)
+                    }
+                    for event in history:
+                        anchor = int(event["selected_pass"])
+                        measured_start = _pose_from_yaml_dict(
+                            event["measured_start"],
+                            f"Pass {anchor} v2 measured START",
+                        )
+                        measured_goal = _pose_from_yaml_dict(
+                            event["measured_goal"],
+                            f"Pass {anchor} v2 measured GOAL",
+                        )
+                        corrected, _transform = correct_remaining_passes(
+                            corrected, anchor, measured_start, measured_goal
+                        )
+            except (
+                KeyError, OSError, TypeError, ValueError, yaml.YAMLError
+            ) as error:
+                self.log(
+                    f"Skipped invalid cumulative correction {manifest_path}: {error}"
+                )
+                continue
+            self.log(
+                f"RESTORED CUMULATIVE 4-PASS CORRECTION · {manifest_path.parent} · "
+                f"events={len(history)}"
+            )
+            return corrected, manifest_path.parent, copy.deepcopy(history)
+        return None
+
     def run_four_pass_correction(self):
-        if self.seam_auto_running:
-            self.error("Automatic seam correction is already running")
+        if self.multi_pass_registration is not None:
+            self.error("A multi-pass registration is already in progress")
+            return
+        if self.sequence_running or self.node.active_motion_goal is not None:
+            self.error("Wait for the current robot motion to finish")
+            return
+        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
+            self.error("Disable Keyboard Teaching before moving to START WAIT")
             return
         if (
             not self.four_pass_references
@@ -10373,389 +10685,805 @@ class WeldActionGui:
             != self.four_pass_loaded_folder
         ) and not self.load_four_pass_references():
             return
-        for name in ("weld_start_wait", "weld_goal_wait"):
-            if self.taught_robot_poses.get(name) is None:
-                self.error(f"Teach {TEACHING_POSES[name]} before root probing")
-                return
-        self.four_pass_auto_pending = True
-        self.run_automatic_seam_correction()
-        if not self.seam_auto_running:
-            self.four_pass_auto_pending = False
-
-    def apply_four_pass_correction(self):
-        if self.seam_auto_running:
-            self.error("Wait for root seam correction to finish")
-            return
-        if not self.four_pass_references:
-            self.error("Load the four pass references before applying root correction")
-            return
-        folder = Path(self.four_pass_folder.get()).expanduser().resolve()
-        if folder != self.four_pass_loaded_folder:
-            self.error("Pass log folder changed; load references and re-probe root")
-            return
-        root_start = self.computed_seam_endpoints.get("start")
-        root_goal = self.computed_seam_endpoints.get("goal")
-        if not self.corrected_two_touch_seam or not all(
-            pose is not None and pose_is_valid(pose)
-            for pose in (root_start, root_goal)
-        ):
-            self.error("Run a fresh root four-touch seam correction first")
-            return
-        try:
-            for reference in self.four_pass_references.values():
-                current_hash = hashlib.sha256(
-                    Path(reference["path"]).read_bytes()
-                ).hexdigest()
-                if current_hash != reference["sha256"]:
-                    raise ValueError("A source pass log changed after loading; reload and re-probe")
-            corrected, angle_deg = correct_four_pass_references(
-                self.four_pass_references, root_start, root_goal
-            )
-            output = folder / (
-                "corrected_" + time.strftime("%Y%m%d_%H%M%S")
-                + f"_{time.monotonic_ns() % 1000000:06d}"
-            )
-            output.mkdir()
-            pose_dict = self._pose_execution_conditions
-            root_reference = self.four_pass_references[1]
-            manifest = {
-                "schema": "construct_robot_four_pass_correction_v1",
-                "status": "root_xyz_measured_other_passes_predicted",
-                "planning_group": "right_manipulator",
-                "root_log": root_reference["path"],
-                "root_log_sha256": root_reference["sha256"],
-                "root_reference_start": pose_dict(root_reference["start"]),
-                "root_reference_goal": pose_dict(root_reference["goal"]),
-                "root_measured_start": pose_dict(root_start),
-                "root_measured_goal": pose_dict(root_goal),
-                "root_direction_change_deg": angle_deg,
-                "method": (
-                    "each logged pass endpoint offset from root, rotated by "
-                    "root seam direction change and anchored to sensed root endpoint"
-                ),
-                "orientation_policy": "preserve each pass log orientation_xyzw",
-                "root_sensing_orientation_policy": (
-                    "common taught upright START/GOAL WAIT orientations"
-                ),
-                "selected_pass_reprobe_policy": (
-                    "START wall/base only; translate predicted START/GOAL equally"
-                ),
-                "verification_required": True,
-                "common_start_wait": pose_dict(self.taught_robot_poses["weld_start_wait"][3]),
-                "common_goal_wait": pose_dict(self.taught_robot_poses["weld_goal_wait"][3]),
-                "passes": [],
-            }
-            for number in range(1, 5):
-                reference = self.four_pass_references[number]
-                record = {
-                    "pass": number,
-                    "status": (
-                        "root_xyz_measured_log_orientation"
-                        if number == 1 else "root_propagated_unverified"
-                    ),
-                    "source_log": reference["path"],
-                    "source_log_sha256": reference["sha256"],
-                    "reference_start": pose_dict(reference["start"]),
-                    "reference_goal": pose_dict(reference["goal"]),
-                    "corrected_start": pose_dict(corrected[number]["start"]),
-                    "corrected_goal": pose_dict(corrected[number]["goal"]),
-                    "orientation_policy": "from source log; no extra tilt applied",
-                }
-                file_name = f"pass_{number}.yaml"
-                (output / file_name).write_text(
-                    yaml.safe_dump(record, sort_keys=False), encoding="utf-8"
-                )
-                manifest["passes"].append({"pass": number, "file": file_name})
-                self.log(
-                    f"4-PASS CORRECTED P{number} · "
-                    f"START={_pose_position_tuple(corrected[number]['start'])} · "
-                    f"GOAL={_pose_position_tuple(corrected[number]['goal'])} · "
-                    "orientation=source log · predicted/unverified"
-                )
-            (output / "manifest.yaml").write_text(
-                yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
-            )
-        except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"4-pass correction was not saved completely: {error}")
-            return
-        self.four_pass_corrected = corrected
-        self.four_pass_output_folder = output
-        self.four_pass_status.set(
-            f"Root measured + 3 predicted passes saved · {output} · verify before welding"
-        )
-        self.pipeline_result(
-            f"4-PASS ROOT CORRECTION COMPLETE · {output} · "
-            "pass-specific re-probing still required after bead buildup"
-        )
-
-    def run_selected_pass_correction(self):
-        """Probe a predicted 1G pass without replacing root teaching/YAML."""
-        if self.seam_auto_running or self.active_pass_probe is not None:
-            self.error("Another seam touch session is running")
-            return
         try:
             number = int(self.selected_pass_number.get())
-            if number not in (2, 3, 4):
-                raise ValueError("Select pass 2, 3, or 4")
-            folder = self.four_pass_output_folder
-            if folder is None or not (folder / "manifest.yaml").is_file():
-                raise ValueError("Run root correction and save four passes first")
-            record = yaml.safe_load((folder / f"pass_{number}.yaml").read_text())
-            if record.get("source_log_sha256") != self.four_pass_references[number]["sha256"]:
-                raise ValueError("Pass source log changed; load references and redo root correction")
-            if hashlib.sha256(
-                Path(self.four_pass_references[number]["path"]).read_bytes()
-            ).hexdigest() != record["source_log_sha256"]:
-                raise ValueError("Pass source log changed on disk; redo root correction")
-            start = _pose_from_yaml_dict(record["corrected_start"], "pass START")
-            goal = _pose_from_yaml_dict(record["corrected_goal"], "pass GOAL")
-            if abs(seam_direction(start, goal)[2]) > 0.25:
-                raise ValueError("Selected seam is too steep for the 1G pass-touch workflow")
-            if any(abs(pose.position.z - root.position.z) > 0.050
-                   for pose, root in ((start, self.four_pass_corrected[1]["start"]),
-                                      (goal, self.four_pass_corrected[1]["goal"]))):
-                raise ValueError("Selected pass is >50 mm from root in World Z; not 1G")
-            root_record = yaml.safe_load((folder / "pass_1.yaml").read_text())
-            root_start = _pose_from_yaml_dict(root_record["corrected_start"], "root START")
-            root_goal = _pose_from_yaml_dict(root_record["corrected_goal"], "root GOAL")
-            waits = {}
-            for endpoint, wait_name, pass_pose, root_pose in (
-                ("start", "weld_start_wait", start, root_start),
-                ("goal", "weld_goal_wait", goal, root_goal),
-            ):
-                saved_wait = self.taught_robot_poses.get(wait_name)
-                if saved_wait is None or saved_wait[0] != "right_manipulator":
-                    raise ValueError(f"Teach/load {TEACHING_POSES[wait_name]} first")
-                # 1G: retain the proven root WAIT-to-seam displacement at
-                # each pass endpoint. A low root wait is not a safe template.
-                clearance = saved_wait[3].position.z - root_pose.position.z
-                if clearance < 0.020:
-                    raise ValueError(
-                        f"{TEACHING_POSES[wait_name]} needs >=20 mm World +Z "
-                        f"clearance above corrected root (now {clearance*1000:.1f} mm)"
-                    )
-                translated = copy.deepcopy(saved_wait[3])
-                for axis in ("x", "y", "z"):
-                    setattr(translated.position, axis,
-                            getattr(saved_wait[3].position, axis)
-                            + getattr(pass_pose.position, axis)
-                            - getattr(root_pose.position, axis))
-                # Keep one common neutral/upright sensing attitude for every
-                # pass. The pass-specific welding attitude remains in the
-                # corrected START/GOAL record and is applied later by the safe
-                # weld-approach sequence.
-                translated.orientation = copy.deepcopy(saved_wait[3].orientation)
-                waits[wait_name] = translated
+            if number not in (1, 2, 3, 4):
+                raise ValueError("Select Pass 1, 2, 3, or 4")
+            self._validate_four_pass_source_hashes()
+            waits = {
+                endpoint: self._multi_pass_translated_wait(number, endpoint)
+                for endpoint in ("start", "goal")
+            }
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Cannot prepare selected-pass touch: {error}")
+            self.error(f"Cannot start multi-pass correction: {error}")
+            return
+        if not self.execution_allowed or not self.robot_connected.get("right", False):
+            self.error("Connect the right robot and enable physical execution")
             return
         if not messagebox.askyesno(
-            "Physical 1G pass re-probe",
-            f"Probe pass {number} START with two DI4 contacts (wall/base)?\n\n"
-            "Root correction is only an initial estimate. The root WAIT offsets "
-            "will be translated to this pass while the common upright sensing "
-            "attitude is retained (at least 20 mm World +Z clearance). The measured "
-            "START translation is applied equally to logged START and GOAL; yaw and "
-            "length remain the root-corrected prediction. Verify probe direction and "
-            "actual tip contact against the bead/fixture. Keep STOP accessible.\n\n"
-            "No welding will start. Root teaching and source logs stay unchanged.",
+            "Sequential multi-pass registration",
+            f"Register Pass {number} START and GOAL?\n\n"
+            "The robot uses this pass's corrected WAIT poses loaded from its log. "
+            "Keyboard Teaching enables automatically after START WAIT; jog to the real "
+            "START and press I. It will then move to GOAL WAIT; jog to the real "
+            "GOAL and press J.\n\n"
+            f"Passes {number}–4 will be updated cumulatively. No arc or welding "
+            "command will be sent.",
             parent=self.root,
         ):
             return
-        reference = {
-            "weld_start": ("right_manipulator", (), (), copy.deepcopy(start)),
-            "weld_end": ("right_manipulator", (), (), copy.deepcopy(goal)),
-        }
-        self.active_pass_probe = {
-            "number": number, "folder": folder,
-            "reference": reference, "waits": waits,
-        }
-        self.pass_probe_touch_yaml_target = folder / f"pass_{number}_touch_points.yaml"
-        self.run_automatic_seam_correction(pass_mode=True)
-        if not self.seam_auto_running:
-            self.active_pass_probe = None
-
-    def _save_selected_pass_touch_result(self):
-        session = self.active_pass_probe
-        if session is None:
-            raise ValueError("No selected-pass touch session")
-        number, folder = session["number"], session["folder"]
-        start_touch_names = ("start_wall", "start_floor")
-        if any(self.seam_probe_touches[name] is None for name in start_touch_names):
-            raise ValueError("START wall/base DI4 contacts are required")
-        reference = session["reference"]
-        _, wall_normal, floor_normal, wall_label, floor_label = (
-            self._seam_geometry_settings(require_teaching=True)
-        )
-        if abs(floor_normal[2]) < 0.99 or abs(wall_normal[2]) > 0.1:
-            raise ValueError("1G pass touch needs a World Z base normal and XY wall normal")
-        geometry = self._compute_touch_corrected_seam_geometry(
-            reference, wall_normal, floor_normal, 0.0, 0.0, log_debug=True
-        )
-        predicted = (reference["weld_start"][3], reference["weld_end"][3])
-        corrected_start, corrected_goal, translation = (
-            correct_seam_from_measured_start(
-                predicted[0], predicted[1], geometry.start
-            )
-        )
-        measured = (corrected_start, corrected_goal)
-        translation_mm = tuple(value * 1000.0 for value in translation)
-        translation_norm_mm = math.sqrt(
-            sum(value * value for value in translation_mm)
-        )
-        if translation_norm_mm > 20.0:
-            raise ValueError(
-                f"Pass {number} START touch differs from prediction by "
-                f"{translation_norm_mm:.1f} mm "
-                "(limit 20 mm); inspect contact geometry before retrying"
-            )
-        path = folder / f"pass_{number}.yaml"
-        record = yaml.safe_load(path.read_text())
-        record["status"] = "pass_start_probed_translation_unverified_for_weld"
-        record["corrected_start"] = self._pose_execution_conditions(measured[0])
-        record["corrected_goal"] = self._pose_execution_conditions(measured[1])
-        record["touch_provenance"] = {
-            "method": (
-                "1G START-only wall/base contact; measured START translation "
-                "applied equally to predicted START/GOAL"
+        self.multi_pass_registration = {
+            "pass": number,
+            "phase": "moving_start_wait",
+            "previous": copy.deepcopy(self.four_pass_corrected),
+            "waits": waits,
+            "velocity_scale": max(
+                0.01, min(1.0, float(self.velocity_percent.get()) / 100.0)
             ),
-            "wall_normal": list(wall_normal), "base_normal": list(floor_normal),
-            "wall_axis": wall_label, "base_axis": floor_label,
-            "wall_sign": self.wall_probe_sign.get(),
-            "base_sign": self.floor_probe_sign.get(),
-            "translation_xyz_mm": list(translation_mm),
-            "translation_norm_mm": translation_norm_mm,
-            "direction_policy": "preserve root-corrected logged seam vector",
-            "length_policy": "preserve root-corrected logged seam length",
-            "sensing_orientation_policy": "common taught WAIT orientation",
-            "welding_orientation_policy": (
-                "preserve source-log START/GOAL orientations"
-            ),
-            "contacts": {
-                name: self._pose_execution_conditions(
-                    self.seam_probe_touches[name]
-                )
-                for name in start_touch_names
-            },
-        }
-        temporary_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=folder,
-                prefix=f".pass_{number}.", suffix=".tmp", delete=False,
-            ) as stream:
-                temporary_path = Path(stream.name)
-                yaml.safe_dump(record, stream, sort_keys=False)
-            temporary_path.replace(path)
-        finally:
-            if temporary_path is not None and temporary_path.exists():
-                temporary_path.unlink()
-        manifest_path = folder / "manifest.yaml"
-        manifest = yaml.safe_load(manifest_path.read_text())
-        for entry in manifest.get("passes", []):
-            if entry.get("pass") == number:
-                entry["status"] = record["status"]
-        manifest["status"] = "root_measured_with_selected_pass_reprobes"
-        temporary_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=folder,
-                prefix=".manifest.", suffix=".tmp", delete=False,
-            ) as stream:
-                temporary_path = Path(stream.name)
-                yaml.safe_dump(manifest, stream, sort_keys=False)
-            temporary_path.replace(manifest_path)
-        finally:
-            if temporary_path is not None and temporary_path.exists():
-                temporary_path.unlink()
-        self.four_pass_corrected[number] = {
-            "start": copy.deepcopy(measured[0]), "goal": copy.deepcopy(measured[1])
+            "measured_start": None,
+            "measured_goal": None,
         }
         self.four_pass_status.set(
-            f"Pass {number} START re-probed/translated · {path} · "
-            "load source log separately for welding"
+            f"Pass {number} correction · moving to corrected logged START WAIT"
+        )
+        threading.Thread(
+            target=self._multi_pass_start_wait_worker,
+            args=(number, copy.deepcopy(waits["start"])),
+            daemon=True,
+        ).start()
+
+    def _validate_four_pass_source_hashes(self):
+        if set(self.four_pass_references) != {1, 2, 3, 4}:
+            raise ValueError("Load all four pass references first")
+        for number, reference in self.four_pass_references.items():
+            if hashlib.sha256(Path(reference["path"]).read_bytes()).hexdigest() != reference["sha256"]:
+                raise ValueError(
+                    f"Pass {number} reference changed after loading; reload references"
+                )
+
+    def _multi_pass_translated_wait(self, number, endpoint):
+        if set(self.four_pass_corrected) != {1, 2, 3, 4}:
+            raise ValueError("Current four-pass prediction is unavailable")
+        wait_endpoint = f"{endpoint}_wait"
+        selected = self.four_pass_corrected[number][endpoint]
+        translated = copy.deepcopy(self.four_pass_corrected[number][wait_endpoint])
+        selected_separation = math.dist(
+            _pose_position_tuple(translated), _pose_position_tuple(selected)
+        )
+        if selected_separation < 0.001:
+            raise ValueError(
+                f"Pass {number} logged/corrected {wait_endpoint.upper()} "
+                f"is indistinguishable from {endpoint.upper()} · separation "
+                f"{selected_separation * 1000.0:.1f} mm"
+            )
+        if selected_separation < 0.020:
+            self.log(
+                f"4-PASS WAIT CLEARANCE WARNING · Pass {number} "
+                f"{wait_endpoint.upper()} is only "
+                f"{selected_separation * 1000.0:.1f} mm from "
+                f"{endpoint.upper()} · using the pass log value as requested · "
+                "verify the collision scene and keep STOP accessible"
+            )
+        return translated
+
+    def _run_multi_pass_tcp_move(
+        self, target, label, velocity_scale, touch_guard=False
+    ):
+        try:
+            current = self.node._current_tcp_pose("right_manipulator")
+            points = named_tcp_linear_waypoints(current, target)
+        except (TransformException, ValueError) as error:
+            return False, f"{label} path failed: {error}"
+        return self.node.run_sequence_cartesian_motion({
+            "planning_group": "right_manipulator",
+            "interpolation_step": 0.005,
+            "velocity_scale": float(velocity_scale),
+            "tcp_speed_m_s": 0.0,
+            "points": points,
+            "path_kind": label,
+            "touch_guard": bool(touch_guard),
+            "continue_after_touch": False,
+            "allow_initial_touch_motion": False,
+        }, True)
+
+    def _multi_pass_start_wait_worker(self, number, target):
+        session = self.multi_pass_registration
+        if session is None or session["pass"] != number:
+            return
+        success, message = self._run_multi_pass_tcp_move(
+            target,
+            f"Pass {number} corrected logged START WAIT",
+            session["velocity_scale"],
+        )
+        self.post(self._multi_pass_start_wait_finished, number, success, message)
+
+    def _multi_pass_start_wait_finished(self, number, success, message):
+        session = self.multi_pass_registration
+        if session is None or session["pass"] != number:
+            return
+        if not success:
+            self.multi_pass_registration = None
+            self.error(f"Pass {number} START WAIT move failed: {message}")
+            return
+        session["phase"] = "waiting_start_capture"
+        self.four_pass_status.set(
+            f"Pass {number} correction · waiting for START capture (I) · "
+            "enable Keyboard Teaching and jog to the real START"
         )
         self.pipeline_result(
-            f"1G PASS {number} START TOUCH RE-CORRECTED · "
-            f"START/GOAL translated · ΔXYZ=({translation_mm[0]:+.1f}, "
-            f"{translation_mm[1]:+.1f}, {translation_mm[2]:+.1f}) mm · "
-            "no welding started"
+            f"Pass {number} corrected logged START WAIT reached · "
+            "no welding command sent"
+        )
+        self._enable_multi_pass_keyboard_teaching(number, "i")
+
+    def _enable_multi_pass_keyboard_teaching(self, number, expected_key):
+        """Enable the existing keyboard controller for the next I/J capture."""
+        session = self.multi_pass_registration
+        if session is None or session["pass"] != number:
+            return
+        expected_key = str(expected_key).lower()
+        if expected_key not in ("i", "j"):
+            raise ValueError("Multi-pass capture key must be I or J")
+        if self.keyboard_velocity_arm == "right" and not self.keyboard_velocity_switching:
+            self.root.focus_set()
+            self.keyboard_jog_enabled.set(True)
+            self.keyboard_jog_status.set(
+                f"READY RIGHT · jog then press {expected_key.upper()} to capture"
+            )
+            return
+        if self.keyboard_velocity_switching:
+            self.four_pass_status.set(
+                f"Pass {number} correction · waiting for Keyboard Teaching · "
+                f"then press {expected_key.upper()}"
+            )
+            return
+        self.keyboard_jog_enabled.set(True)
+        self.four_pass_status.set(
+            f"Pass {number} correction · enabling Keyboard Teaching for "
+            f"{expected_key.upper()} capture"
+        )
+        self.keyboard_jog_status.set(
+            f"AUTO ENABLE · preparing {expected_key.upper()} capture..."
+        )
+        self.keyboard_jog_enable_changed()
+
+    def _finish_multi_pass_keyboard_capture(self, key, captured, error):
+        self.keyboard_teaching_capture_in_progress = False
+        session = self.multi_pass_registration
+        if session is None:
+            self.error("Multi-pass capture arrived after the session ended")
+            return
+        number = session["pass"]
+        expected_key = "i" if session["phase"] == "waiting_start_capture" else "j"
+        if key != expected_key:
+            self.error(
+                f"Pass {number} expects {expected_key.upper()} capture, not {key.upper()}"
+            )
+            return
+        if error is not None:
+            self.keyboard_jog_status.set(f"{key.upper()} · capture rejected")
+            self.four_pass_status.set(
+                f"Pass {number} correction · {key.upper()} capture FAILED · retry"
+            )
+            self.error(f"Pass {number} {key.upper()} capture rejected: {error}")
+            return
+        _joint_names, _positions, pose, provenance = captured
+        if key == "i":
+            session["measured_start"] = copy.deepcopy(pose)
+            session["start_capture_provenance"] = copy.deepcopy(provenance)
+            session["phase"] = "moving_goal_wait"
+            self.keyboard_velocity_switching = True
+            self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
+            self.four_pass_status.set(
+                f"Pass {number} correction · I accepted / START captured · "
+                "restoring trajectory controller and moving to GOAL WAIT"
+            )
+            self.keyboard_jog_status.set(
+                f"I COMPLETE · Pass {number} START saved · moving to GOAL WAIT"
+            )
+            threading.Thread(
+                target=self._multi_pass_goal_wait_worker,
+                args=(number, copy.deepcopy(session["waits"]["goal"])),
+                daemon=True,
+            ).start()
+            return
+        session["measured_goal"] = copy.deepcopy(pose)
+        session["goal_capture_provenance"] = copy.deepcopy(provenance)
+        self.four_pass_status.set(
+            f"Pass {number} correction · J accepted / GOAL captured · "
+            "calculating cumulative correction"
+        )
+        self.keyboard_jog_status.set(
+            f"J COMPLETE · Pass {number} GOAL saved"
+        )
+        self._complete_multi_pass_registration()
+
+    def _multi_pass_goal_wait_worker(self, number, target):
+        session = self.multi_pass_registration
+        if session is None or session["pass"] != number:
+            return
+        self.node.clear_keyboard_velocity()
+        time.sleep(0.10)
+        switched, switch_message = self.node.set_keyboard_velocity_controller_enabled(
+            "right", False
+        )
+        if not switched:
+            self.post(
+                self._multi_pass_goal_wait_finished,
+                number, False,
+                f"trajectory controller restore failed: {switch_message}",
+            )
+            return
+        # Leave the workpiece along the pass log's corrected START-WAIT route before
+        # traversing to the far GOAL WAIT.  A direct real-START -> GOAL-WAIT
+        # Cartesian segment can cut through the groove or an existing bead.
+        success, message = self._run_multi_pass_tcp_move(
+            copy.deepcopy(session["waits"]["start"]),
+            f"Pass {number} retract to corrected logged START WAIT",
+            session["velocity_scale"],
+        )
+        if not success:
+            self.post(
+                self._multi_pass_goal_wait_finished,
+                number, False, f"START WAIT retract failed: {message}",
+            )
+            return
+        success, message = self._run_multi_pass_tcp_move(
+            target,
+            f"Pass {number} corrected logged GOAL WAIT",
+            session["velocity_scale"],
+        )
+        self.post(self._multi_pass_goal_wait_finished, number, success, message)
+
+    def _multi_pass_goal_wait_finished(self, number, success, message):
+        self.keyboard_velocity_switching = False
+        self.keyboard_velocity_arm = None
+        self.keyboard_jog_enabled.set(False)
+        self.keyboard_jog_enable_button.configure(state=tk.NORMAL)
+        self.keyboard_jog_status.set("Keyboard teaching locked")
+        session = self.multi_pass_registration
+        if session is None or session["pass"] != number:
+            return
+        if not success:
+            self.multi_pass_registration = None
+            self.error(f"Pass {number} GOAL WAIT move failed: {message}")
+            return
+        session["phase"] = "waiting_goal_capture"
+        self.four_pass_status.set(
+            f"Pass {number} correction · START captured · "
+            "waiting for GOAL capture (J) · enable Keyboard Teaching"
+        )
+        self.pipeline_result(
+            f"Pass {number} corrected logged GOAL WAIT reached · "
+            "no welding command sent"
+        )
+        self._enable_multi_pass_keyboard_teaching(number, "j")
+
+    def _complete_multi_pass_registration(self):
+        session = self.multi_pass_registration
+        if session is None:
+            return
+        number = session["pass"]
+        try:
+            self._validate_four_pass_source_hashes()
+            corrected, transform = correct_remaining_passes(
+                session["previous"],
+                number,
+                session["measured_start"],
+                session["measured_goal"],
+            )
+            self._save_sequential_four_pass_state(
+                corrected, session, transform
+            )
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Pass {number} correction failed: {error}")
+            return
+        self.four_pass_corrected = corrected
+        self.multi_pass_registration = None
+        later = transform["later_passes_updated"]
+        later_text = "/".join(str(value) for value in later) or "none"
+        self.four_pass_status.set(
+            f"Pass {number} corrected · later predictions updated: {later_text} · "
+            "verify corrected START/GOAL before welding"
+        )
+        self.pipeline_result(
+            f"SEQUENTIAL PASS {number} REGISTRATION COMPLETE · "
+            f"direction change={transform['direction_change_deg']:+.3f}° · "
+            f"updated later passes={later_text} · ARC/WELD not started"
+        )
+        self.keyboard_jog_status.set(
+            f"PASS {number} CORRECTION COMPLETE · verify corrected START/GOAL"
+        )
+
+    def _save_sequential_four_pass_state(self, corrected, session, transform):
+        folder = self.four_pass_loaded_folder
+        if folder is None:
+            raise ValueError("Four-pass source folder is unavailable")
+        output = self.four_pass_output_folder
+        if output is None:
+            output = folder / (
+                "sequential_corrected_" + time.strftime("%Y%m%d_%H%M%S")
+                + f"_{time.monotonic_ns() % 1000000:06d}"
+            )
+            output.mkdir()
+        number = session["pass"]
+        previous = session["previous"]
+        pose_dict = self._pose_execution_conditions
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        event = {
+            "timestamp": timestamp,
+            "status": "measured_anchor_applied",
+            "selected_pass": number,
+            "source_log": self.four_pass_references[number]["path"],
+            "source_log_sha256": self.four_pass_references[number]["sha256"],
+            "previous_predicted_start_wait": pose_dict(
+                previous[number]["start_wait"]
+            ),
+            "previous_predicted_start": pose_dict(previous[number]["start"]),
+            "previous_predicted_goal_wait": pose_dict(
+                previous[number]["goal_wait"]
+            ),
+            "previous_predicted_goal": pose_dict(previous[number]["goal"]),
+            "measured_start": pose_dict(session["measured_start"]),
+            "measured_goal": pose_dict(session["measured_goal"]),
+            "direction_change_deg": transform["direction_change_deg"],
+            "start_translation_mm": [
+                value * 1000.0 for value in transform["start_translation_m"]
+            ],
+            "goal_translation_mm": [
+                value * 1000.0 for value in transform["goal_translation_m"]
+            ],
+            "rotation_xyzw": list(transform["rotation_xyzw"]),
+            "later_passes_updated": list(transform["later_passes_updated"]),
+            "orientation_policy": (
+                "q_new = q_minimal_direction_rotation * q_current; "
+                "no additional seam-axis roll"
+            ),
+            "wait_orientation_policy": (
+                "pass-specific WAIT from source log; corrected with the same "
+                "minimal seam rotation"
+            ),
+            "start_capture_provenance": session.get("start_capture_provenance"),
+            "goal_capture_provenance": session.get("goal_capture_provenance"),
+        }
+        history = [*self.four_pass_history, event]
+        manifest = {
+            "schema": "construct_robot_sequential_four_pass_correction_v3",
+            "status": "sequential_pass_registration",
+            "planning_group": "right_manipulator",
+            "source_folder": str(folder),
+            "source_logs_immutable": True,
+            "current_anchor_pass": number,
+            "wait_pose_source": "pass-specific teaching snapshot in each N.log",
+            "history": history,
+            "passes": [],
+        }
+
+        def atomic_yaml(path, document):
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=output,
+                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary_path = Path(stream.name)
+                    yaml.safe_dump(document, stream, sort_keys=False)
+                temporary_path.replace(path)
+            finally:
+                if temporary_path is not None and temporary_path.exists():
+                    temporary_path.unlink()
+
+        for pass_number in range(1, 5):
+            reference = self.four_pass_references[pass_number]
+            record = {
+                "schema": "construct_robot_sequential_pass_v3",
+                "pass": pass_number,
+                "status": (
+                    "measured_anchor"
+                    if pass_number == number
+                    else (
+                        f"propagated_from_pass_{number}"
+                        if pass_number > number
+                        else "previously_registered_unchanged"
+                    )
+                ),
+                "source_log": reference["path"],
+                "source_log_sha256": reference["sha256"],
+                "source_start_wait": pose_dict(reference["start_wait"]),
+                "source_start": pose_dict(reference["start"]),
+                "source_goal_wait": pose_dict(reference["goal_wait"]),
+                "source_goal": pose_dict(reference["goal"]),
+                "current_start_wait": pose_dict(
+                    corrected[pass_number]["start_wait"]
+                ),
+                "current_start": pose_dict(corrected[pass_number]["start"]),
+                "current_goal_wait": pose_dict(
+                    corrected[pass_number]["goal_wait"]
+                ),
+                "current_goal": pose_dict(corrected[pass_number]["goal"]),
+                "last_registration": event if pass_number >= number else None,
+            }
+            file_name = f"pass_{pass_number}.yaml"
+            atomic_yaml(output / file_name, record)
+            manifest["passes"].append({"pass": pass_number, "file": file_name})
+        atomic_yaml(output / "manifest.yaml", manifest)
+        self.four_pass_output_folder = output
+        self.four_pass_history = history
+
+    def go_to_corrected_pass_endpoint(self, endpoint):
+        endpoint = str(endpoint).strip().lower()
+        try:
+            number = int(self.selected_pass_number.get())
+            if endpoint not in ("start", "goal"):
+                raise ValueError("Endpoint must be START or GOAL")
+            target = copy.deepcopy(self.four_pass_corrected[number][endpoint])
+            self._validate_four_pass_source_hashes()
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            self.error(f"Cannot move to corrected endpoint: {error}")
+            return
+        if self.multi_pass_registration is not None:
+            self.error("Finish the active multi-pass registration first")
+            return
+        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
+            self.error("Disable Keyboard Teaching before corrected-pose motion")
+            return
+        if self.sequence_running or self.node.active_motion_goal is not None:
+            self.error("Another robot motion is active")
+            return
+        if not self.execution_allowed or not self.robot_connected.get("right", False):
+            self.error("Connect the right robot and enable physical execution")
+            return
+        if not messagebox.askyesno(
+            "Verify corrected pass endpoint",
+            f"Move to corrected Pass {number} {endpoint.upper()}?\n\n"
+            "This is a robot motion only. ARC and welding outputs remain OFF.",
+            parent=self.root,
+        ):
+            return
+        speed = max(0.01, min(1.0, float(self.velocity_percent.get()) / 100.0))
+        threading.Thread(
+            target=self._go_to_corrected_pass_endpoint_worker,
+            args=(number, endpoint, target, speed),
+            daemon=True,
+        ).start()
+
+    def _go_to_corrected_pass_endpoint_worker(
+        self, number, endpoint, target, velocity_scale
+    ):
+        success, message = self._run_multi_pass_tcp_move(
+            target,
+            f"Pass {number} corrected {endpoint.upper()} verification",
+            velocity_scale,
+            touch_guard=True,
+        )
+        self.post(
+            self._go_to_corrected_pass_endpoint_finished,
+            number, endpoint, success, message,
+        )
+
+    def _go_to_corrected_pass_endpoint_finished(
+        self, number, endpoint, success, message
+    ):
+        if success:
+            self.pipeline_result(
+                f"Pass {number} corrected {endpoint.upper()} reached · "
+                "visual verification only · no welding command sent"
+            )
+        else:
+            self.error(
+                f"Pass {number} corrected {endpoint.upper()} move failed: {message}"
+            )
+
+    def _selected_pass_teaching_path(self, number):
+        folder = self.four_pass_loaded_folder
+        if folder is None:
+            folder = Path(self.four_pass_folder.get()).expanduser().resolve()
+        teaching_folder = folder if folder.name == "pass_teaching" else (
+            folder / "pass_teaching"
+        )
+        return teaching_folder / f"pass_{int(number)}_teaching.yaml"
+
+    def _load_saved_pass_teaching(self, number):
+        """Return a selected pass's independent manual teaching, if present."""
+        path = self._selected_pass_teaching_path(number)
+        if not path.is_file():
+            return None
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if document.get("schema") != "construct_robot_pass_teaching_v1":
+            raise ValueError(f"Unsupported pass teaching schema: {path}")
+        if int(document.get("pass", 0)) != int(number):
+            raise ValueError(f"Saved teaching pass does not match Pass {number}")
+        reference = self.four_pass_references.get(number)
+        reference_is_this_teaching = (
+            reference is not None
+            and reference.get("reference_kind") == "saved_pass_teaching"
+            and Path(reference["path"]).resolve() == path.resolve()
+        )
+        if (
+            reference is not None
+            and not reference_is_this_teaching
+            and document.get("source_log_sha256")
+            and document.get("source_log_sha256") != reference["sha256"]
+        ):
+            raise ValueError(
+                f"Pass {number} saved teaching belongs to a different source log"
+            )
+        pose_entries = document.get("poses")
+        if not isinstance(pose_entries, dict):
+            raise ValueError(f"Pass {number} saved teaching has no poses mapping")
+        current = {}
+        joint_states = {}
+        for endpoint, pose_name in (
+            ("start_wait", "weld_start_wait"),
+            ("start", "weld_start"),
+            ("goal_wait", "weld_goal_wait"),
+            ("goal", "weld_end"),
+        ):
+            group, names, positions, tcp = parse_teaching_snapshot_entry(
+                pose_name, pose_entries.get(pose_name)
+            )
+            if group != "right_manipulator":
+                raise ValueError(f"{pose_name} is not a right-arm teaching pose")
+            current[endpoint] = copy.deepcopy(tcp)
+            joint_states[endpoint] = (tuple(names), tuple(positions))
+        self.four_pass_corrected[number] = copy.deepcopy(current)
+        return current, joint_states, path
+
+    def save_teaching_to_selected_pass(self):
+        """Save current Teaching Detail poses without modifying N.log sources."""
+        try:
+            number = int(self.selected_pass_number.get())
+            if number not in (1, 2, 3, 4):
+                raise ValueError("Select Pass 1, 2, 3, or 4")
+            pose_records = {}
+            current = {}
+            for endpoint, pose_name in (
+                ("start_wait", "weld_start_wait"),
+                ("start", "weld_start"),
+                ("goal_wait", "weld_goal_wait"),
+                ("goal", "weld_end"),
+            ):
+                stored = self.taught_robot_poses.get(pose_name)
+                if stored is None or stored[0] != "right_manipulator":
+                    raise ValueError(
+                        f"Teaching Detail has no right-arm {TEACHING_POSES[pose_name]}"
+                    )
+                group, names, positions, tcp = stored
+                if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
+                    raise ValueError(
+                        f"Teaching Detail {TEACHING_POSES[pose_name]} is incomplete"
+                    )
+                pose_records[pose_name] = {
+                    "planning_group": group,
+                    "joint_state": {
+                        "names": list(names),
+                        "positions_rad": [float(value) for value in positions],
+                    },
+                    "tcp_pose_world": self._pose_execution_conditions(tcp),
+                }
+                provenance = getattr(
+                    self, "teaching_capture_provenance", {}
+                ).get(pose_name)
+                if provenance:
+                    pose_records[pose_name]["capture_provenance"] = copy.deepcopy(
+                        provenance
+                    )
+                current[endpoint] = copy.deepcopy(tcp)
+            reference = self.four_pass_references.get(number)
+            document = {
+                "schema": "construct_robot_pass_teaching_v1",
+                "status": "manual_teaching_saved",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "pass": number,
+                "poses": pose_records,
+            }
+            if reference is not None:
+                document.update({
+                    "source_reference": reference["path"],
+                    "source_reference_kind": reference.get(
+                        "reference_kind", "unknown"
+                    ),
+                    "source_reference_sha256": reference["sha256"],
+                    # Retain the v1 provenance keys for existing files and
+                    # correction manifests.  They do not make saving depend
+                    # on a log being loaded.
+                    "source_log": reference["path"],
+                    "source_log_sha256": reference["sha256"],
+                })
+            path = self._selected_pass_teaching_path(number)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=path.parent,
+                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary_path = Path(stream.name)
+                    yaml.safe_dump(document, stream, sort_keys=False)
+                temporary_path.replace(path)
+            finally:
+                if temporary_path is not None and temporary_path.exists():
+                    temporary_path.unlink()
+            persisted = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if persisted != document:
+                raise OSError(f"Pass teaching YAML read-back failed: {path}")
+            replaces_loaded_reference = (
+                reference is not None
+                and reference.get("reference_kind") == "saved_pass_teaching"
+                and Path(reference["path"]).resolve() == path.resolve()
+            )
+            if replaces_loaded_reference:
+                self.four_pass_references[number] = read_pass_teaching_reference(
+                    path, number
+                )
+        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Cannot save selected-pass teaching: {error}")
+            return
+        self.four_pass_corrected[number] = current
+        self.four_pass_status.set(
+            f"Pass {number} Teaching Detail saved separately · {path}"
+        )
+        self.pipeline_result(
+            f"PASS {number} TEACHING SAVED · WAIT/START/GOAL WAIT/GOAL · "
+            f"{path} · "
+            + (
+                "loaded teaching reference updated"
+                if replaces_loaded_reference
+                else "saved independently of pass-reference loading"
+            )
         )
 
     def apply_selected_pass_correction(self):
-        """Apply one saved pass TCP pair in memory after its source log is loaded."""
+        """Load the selected pass from the cumulative seam-correction state."""
+        self._apply_selected_pass_teaching(use_saved_teaching=False)
+
+    def load_saved_teaching_for_selected_pass(self):
+        """Load the selected pass's explicit manual-teaching override."""
+        self._apply_selected_pass_teaching(use_saved_teaching=True)
+
+    def _apply_selected_pass_teaching(self, use_saved_teaching):
+        """Apply either cumulative correction or explicit saved teaching."""
         try:
             number = int(self.selected_pass_number.get())
-            if number not in (2, 3, 4) or self.four_pass_output_folder is None:
-                raise ValueError("Select pass 2–4 and run root correction first")
-            record = yaml.safe_load(
-                (self.four_pass_output_folder / f"pass_{number}.yaml").read_text()
-            )
-            reference = self.four_pass_references[number]
-            if hashlib.sha256(Path(reference["path"]).read_bytes()).hexdigest() != record["source_log_sha256"]:
-                raise ValueError("Source log changed since correction")
-            for endpoint, name in (("start", "weld_start"), ("goal", "weld_end")):
-                loaded = self.taught_robot_poses.get(name)
-                if loaded is None or loaded[0] != "right_manipulator":
-                    raise ValueError(f"Load pass {number} source log first")
-                if math.dist(_pose_position_tuple(loaded[3]),
-                             _pose_position_tuple(reference[endpoint])) > 0.001:
+            if number not in (1, 2, 3, 4):
+                raise ValueError("Select Pass 1, 2, 3, or 4")
+            if not use_saved_teaching:
+                self._validate_four_pass_source_hashes()
+                current = self.four_pass_corrected[number]
+                reference = self.four_pass_references[number]
+                joint_states = reference.get(
+                    "joint_states", {}
+                )
+                teaching_source = "latest cumulative seam correction"
+                resolve_corrected_ik = not (
+                    reference.get("reference_kind") == "saved_pass_teaching"
+                    and not self.four_pass_history
+                )
+            else:
+                saved = self._load_saved_pass_teaching(number)
+                if saved is None:
                     raise ValueError(
-                        f"{name} does not match {number}.log; load that pass log first"
+                        f"Pass {number} has no separately saved teaching file"
                     )
-            start = _pose_from_yaml_dict(record["corrected_start"], "corrected START")
-            goal = _pose_from_yaml_dict(record["corrected_goal"], "corrected GOAL")
-            if record.get("status") not in (
-                "pass_start_probed_translation_unverified_for_weld",
-                # Backward compatibility with existing correction folders.
-                "pass_physically_probed_unverified_for_weld",
-            ):
-                raise ValueError(f"Pass {number} has not been physically re-probed")
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Cannot apply pass correction: {error}")
+                current, joint_states, saved_path = saved
+                teaching_source = f"saved pass teaching {saved_path}"
+                resolve_corrected_ik = False
+            required_endpoints = {"start_wait", "start", "goal_wait", "goal"}
+            if not required_endpoints.issubset(joint_states):
+                raise ValueError(
+                    f"{number}.log has no complete WAIT/START/GOAL WAIT/GOAL "
+                    "joint snapshots"
+                )
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            self.error(f"Cannot apply selected pass: {error}")
             return
         self._invalidate_seam_correction_runtime(
-            f"applying pass {number} physical correction", clear_touches=True
+            f"applying cumulative Pass {number} correction", clear_touches=True
         )
-        for name, corrected in (("weld_start", start), ("weld_end", goal)):
-            group, names, positions, _ = self.taught_robot_poses[name]
-            self.taught_robot_poses[name] = (
-                group, names, positions, copy.deepcopy(corrected)
+        for endpoint, pose_name in (
+            ("start_wait", "weld_start_wait"),
+            ("start", "weld_start"),
+            ("goal_wait", "weld_goal_wait"),
+            ("goal", "weld_end"),
+        ):
+            names, positions = joint_states[endpoint]
+            self.taught_robot_poses[pose_name] = (
+                "right_manipulator",
+                tuple(names),
+                tuple(positions),
+                copy.deepcopy(current[endpoint]),
             )
-        self.seam_teaching_reference = None
+            if endpoint in ("start", "goal"):
+                self.linear_tcp_endpoints[0 if endpoint == "start" else 1] = (
+                    copy.deepcopy(current[endpoint])
+                )
+        self.seam_teaching_reference = {
+            name: copy.deepcopy(self.taught_robot_poses[name])
+            for name in ("weld_start", "weld_end")
+        }
+        try:
+            save_seam_teaching_reference_yaml(
+                self._seam_reference_yaml_path("right_manipulator"),
+                "right_manipulator",
+                self.seam_teaching_reference,
+            )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Selected pass seam reference save failed: {error}")
+            return
+        self.teaching_pose_changed()
+        if resolve_corrected_ik:
+            ik_targets = tuple(
+                (
+                    "goal" if endpoint.startswith("goal") else "start",
+                    "right_manipulator",
+                    copy.deepcopy(current[endpoint]),
+                    tuple(joint_states[endpoint][0]),
+                    pose_name,
+                )
+                for endpoint, pose_name in (
+                    ("start_wait", "weld_start_wait"),
+                    ("start", "weld_start"),
+                    ("goal_wait", "weld_goal_wait"),
+                    ("goal", "weld_end"),
+                )
+            )
+            threading.Thread(
+                target=self.node.resolve_tcp_joint_states,
+                args=(ik_targets,),
+                daemon=True,
+            ).start()
+            load_completion = "resolving corrected joint states"
+        else:
+            try:
+                for endpoint, pose_name in (
+                    ("start_wait", "weld_start_wait"),
+                    ("start", "weld_start"),
+                    ("goal_wait", "weld_goal_wait"),
+                    ("goal", "weld_end"),
+                ):
+                    names, positions = joint_states[endpoint]
+                    save_initial_state_yaml(
+                        self._initial_state_yaml_path(
+                            "right_manipulator", pose_name
+                        ),
+                        "right_manipulator",
+                        names,
+                        positions,
+                        current[endpoint],
+                    )
+            except (OSError, ValueError, yaml.YAMLError) as error:
+                self.error(f"Saved pass teaching restore failed: {error}")
+                return
+            load_completion = "saved joint/TCP pairs restored exactly"
         self.four_pass_status.set(
-            f"Pass {number} measured START/GOAL active in memory · rebuild scenario before execute"
+            f"Pass {number} corrected WAIT/START/GOAL WAIT/GOAL loaded into "
+            f"Teaching Detail · {teaching_source} · {load_completion}"
         )
         self.pipeline_result(
-            f"1G PASS {number} TCPs APPLIED · in-memory only · "
-            "review path/clearance and rebuild scenario before executing"
+            f"PASS {number} CUMULATIVE CORRECTION APPLIED · "
+            f"four teaching poses loaded · {load_completion} · "
+            "no welding started"
         )
 
-    def run_automatic_seam_correction(self, pass_mode=False):
+    def run_automatic_seam_correction(self):
         if self.seam_auto_running:
             self.error("Automatic seam correction is already running")
             return
-        if not pass_mode:
-            self.pass_probe_touch_yaml_target = None
+        self.pass_probe_touch_yaml_target = None
         if not self.execution_allowed or not self.robot_connected["right"]:
             self.error("Connect the right robot and enable physical execution")
             return
         if self.planning_group.get() != "right_manipulator":
             self.error("Automatic seam correction currently supports right arm")
             return
-        multi_pass_sensing_mode = bool(pass_mode or self.four_pass_auto_pending)
-        fixed_tilt_mode = (
-            self._wait_fixed_tilt_mode_enabled() and not multi_pass_sensing_mode
-        )
+        fixed_tilt_mode = self._wait_fixed_tilt_mode_enabled()
         required = (
             ("weld_start_wait", "weld_goal_wait")
             if fixed_tilt_mode
             else ("weld_start_wait", "weld_start", "weld_goal_wait", "weld_end")
         )
-        if self.auto_seam_move_to_end_pose.get() and not pass_mode:
+        if self.auto_seam_move_to_end_pose.get():
             required += ("weld_finish",)
-        if pass_mode:
-            required = ("weld_start_wait", "weld_goal_wait")
         missing = [
             TEACHING_POSES[name]
             for name in required
@@ -10782,20 +11510,15 @@ class WeldActionGui:
             self.error("Fastech DI4 is already ON; release it before auto correction")
             return
         orientation_note = (
-            "Touch orientation = taught upright START/GOAL WAIT orientation; "
-            "logged welding orientations are preserved for later safe approach."
-            if multi_pass_sensing_mode
-            else (
-                "START/GOAL orientation = each WAIT orientation + fixed World XYZ "
-                f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
-                f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
-                f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)\n"
-                "Separate Weld START/GOAL teaching is not required."
-                if fixed_tilt_mode
-                else "START/GOAL orientation = existing Weld START/GOAL teaching."
-            )
+            "START/GOAL orientation = each WAIT orientation + fixed World XYZ "
+            f"({float(self.weld_fixed_tilt_x_deg.get()):+.1f}°, "
+            f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
+            f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)\n"
+            "Separate Weld START/GOAL teaching is not required."
+            if fixed_tilt_mode
+            else "START/GOAL orientation = existing Weld START/GOAL teaching."
         )
-        if not pass_mode and not messagebox.askyesno(
+        if not messagebox.askyesno(
             "Automatic Seam Correction",
             "Execute the complete four-probe correction?\n\n"
             "START wait → wall/base → GOAL wait → wall/base\n"
@@ -10837,31 +11560,12 @@ class WeldActionGui:
                     f"{float(self.weld_fixed_tilt_y_deg.get()):+.1f}°, "
                     f"{float(self.weld_fixed_tilt_z_deg.get()):+.1f}°)"
                 )
-            elif pass_mode:
-                endpoint_tcp = self.active_pass_probe["reference"][endpoint_name][3]
-                orientation_source = TEACHING_POSES[wait_name]
-            elif self.four_pass_auto_pending:
-                endpoint_tcp = self.taught_robot_poses[endpoint_name][3]
-                orientation_source = TEACHING_POSES[wait_name]
             else:
                 endpoint_tcp = self.taught_robot_poses[endpoint_name][3]
                 orientation_source = TEACHING_POSES[endpoint_name]
 
-            # Single-seam correction retains the historical endpoint-attitude
-            # probe behavior. Multi-pass correction instead uses one common
-            # upright WAIT attitude so pass-specific torch tilt cannot change
-            # the physical contact feature or sweep the torch body into the
-            # trapezoid. Its TCP must therefore be calibrated at the wire tip.
-            probe_wait_tcp = copy.deepcopy(
-                self.active_pass_probe["waits"][wait_name] if pass_mode else tcp
-            )
-            if multi_pass_sensing_mode:
-                # Root and selected-pass probing share the same upright WAIT
-                # attitude. Pass welding attitudes remain in the corrected TCP
-                # records and are acquired later at safe clearance.
-                probe_wait_tcp.orientation = copy.deepcopy(tcp.orientation)
-            else:
-                probe_wait_tcp.orientation = copy.deepcopy(endpoint_tcp.orientation)
+            probe_wait_tcp = copy.deepcopy(tcp)
+            probe_wait_tcp.orientation = copy.deepcopy(endpoint_tcp.orientation)
             orientation_delta = quaternion_angular_distance(
                 tcp.orientation, probe_wait_tcp.orientation
             )
@@ -10895,19 +11599,18 @@ class WeldActionGui:
                 wait_steps["weld_start_wait"],
                 ("start_wall", "start_floor"),
             ),
-        ]
-        if not pass_mode:
-            workflow.append((
+            (
                 wait_steps["weld_goal_wait"],
                 ("goal_wall", "goal_floor"),
-            ))
+            ),
+        ]
         # Every AUTO run is a new measurement session.  Clear *all* derived
         # seam state, including computed endpoints from the previous run.
         self._invalidate_seam_correction_runtime(
             "new AUTO seam-correction session", clear_touches=True
         )
         self.seam_auto_move_to_end_requested = bool(
-            self.auto_seam_move_to_end_pose.get() and not pass_mode
+            self.auto_seam_move_to_end_pose.get()
         )
         self.seam_auto_running = True
         self.auto_seam_correction_button.configure(state=tk.DISABLED)
@@ -10924,8 +11627,6 @@ class WeldActionGui:
             return
         self.seam_auto_running = False
         self.seam_auto_move_to_end_requested = False
-        self.four_pass_auto_pending = False
-        self.active_pass_probe = None
         self.seam_auto_expected_kind = None
         self.seam_auto_stage_success = False
         self.seam_auto_stage_event.set()
@@ -11180,21 +11881,6 @@ class WeldActionGui:
         self.pipeline_waiting(text)
 
     def _complete_automatic_seam_correction(self):
-        if self.active_pass_probe is not None:
-            try:
-                self._save_selected_pass_touch_result()
-            except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
-                self._finish_automatic_seam_correction(False, f"pass touch rejected: {error}")
-                return
-            number = self.active_pass_probe["number"]
-            self._invalidate_seam_correction_runtime(
-                f"pass {number} touch complete; global root teaching unchanged",
-                clear_touches=True,
-            )
-            self._finish_automatic_seam_correction(
-                True, f"pass {number} saved; no weld executed"
-            )
-            return
         self.compute_two_touch_seam()
         if not self.corrected_two_touch_seam:
             self._finish_automatic_seam_correction(
@@ -11267,9 +11953,6 @@ class WeldActionGui:
         )
 
     def _finish_automatic_seam_correction(self, success, message):
-        apply_four_pass = bool(self.four_pass_auto_pending and success)
-        self.four_pass_auto_pending = False
-        self.active_pass_probe = None
         self.seam_auto_running = False
         self.seam_auto_move_to_end_requested = False
         self.seam_auto_expected_kind = None
@@ -11278,8 +11961,6 @@ class WeldActionGui:
         self.stop_auto_seam_button.configure(state=tk.DISABLED)
         if success:
             self.pipeline_result(f"AUTO SEAM CORRECTION COMPLETE · {message}")
-            if apply_four_pass:
-                self.apply_four_pass_correction()
         else:
             self.error(f"Automatic seam correction stopped: {message}")
 
@@ -11442,7 +12123,7 @@ class WeldActionGui:
         )
 
     def start_automatic_touch_probe(self, kind, skip_confirmation=False):
-        if not self.seam_auto_running and self.active_pass_probe is None:
+        if not self.seam_auto_running:
             self.pass_probe_touch_yaml_target = None
         if kind not in CORNER_TOUCH_NAMES:
             self.error(f"Unknown touch probe kind: {kind}")
@@ -11605,26 +12286,6 @@ class WeldActionGui:
 
     def _ensure_seam_teaching_reference(self, require_complete=False):
         """Return immutable TCP1/TCP2 seam references used for geometry/yaw."""
-        if self.active_pass_probe is not None:
-            return self.active_pass_probe["reference"]
-        if self.four_pass_auto_pending and 1 in self.four_pass_references:
-            # Multi-pass root sensing is anchored to 1.log. START/GOAL WAIT
-            # are elevated neutral sensing poses, not the nominal seam
-            # endpoints, so fixed-WAIT orientation mode must not replace the
-            # root log's endpoint geometry here.
-            root = self.four_pass_references[1]
-            self.log(
-                "Multi-pass root reference ready from 1.log · "
-                "WAIT poses supply sensing approach only"
-            )
-            return {
-                "weld_start": (
-                    "right_manipulator", (), (), copy.deepcopy(root["start"])
-                ),
-                "weld_end": (
-                    "right_manipulator", (), (), copy.deepcopy(root["goal"])
-                ),
-            }
         if self._wait_fixed_tilt_mode_enabled():
             reference = self._wait_fixed_tilt_seam_reference(require_complete)
             if reference is not None:
@@ -14975,9 +15636,30 @@ class WeldActionGui:
             # focus away from a speed Spinbox/Combobox so their class binding
             # cannot consume the first key event.
             self.root.focus_set()
-            self.keyboard_jog_status.set(
-                f"READY {arm.upper()} · hold arrow to move"
-            )
+            registration = self.multi_pass_registration
+            expected_key = None
+            if registration is not None and arm == "right":
+                expected_key = {
+                    "waiting_start_capture": "I",
+                    "waiting_goal_capture": "J",
+                }.get(registration.get("phase"))
+            if expected_key is not None:
+                number = registration["pass"]
+                self.keyboard_jog_status.set(
+                    f"READY RIGHT · jog then press {expected_key} to capture"
+                )
+                self.four_pass_status.set(
+                    f"Pass {number} correction · Keyboard Teaching READY · "
+                    f"waiting for {expected_key} capture"
+                )
+                self.pipeline_result(
+                    f"Pass {number} Keyboard Teaching enabled automatically · "
+                    f"jog to the real endpoint and press {expected_key}"
+                )
+            else:
+                self.keyboard_jog_status.set(
+                    f"READY {arm.upper()} · hold arrow to move"
+                )
             self.log(f"Keyboard native Cartesian velocity enabled · {message}")
             return
         if success:
@@ -14990,6 +15672,12 @@ class WeldActionGui:
         self.keyboard_velocity_arm = None
         self.keyboard_jog_enabled.set(False)
         self.keyboard_jog_status.set(f"VELOCITY MODE FAILED · {message}")
+        if self.multi_pass_registration is not None:
+            number = self.multi_pass_registration["pass"]
+            self.four_pass_status.set(
+                f"Pass {number} correction · automatic Keyboard Teaching enable "
+                "FAILED · use Enable Keyboard Teaching to retry"
+            )
         self.error(f"Keyboard controller exchange failed · {message}")
 
     def _cancel_keyboard_release_timer(self):
@@ -15229,11 +15917,32 @@ class WeldActionGui:
 
     def keyboard_teaching_shortcut_key(self, event):
         """Handle speed cycling and current-pose saves in teaching mode."""
+        key = str(event.keysym).lower()
+        registration = self.multi_pass_registration
         if not self.keyboard_jog_enabled.get():
+            if registration is not None and key in ("i", "j"):
+                self.four_pass_status.set(
+                    f"Pass {registration['pass']} correction · {key.upper()} received, "
+                    "but Keyboard Teaching is not ready"
+                )
+                self.error(
+                    f"{key.upper()} capture not started · wait for automatic "
+                    "Keyboard Teaching enable or enable it manually"
+                )
+                return "break"
             return None
         if not self._keyboard_focus_allows_jog():
+            if registration is not None and key in ("i", "j"):
+                self.four_pass_status.set(
+                    f"Pass {registration['pass']} correction · {key.upper()} received, "
+                    "but keyboard focus is in an input field"
+                )
+                self.error(
+                    f"{key.upper()} capture not started · click the main GUI background "
+                    "and press the key again"
+                )
+                return "break"
             return None
-        key = str(event.keysym).lower()
         pending_release = self.keyboard_shortcut_release_ids.pop(key, None)
         if pending_release is not None:
             try:
@@ -15265,6 +15974,22 @@ class WeldActionGui:
             self.log(f"Keyboard rotation speed selected · {speed:g} deg/s")
             return "break"
 
+        if registration is not None and key in ("i", "j"):
+            expected = (
+                "i"
+                if registration.get("phase") == "waiting_start_capture"
+                else "j"
+                if registration.get("phase") == "waiting_goal_capture"
+                else None
+            )
+            if key != expected:
+                self.error(
+                    f"Pass {registration['pass']} registration is in "
+                    f"{registration.get('phase')} state; "
+                    f"{(expected or 'no').upper()} capture is expected"
+                )
+                return "break"
+
         if self.sequence_running or self.node.active_motion_goal is not None:
             self.error("Cannot save a teaching pose during another motion")
             return "break"
@@ -15276,7 +16001,19 @@ class WeldActionGui:
             self.error("Wait for the current keyboard teaching capture to finish")
             return "break"
         self.keyboard_teaching_capture_in_progress = True
-        self.keyboard_jog_status.set(f"Stopping before {key.upper()} pose capture...")
+        if registration is not None and key in ("i", "j"):
+            endpoint = "START" if key == "i" else "GOAL"
+            self.four_pass_status.set(
+                f"Pass {registration['pass']} correction · {key.upper()} received · "
+                f"capturing {endpoint}..."
+            )
+            self.pipeline_waiting(
+                f"Pass {registration['pass']} {key.upper()} CAPTURE IN PROGRESS · "
+                f"stopping and measuring {endpoint}"
+            )
+        self.keyboard_jog_status.set(
+            f"{key.upper()} RECEIVED · stopping before pose capture..."
+        )
         threading.Thread(
             target=self._keyboard_teaching_capture_worker,
             args=(arm, key),
@@ -15306,6 +16043,25 @@ class WeldActionGui:
         self.keyboard_shortcut_active_keys.discard(key)
 
     def _keyboard_teaching_capture_worker(self, arm, key):
+        registration = self.multi_pass_registration
+        if registration is not None and key in ("i", "j"):
+            planning_group = f"{arm}_manipulator"
+            try:
+                captured = self.node.capture_measured_teaching_snapshot(
+                    planning_group,
+                    f"multi_pass_{registration['pass']}_{'start' if key == 'i' else 'goal'}",
+                )
+            except Exception as error:
+                self.post(
+                    self._finish_multi_pass_keyboard_capture,
+                    key, None, str(error),
+                )
+                return
+            self.post(
+                self._finish_multi_pass_keyboard_capture,
+                key, captured, None,
+            )
+            return
         pose_name = KEYBOARD_TEACHING_POSE_SHORTCUTS.get(key)
         if pose_name is not None:
             planning_group = f"{arm}_manipulator"
@@ -15523,7 +16279,7 @@ class WeldActionGui:
 
     def emergency_stop_all(self, restore_keyboard_controller=True):
         """Stop every GUI-owned workflow, robot goal, and welder output."""
-        self.four_pass_auto_pending = False
+        self.multi_pass_registration = None
         self._stop_keyboard_wire()
         self._stop_keyboard_jog_command()
         self.keyboard_jog_enabled.set(False)
