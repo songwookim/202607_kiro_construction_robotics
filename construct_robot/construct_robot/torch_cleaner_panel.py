@@ -1,6 +1,5 @@
 """Operator-confirmed cleaner teaching and motion, using existing GUI motion APIs."""
 import threading
-import math
 import time
 from pathlib import Path
 import tkinter as tk
@@ -9,6 +8,11 @@ from tkinter import filedialog, ttk
 import yaml
 
 from .teaching_paths import teaching_config_dir
+from .torch_cleaner_teaching import (
+    build_cleaner_sequence_steps,
+    cleaner_output_step,
+    cleaner_pose_path,
+)
 
 
 class TorchCleanerPanel:
@@ -88,70 +92,15 @@ class TorchCleanerPanel:
         self.gui.run_sequence(True, execute, steps_override=steps)
 
     def build_sequence_steps(self):
-        """Read the latest teaching YAMLs; this function does not command motion."""
+        """Read latest teaching YAML and delegate sequence generation."""
         self.refresh_teaching_index()
         order_path = Path(self.folder.get()) / "sequence.yaml"
         if not order_path.is_file():
             raise ValueError(f"Cleaner order is missing: {order_path}")
         tokens = [name.strip() for name in self.order.get().split(",") if name.strip()]
-        if not tokens:
-            raise ValueError("Cleaner sequence is empty")
-        pulse_reference = {}
-        for token in tokens:
-            if ":" in token:
-                port, value = self.output_step(token)
-                if value not in ("ON", "OFF"):
-                    pulse_reference[port] = float(value)
-        steps = []
-        index = 0
-        while index < len(tokens):
-            token = tokens[index]
-            common = {"parallel_slot": len(steps) + 1, "duration": 0.0,
-                      "torch_clean_scenario": True}
-            if ":" in token:
-                port, value = self.output_step(token)
-                if value == "ON":
-                    if index + 1 >= len(tokens) or tokens[index + 1] != f"DO{port}:OFF":
-                        raise ValueError(f"DO{port}:ON needs an adjacent DO{port}:OFF for automatic execution")
-                    # The former manual ON/confirm/OFF pair becomes one timed
-                    # pulse. Use that output's explicit numeric pulse as its
-                    # reference (DO7:1 in the supplied cleaner order).
-                    duration = pulse_reference.get(port, 1.0)
-                    index += 2
-                else:
-                    duration = float(value) if value != "OFF" else 0.0
-                    index += 1
-                steps.append(dict(common, type="digital_output", port=port,
-                                  value=value != "OFF", io_backend="fastech_ethernet",
-                                  task_cleaner_output=True,
-                                  duration=duration))
-                continue
-            path = self.path(token)
-            document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
-            if not isinstance(document, dict):
-                raise ValueError(f"Invalid cleaner pose: {path}")
-            if document.get("schema") == "torch_cleaner_joints_v1":
-                group = document.get("planning_group")
-                joint_state = document.get("joint_state", {})
-                names = tuple(joint_state.get("names", ()))
-                positions = tuple(float(value) for value in joint_state.get("positions_rad", ()))
-                tcp = None
-            else:
-                group, names, positions, tcp = self.load_pose(path)
-            expected = {f"right_manipulator_joint{i}" for i in range(1, 7)}
-            if (group != "right_manipulator" or len(names) != 6 or set(names) != expected
-                    or len(positions) != 6 or not all(math.isfinite(value) for value in positions)):
-                raise ValueError(f"Cleaner pose must contain six right-arm joints: {path}")
-            joint_approach = token in ("start", "end")
-            steps.append(dict(common, type="named_pose", pose_name=(
-                "cleaner_joint" if joint_approach else "weld_start"),
-                pose_label=f"Cleaner {token}", planning_group=group,
-                joint_names=names, positions=positions, tcp_pose=tcp,
-                resolve_tcp_from_joints=tcp is None, use_joint_planning=joint_approach,
-                velocity_scale=max(0.01, min(1.0, float(self.gui.velocity_percent.get()) / 100.0)),
-                touch_guard=False, continue_after_touch=False))
-            index += 1
-        return steps
+        return build_cleaner_sequence_steps(
+            self.folder.get(), tokens, self.gui.velocity_percent.get(), self.load_pose
+        )
 
     def seed(self):
         try:
@@ -174,14 +123,7 @@ class TorchCleanerPanel:
             self.gui.error(f"Cleaner: {error}")
 
     def output_step(self, name):
-        channel, value = name.split(":", 1)
-        if channel not in ("DO5", "DO6", "DO7"):
-            raise ValueError("Cleaner output must be DO5/6/7")
-        if value not in ("ON", "OFF"):
-            duration = float(value)
-            if not math.isfinite(duration) or not 0 < duration <= 30:
-                raise ValueError("Pulse duration must be 0..30 seconds")
-        return int(channel[2:]), value
+        return cleaner_output_step(name)
 
     def idle(self, next_step=False):
         g = self.gui
@@ -217,9 +159,7 @@ class TorchCleanerPanel:
             self.gui.error(f"Cleaner: {error}")
 
     def path(self, name):
-        if not name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in name) or name == "sequence":
-            raise ValueError("Use a position name containing letters, digits, _ or -")
-        return Path(self.folder.get()).expanduser().resolve() / f"{name}.yaml"
+        return cleaner_pose_path(self.folder.get(), name)
 
     def capture(self):
         try:

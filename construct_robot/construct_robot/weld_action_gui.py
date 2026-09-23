@@ -78,6 +78,30 @@ from construct_robot.hicomm_welder import (
     build_request,
 )
 from construct_robot.weld_quality_metrics import analyze_weld_quality, format_quality_summary
+from construct_robot.sequence_model import (
+    SequenceModel,
+    WELD_SCENARIO_STAGE_ORDER,
+    next_sequential_slot,
+    validate_managed_weld_sequence,
+)
+from construct_robot.seam_geometry import (
+    _pose_position_tuple,
+    _unit_vector,
+    _vector_cross,
+    _vector_dot,
+    seam_direction,
+)
+from construct_robot.multipass import (
+    correct_four_pass_references,
+    correct_remaining_passes,
+    correct_seam_from_measured_start,
+)
+from construct_robot.weld_logging import (
+    calculate_weld_production_metrics,
+    format_weld_feedback_log,
+    save_weld_feedback_log,
+    weld_weave_settings_text,
+)
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
 FASTECH_GUI_CHANNELS = {
     0: "Touch sensing",
@@ -239,22 +263,6 @@ DEFAULT_DIGITAL_WELD_SETTINGS = {
     "wire_consumable_alpha_mm": 0.0,
 }
 
-WELD_SCENARIO_STAGE_ORDER = (
-    "start_wait",
-    "start_safe",
-    "start_contact",
-    "touch_output_off",
-    "arc_on",
-    "custom_hot_start",
-    "weld_motion",
-    "software_crater",
-    "arc_off",
-    "goal_wait",
-    "finish",
-    "touch_output_on",
-)
-
-
 def digital_weld_recipe(settings):
     """Return only the values encoded into the Hi-COMM welding frame."""
     recipe = {key: settings[key] for key in DIGITAL_WELD_RECIPE_KEYS}
@@ -351,224 +359,6 @@ def weld_current_profile(settings):
             nominal * (1.0 + float(settings.get("hot_start_percent", 20.0)) / 100.0)
         ))
     return {"nominal": nominal, "hot": hot}
-
-
-def next_sequential_slot(steps, requested=1):
-    """Return a free slot after every existing non-sleep sequence step."""
-    requested = int(requested)
-    if not 1 <= requested <= 999:
-        raise ValueError("Sequence start slot must be in 1..999")
-    occupied = []
-    for index, step in enumerate(steps):
-        if step.get("type") == "sleep":
-            continue
-        slot = int(step.get("parallel_slot", index + 1))
-        if 1 <= slot <= 999:
-            occupied.append(slot)
-    return max(requested, max(occupied, default=0) + 1)
-
-
-def validate_managed_weld_sequence(steps, require_complete=False):
-    """Validate generated welding order and its intentional ARC/motion pair."""
-    scenarios = {}
-    all_slots = {}
-    for index, step in enumerate(steps):
-        if step.get("type") != "sleep":
-            slot = int(step.get("parallel_slot", index + 1))
-            all_slots.setdefault(slot, []).append(step)
-        scenario_id = step.get("weld_scenario_id")
-        if scenario_id is not None:
-            scenarios.setdefault(scenario_id, []).append(step)
-
-    motion_types = {"motion", "named_pose", "planned_trajectory"}
-    for slot, slot_steps in all_slots.items():
-        arc_on = any(
-            step.get("type") == "digital_weld"
-            and step.get("command") == "on"
-            for step in slot_steps
-        )
-        robot_motion = any(
-            step.get("type") in motion_types for step in slot_steps
-        )
-        if arc_on and robot_motion:
-            scenario_ids = {
-                step.get("weld_scenario_id") for step in slot_steps
-            }
-            stages = {
-                step.get("weld_scenario_stage") for step in slot_steps
-            }
-            managed_pair = (
-                len(slot_steps) in (2, 3)
-                and None not in scenario_ids
-                and len(scenario_ids) == 1
-                and stages in (
-                    {"arc_on", "weld_motion"},
-                    {"arc_on", "weld_motion", "arc_off"},
-                )
-            )
-            if not managed_pair:
-                raise ValueError(
-                    f"D-WELD ON cannot share slot {slot} with arbitrary robot "
-                    "motion; only the generated ARC ON + weld-motion + "
-                    "triggered ARC OFF group is allowed"
-                )
-
-    stage_rank = {
-        stage: index for index, stage in enumerate(WELD_SCENARIO_STAGE_ORDER)
-    }
-    for scenario_steps in scenarios.values():
-        previous_rank = -1
-        previous_slot = 0
-        previous_stage = None
-        seen = set()
-        for step in scenario_steps:
-            stage = step.get("weld_scenario_stage")
-            if stage not in stage_rank or stage in seen:
-                raise ValueError("Generated weld scenario stages are invalid")
-            seen.add(stage)
-            rank = stage_rank[stage]
-            slot = int(step.get("parallel_slot", 0))
-            shared_weld_slot = (
-                slot == previous_slot
-                and (
-                    (stage == "weld_motion" and previous_stage == "arc_on")
-                    or (stage == "arc_off" and previous_stage == "weld_motion")
-                )
-            )
-            if rank <= previous_rank or (
-                slot <= previous_slot and not shared_weld_slot
-            ):
-                raise ValueError(
-                    "Generated weld scenario order/parallel slots are invalid"
-                )
-            previous_rank = rank
-            previous_slot = slot
-            previous_stage = stage
-
-            if stage == "arc_on":
-                if (
-                    step.get("type") != "digital_weld"
-                    or step.get("command") != "on"
-                ):
-                    raise ValueError("Generated ARC ON stage cannot be changed")
-                if float(step.get("duration", 0.0)) != 0.0:
-                    raise ValueError(
-                        "Generated ARC ON duration must be 0; ARC OFF is explicit"
-                    )
-                paired_stages = {
-                    candidate.get("weld_scenario_stage")
-                    for candidate in all_slots.get(slot, ())
-                }
-                custom_enabled = bool(step.get("settings", {}).get(
-                    "custom_hot_start_enabled", False
-                ))
-                if paired_stages not in (
-                    ({"arc_on"},) if custom_enabled else (
-                        {"arc_on", "weld_motion"},
-                        {"arc_on", "weld_motion", "arc_off"},
-                    )
-                ):
-                    raise ValueError(
-                        "Generated ARC ON slot does not match the configured "
-                        "custom-hot-start sequence"
-                    )
-            elif stage == "custom_hot_start":
-                if (step.get("type") != "custom_hot_start"
-                        or not step.get("settings", {}).get("custom_hot_start_enabled")):
-                    raise ValueError("Generated custom hot start stage is invalid")
-            elif stage == "arc_off":
-                if (
-                    step.get("type") != "digital_weld"
-                    or step.get("command") != "off"
-                ):
-                    raise ValueError("Generated ARC OFF stage cannot be changed")
-                if step.get("trigger_before_goal", False):
-                    motion_steps = [
-                        candidate for candidate in scenario_steps
-                        if candidate.get("weld_scenario_stage") == "weld_motion"
-                    ]
-                    if not motion_steps or int(
-                        motion_steps[0].get("parallel_slot", -1)
-                    ) != slot:
-                        raise ValueError(
-                            "Triggered ARC OFF must share the continuous weld-motion slot"
-                        )
-                elif any(candidate.get("weld_scenario_stage") == "software_crater"
-                         for candidate in scenario_steps):
-                    if slot <= int(next(candidate for candidate in scenario_steps
-                                       if candidate.get("weld_scenario_stage") == "software_crater").get("parallel_slot", 0)):
-                        raise ValueError("ARC OFF must follow software crater")
-            elif stage == "software_crater":
-                if step.get("type") != "software_crater" or not step.get("settings", {}).get("software_crater_enabled"):
-                    raise ValueError("Generated software crater stage is invalid")
-            elif stage == "start_safe" and step.get("touch_guard", False):
-                raise ValueError(
-                    "Safe approach motion must not use the Fastech DI0 guard"
-                )
-            elif stage == "start_contact":
-                if step.get("touch_guard", False) and (
-                    not step.get("continue_after_touch", False)
-                    or step.get("accept_initial_touch", False)
-                ):
-                    raise ValueError(
-                        "Guarded START contact must require a new Fastech DI0 edge, "
-                        "stop, then continue"
-                    )
-            elif stage == "touch_output_off" and (
-                step.get("type") != "digital_output"
-                or step.get("io_backend") != FASTECH_TOUCH_BACKEND
-                or int(step.get("port", -1)) != FASTECH_TOUCH_OUTPUT_PORT
-                or bool(step.get("value", True))
-            ):
-                raise ValueError(
-                    "Generated scenario must turn Fastech DO0 OFF before ARC ON"
-                )
-            elif stage == "touch_output_on" and (
-                step.get("type") != "digital_output"
-                or step.get("io_backend") != FASTECH_TOUCH_BACKEND
-                or int(step.get("port", -1)) != FASTECH_TOUCH_OUTPUT_PORT
-                or not bool(step.get("value", False))
-            ):
-                raise ValueError(
-                    "Generated scenario must restore Fastech DO0 ON after finish"
-                )
-            elif stage == "weld_motion":
-                if step.get("touch_guard", False):
-                    raise ValueError(
-                        "Fastech DI0 must be ignored during weld motion"
-                    )
-                arc_steps = [
-                    candidate for candidate in scenario_steps
-                    if candidate.get("weld_scenario_stage") == "arc_on"
-                ]
-                custom_enabled = bool(arc_steps and arc_steps[0].get(
-                    "settings", {}
-                ).get("custom_hot_start_enabled", False))
-                custom_steps = [
-                    candidate for candidate in scenario_steps
-                    if candidate.get("weld_scenario_stage") == "custom_hot_start"
-                ]
-                if custom_enabled != bool(custom_steps):
-                    raise ValueError("Custom hot start stage does not match ARC ON settings")
-                if custom_steps and not (
-                    int(arc_steps[0].get("parallel_slot", -1))
-                    < int(custom_steps[0].get("parallel_slot", -1)) < slot
-                ):
-                    raise ValueError("Custom hot start must precede weld motion")
-                # if not arc_steps or int(
-                #     arc_steps[0].get("parallel_slot", -1)
-                # ) != slot:
-                #     raise ValueError(
-                #         "Generated weld motion must share the ARC ON slot"
-                #     )
-        # if require_complete and seen != set(WELD_SCENARIO_STAGE_ORDER):
-        #     missing = [
-        #         stage for stage in WELD_SCENARIO_STAGE_ORDER if stage not in seen
-        #     ]
-        #     raise ValueError(
-        #         "Generated weld scenario is incomplete: " + ", ".join(missing)
-        #     )
-    return True
 
 
 def midpoint_pose(first, second):
@@ -861,28 +651,6 @@ def pose_with_rpy_offset(pose, roll, pitch, yaw, reference="tool"):
     return result
 
 
-def _vector_dot(first, second):
-    return sum(float(a) * float(b) for a, b in zip(first, second))
-
-
-def _vector_cross(first, second):
-    ax, ay, az = (float(value) for value in first)
-    bx, by, bz = (float(value) for value in second)
-    return (
-        ay * bz - az * by,
-        az * bx - ax * bz,
-        ax * by - ay * bx,
-    )
-
-
-def _unit_vector(vector, description="vector"):
-    values = tuple(float(value) for value in vector)
-    norm = math.sqrt(sum(value * value for value in values))
-    if norm < 1e-9:
-        raise ValueError(f"{description} has near-zero length")
-    return tuple(value / norm for value in values)
-
-
 def _axis_unit_vector(axis):
     axis = str(axis).strip().lower().replace("world ", "")
     vectors = {
@@ -893,18 +661,6 @@ def _axis_unit_vector(axis):
     if axis not in vectors:
         raise ValueError(f"unsupported World probe axis: {axis}")
     return vectors[axis]
-
-
-def seam_direction(start, goal, *, xy_only=False):
-    """Return a unit START→GOAL direction, optionally projected onto World XY."""
-    if not pose_is_valid(start) or not pose_is_valid(goal):
-        raise ValueError("seam START/GOAL poses must be valid")
-    direction = (
-        goal.position.x - start.position.x,
-        goal.position.y - start.position.y,
-        0.0 if xy_only else goal.position.z - start.position.z,
-    )
-    return _unit_vector(direction, "seam direction")
 
 
 def _quaternion_rotate_vector(orientation, vector):
@@ -1682,10 +1438,6 @@ def seam_xy_normal(start, goal):
     return (-ty, tx, 0.0)
 
 
-def _pose_position_tuple(pose):
-    return (pose.position.x, pose.position.y, pose.position.z)
-
-
 def intersect_three_planes(normal_a, value_a, normal_b, value_b, normal_c, value_c):
     """Return the unique point satisfying n·p=d for three independent planes."""
     normal_a = _unit_vector(normal_a, "plane A normal")
@@ -1934,362 +1686,6 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp, p
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
 
-
-def calculate_weld_production_metrics(
-    samples,
-    *,
-    weld_motion_start_elapsed_s=None,
-    weld_motion_complete_elapsed_s=None,
-    wire_consumable_alpha_mm=0.0,
-):
-    """Integrate actual ARC time and wire feed on the feedback time base.
-
-    Each RX value owns the interval until the following RX sample.  An arc is
-    considered physically active from WCR/current/output state, rather than
-    merely from the outbound ARC command bit.  This excludes pre-gas and ARC
-    recognition delay from production time.
-    """
-    ordered = sorted(
-        (sample for sample in samples if sample.get("elapsed_s") is not None),
-        key=lambda sample: float(sample["elapsed_s"]),
-    )
-    arc_on_time_s = 0.0
-    main_weld_arc_time_s = 0.0
-    crater_arc_time_s = 0.0
-    net_weld_arc_time_s = 0.0
-    wire_consumable_base_mm = 0.0
-    arc_started_elapsed_s = None
-    arc_completed_elapsed_s = None
-    start = (
-        None if weld_motion_start_elapsed_s is None
-        else float(weld_motion_start_elapsed_s)
-    )
-    complete = (
-        None if weld_motion_complete_elapsed_s is None
-        else float(weld_motion_complete_elapsed_s)
-    )
-    for first, second in zip(ordered, ordered[1:]):
-        interval_start = float(first["elapsed_s"])
-        interval_end = float(second["elapsed_s"])
-        dt = max(0.0, min(0.25, interval_end - interval_start))
-        effective_end = interval_start + dt
-        output_state = int(first.get("output_state", 0) or 0)
-        active = bool(
-            first.get("wcr_detected")
-            or float(first.get("feedback_current_a", 0.0) or 0.0) > 10.0
-            or output_state in (1, 2)
-        )
-        if not active or dt <= 0.0:
-            continue
-        if arc_started_elapsed_s is None:
-            arc_started_elapsed_s = interval_start
-        arc_completed_elapsed_s = effective_end
-        arc_on_time_s += dt
-        if output_state == 1:
-            main_weld_arc_time_s += dt
-        elif output_state == 2:
-            crater_arc_time_s += dt
-        wire_feed = max(
-            0.0, float(first.get("wire_feed_m_min", 0.0) or 0.0)
-        )
-        wire_consumable_base_mm += wire_feed * 1000.0 / 60.0 * dt
-        if start is not None and complete is not None and complete >= start:
-            overlap = max(
-                0.0,
-                min(effective_end, complete) - max(interval_start, start),
-            )
-            net_weld_arc_time_s += overlap
-    average_wire_feed = (
-        wire_consumable_base_mm * 60.0 / (1000.0 * arc_on_time_s)
-        if arc_on_time_s > 0.0 else 0.0
-    )
-    alpha = float(wire_consumable_alpha_mm)
-    motion_duration = (
-        max(0.0, complete - start)
-        if start is not None and complete is not None else None
-    )
-    return {
-        "arc_started_elapsed_s": arc_started_elapsed_s,
-        "arc_completed_elapsed_s": arc_completed_elapsed_s,
-        "arc_on_time_s": arc_on_time_s,
-        "main_weld_arc_time_s": main_weld_arc_time_s,
-        "crater_arc_time_s": crater_arc_time_s,
-        "weld_motion_start_elapsed_s": start,
-        "weld_motion_complete_elapsed_s": complete,
-        "weld_motion_duration_s": motion_duration,
-        "net_weld_arc_time_s": net_weld_arc_time_s,
-        "wire_feed_average_m_min": average_wire_feed,
-        "wire_consumable_base_mm": wire_consumable_base_mm,
-        "wire_consumable_alpha_mm": alpha,
-        "wire_consumable_mm": wire_consumable_base_mm + alpha,
-        "wire_consumable_formula": "integral(WFS*1000/60*dt)+alpha",
-    }
-
-
-def weld_weave_settings_text(conditions):
-    """Human-readable meaning of the effective scenario weave settings."""
-    if not conditions.get("weld_weave_enabled", False):
-        return "OFF"
-    pattern = str(conditions.get("weld_weave_pattern", "sine"))
-    amplitude = float(conditions.get("weld_weave_amplitude_mm", 0.0))
-    pitch = float(conditions.get("weld_weave_pitch_mm", 0.0))
-    cycles = int(conditions.get("weld_weave_cycles", 0))
-    actual_pitch = float(conditions.get("weld_weave_actual_pitch_mm", 0.0))
-    if pattern == "circle":
-        amplitude_text = (
-            f"radius {amplitude:.2f} mm (diameter {2 * amplitude:.2f} mm)"
-        )
-    else:
-        amplitude_text = (
-            f"centerline ±{amplitude:.2f} mm "
-            f"(full width {2 * amplitude:.2f} mm)"
-        )
-    crescent_text = (
-        f" · forward bulge {float(conditions.get('weld_weave_crescent_bulge_mm') or 0.0):.2f} mm"
-        if pattern == "crescent" else ""
-    )
-    return (
-        f"{pattern} · {amplitude_text} · requested pitch {pitch:.2f} mm/cycle "
-        f"· actual pitch {actual_pitch:.2f} mm/cycle · {cycles} cycles{crescent_text} · "
-        f"axis {conditions.get('weld_weave_axis', 'tool_y')} · "
-        f"dwell L/R {float(conditions.get('weld_weave_left_dwell_s', 0.0)):.2f}/"
-        f"{float(conditions.get('weld_weave_right_dwell_s', 0.0)):.2f} s"
-    )
-
-
-def format_weld_feedback_log(document):
-    """Return a readable, line-oriented weld report including every RX sample."""
-    lines = [
-        "WELD FEEDBACK LOG",
-        f"result={document['result']}",
-        f"started={document['started']}",
-        f"ended={document['ended']}",
-        f"elapsed_seconds={document['elapsed_seconds']:.3f}",
-    ]
-    lines.extend(("", *format_quality_summary(document)))
-    commanded = document["commanded"]
-    welding_echo = (
-        document.get("rx_welding_setting_echo")
-        or document.get("rx_setting_echo")
-        or {}
-    )
-    feedback = document["feedback"]
-    production = document.get("production_metrics", {}) or {}
-
-    def statistic_text(values):
-        if values.get("average") is None:
-            return "no positive feedback"
-        return (
-            f"avg {values['average']:.2f} · min {values['min']:.2f} · "
-            f"max {values['max']:.2f}"
-        )
-
-    requested_current = int(commanded.get("current_a", 0))
-    requested_voltage = float(commanded.get("voltage", 0.0))
-    echo_current = int(welding_echo.get("current_a", 0))
-    echo_voltage = float(welding_echo.get("voltage_v", 0.0))
-    echo_match = (
-        requested_current == echo_current
-        and math.isclose(requested_voltage, echo_voltage, abs_tol=0.05)
-    )
-    lines.extend((
-        "",
-        "================ OPERATOR OVERVIEW ================",
-        f"REQUESTED : {requested_current} A / {requested_voltage:.1f} V · "
-        f"{commanded.get('material')} {commanded.get('diameter_mm')} mm · "
-        f"{commanded.get('mode')} · {commanded.get('gas')}",
-        f"RX ECHO   : {echo_current} A / {echo_voltage:.1f} V · "
-        f"MATCH={'YES' if echo_match else 'NO'}",
-        f"CURRENT FB: {statistic_text(feedback['current_a'])} A",
-        f"VOLTAGE FB: {statistic_text(feedback['voltage_v'])} V",
-        f"WIRE FEED : {statistic_text(feedback['wire_feed_m_min'])} m/min",
-        f"ARC ON    : {float(production.get('arc_on_time_s', 0.0)):.3f} s",
-        f"NET WELD  : {float(production.get('net_weld_arc_time_s', 0.0)):.3f} s",
-        f"WIRE USED : {float(production.get('wire_consumable_mm', 0.0)):.3f} mm "
-        f"(base {float(production.get('wire_consumable_base_mm', 0.0)):.3f} "
-        f"+ alpha {float(production.get('wire_consumable_alpha_mm', 0.0)):.3f})",
-        f"WEAVE     : {weld_weave_settings_text(document.get('execution_conditions', {}))}",
-        f"WCR       : {'DETECTED' if feedback['wcr_seen'] else 'NOT DETECTED'}",
-        f"SAMPLES   : RX {feedback['rx_samples']} / "
-        f"welding {feedback['welding_samples']} / "
-        f"TCP {len(document.get('tcp_trajectory', ())) }",
-        "===================================================",
-        "",
-        "[commanded]",
-    ))
-    for key, value in document["commanded"].items():
-        lines.append(f"{key}={value}")
-
-    echo = document.get("rx_setting_echo") or {}
-    lines.extend(("", "[rx_setting_echo]"))
-    for key, value in echo.items():
-        lines.append(f"{key}={value}")
-    lines.extend(("", "[rx_welding_setting_echo]"))
-    for key, value in (
-        document.get("rx_welding_setting_echo") or {}
-    ).items():
-        lines.append(f"{key}={value}")
-
-    def flattened(prefix, value):
-        if isinstance(value, dict):
-            for child_key, child_value in value.items():
-                child_prefix = f"{prefix}.{child_key}" if prefix else str(child_key)
-                yield from flattened(child_prefix, child_value)
-        elif isinstance(value, (list, tuple)):
-            for index, child_value in enumerate(value):
-                yield from flattened(f"{prefix}[{index}]", child_value)
-        else:
-            yield prefix, value
-
-    lines.extend(("", "[execution_conditions]"))
-    for key, value in flattened("", document.get("execution_conditions", {})):
-        lines.append(f"{key}={value}")
-
-    lines.extend((
-        "",
-        "[summary]",
-        f"rx_samples={feedback['rx_samples']}",
-        f"welding_samples={feedback['welding_samples']}",
-        f"wcr_seen={int(feedback['wcr_seen'])}",
-    ))
-    for name in ("current_a", "voltage_v", "wire_feed_m_min"):
-        values = feedback[name]
-        for statistic in ("min", "average", "max"):
-            lines.append(f"{name}.{statistic}={values[statistic]}")
-
-    lines.extend(("", "[production_metrics]"))
-    for key, value in production.items():
-        lines.append(f"{key}={value}")
-
-    lines.extend(("", "[arc_off_control]"))
-    for key, value in flattened("", document.get("arc_off_control", {})):
-        lines.append(f"{key}={value}")
-
-    lines.extend(("", "[custom_hot_start]"))
-    for key, value in flattened("", document.get("custom_hot_start", {})):
-        lines.append(f"{key}={value}")
-
-    lines.extend(("", "[software_crater_control]"))
-    for key, value in flattened("", document.get("software_crater_control", {})):
-        lines.append(f"{key}={value}")
-
-    lines.extend(("", "[quality_metrics]"))
-    for key, value in flattened("", document.get("quality_metrics", {})):
-        lines.append(f"{key}={value if value is not None else 'N/A'}")
-    lines.extend(("", "[event_timeline]"))
-    for name, event in (document.get("quality_metrics", {}).get("timeline", {}) or {}).items():
-        for field in ("elapsed_s", "unix_time", "wall_time"):
-            value = event.get(field)
-            lines.append(f"{name}.{field}={value if value is not None else 'N/A'}")
-    lines.extend(("", "[tx_frames]", "elapsed_s unix_time raw_hex"))
-    for frame in document.get("tx_frames", ()):
-        lines.append(
-            f"{float(frame['elapsed_s']):.6f} {float(frame['unix_time']):.6f} "
-            f"{frame['raw_hex']}"
-        )
-
-    # Embedded YAML snapshots of the taught poses/touch points active for
-    # this run, so "Load teaching/touch from log" can restore exactly what
-    # was on screen when this weld happened -- reusing the same
-    # position_m/orientation_xyzw shape as the per-pose teaching YAML files.
-    lines.extend(("", "[teaching_snapshot_yaml]"))
-    teaching_yaml = yaml.safe_dump(
-        document.get("teaching_snapshot", {}) or {},
-        sort_keys=False,
-        default_flow_style=False,
-    ).rstrip("\n")
-    lines.extend(teaching_yaml.splitlines() or ["{}"])
-
-    lines.extend(("", "[touch_snapshot_yaml]"))
-    touch_yaml = yaml.safe_dump(
-        document.get("touch_snapshot", {}) or {},
-        sort_keys=False,
-        default_flow_style=False,
-    ).rstrip("\n")
-    lines.extend(touch_yaml.splitlines() or ["{}"])
-
-    lines.extend((
-        "",
-        "[samples]",
-        "elapsed_s raw0 state arc gas fwd wcr current_a voltage_v "
-        "wire_feed_m_min set_current_a set_voltage_v error db collision",
-    ))
-    for sample in document.get("samples", ()):
-        lines.append(
-            f"{sample['elapsed_s']:.3f} "
-            f"0x{int(sample.get('raw0') or 0):02X} "
-            f"{sample.get('output_state_name') or 'unknown'} "
-            f"{int(bool(sample.get('arc_ack')))} "
-            f"{int(bool(sample.get('gas_ack')))} "
-            f"{int(bool(sample.get('forward_ack')))} "
-            f"{int(bool(sample.get('wcr_detected')))} "
-            f"{sample.get('feedback_current_a') or 0} "
-            f"{sample.get('feedback_voltage_v') or 0.0} "
-            f"{sample.get('wire_feed_m_min') or 0.0} "
-            f"{sample.get('set_current_a') or 0} "
-            f"{sample.get('set_voltage_v') or 0.0} "
-            f"{sample.get('welder_error') or 0} "
-            f"{int(bool(sample.get('db_unavailable')))} "
-            f"{int(bool(sample.get('torch_collision')))}"
-        )
-
-    lines.extend((
-        "",
-        "[tcp_trajectory]",
-        "elapsed_s x_m y_m z_m qx qy qz qw speed_m_s tf_stamp_s "
-        "along_mm remaining_mm cross_track_mm signed_weave_offset_mm "
-        "weave_tracking_error_mm raw_speed_m_s progress waypoint phase",
-    ))
-    for sample in document.get("tcp_trajectory", ()):
-        phase = str(sample.get("phase", "unknown")).replace(" ", "_")
-
-        def tcp_value(name, digits):
-            value = sample.get(name)
-            return "nan" if value is None else f"{float(value):.{digits}f}"
-
-        lines.append(
-            f"{float(sample.get('elapsed_s', 0.0)):.4f} "
-            f"{float(sample.get('x_m', 0.0)):.7f} "
-            f"{float(sample.get('y_m', 0.0)):.7f} "
-            f"{float(sample.get('z_m', 0.0)):.7f} "
-            f"{float(sample.get('qx', 0.0)):.8f} "
-            f"{float(sample.get('qy', 0.0)):.8f} "
-            f"{float(sample.get('qz', 0.0)):.8f} "
-            f"{float(sample.get('qw', 1.0)):.8f} "
-            f"{float(sample.get('speed_m_s', 0.0)):.6f} "
-            f"{tcp_value('tf_stamp_s', 9)} "
-            f"{tcp_value('along_mm', 3)} "
-            f"{tcp_value('remaining_mm', 3)} "
-            f"{tcp_value('cross_track_mm', 3)} "
-            f"{tcp_value('signed_weave_offset_mm', 3)} "
-            f"{tcp_value('weave_tracking_error_mm', 3)} "
-            f"{tcp_value('raw_speed_m_s', 6)} "
-            f"{float(sample.get('progress', 0.0)):.5f} "
-            f"{int(sample.get('waypoint_index', -1))} {phase}"
-        )
-    return "\n".join(lines) + "\n"
-
-
-def save_weld_feedback_log(path, document):
-    """Atomically save one completed welding-feedback report as text."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary_path = Path(stream.name)
-            stream.write(format_weld_feedback_log(document))
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
 
 # delay값을 예를 들어 500ms
 def read_arc_off_feedback_extinction_delay_s(path):
@@ -2599,201 +1995,6 @@ def read_pass_teaching_reference(path, expected_pass):
         "joint_states": joint_states,
         "additional_pose_entries": additional_pose_entries,
     }
-
-
-def _minimal_direction_rotation(old_direction, new_direction, maximum_degrees=30.0):
-    """Return the unique minimal rotation quaternion from old to new direction."""
-    old_direction = _unit_vector(old_direction, "old seam direction")
-    new_direction = _unit_vector(new_direction, "measured seam direction")
-    cosine = max(-1.0, min(1.0, _vector_dot(old_direction, new_direction)))
-    angle = math.acos(cosine)
-    if angle > math.radians(float(maximum_degrees)):
-        raise ValueError(
-            f"Seam direction changed {math.degrees(angle):.1f}° "
-            f"(limit {float(maximum_degrees):.1f}°)"
-        )
-    cross = _vector_cross(old_direction, new_direction)
-    sine = math.sqrt(_vector_dot(cross, cross))
-    if sine <= 1e-12:
-        return (0.0, 0.0, 0.0, 1.0), math.degrees(angle)
-    axis = tuple(value / sine for value in cross)
-    half = angle * 0.5
-    scale = math.sin(half)
-    return (
-        axis[0] * scale,
-        axis[1] * scale,
-        axis[2] * scale,
-        math.cos(half),
-    ), math.degrees(angle)
-
-
-def _rotate_vector_by_quaternion(vector, quaternion):
-    qx, qy, qz, qw = (float(value) for value in quaternion)
-    vx, vy, vz = (float(value) for value in vector)
-    tx = 2.0 * (qy * vz - qz * vy)
-    ty = 2.0 * (qz * vx - qx * vz)
-    tz = 2.0 * (qx * vy - qy * vx)
-    return (
-        vx + qw * tx + qy * tz - qz * ty,
-        vy + qw * ty + qz * tx - qx * tz,
-        vz + qw * tz + qx * ty - qy * tx,
-    )
-
-
-def _rotate_pose_orientation_left(pose, rotation):
-    """Apply q_rotation * q_pose without introducing seam-axis roll."""
-    rx, ry, rz, rw = rotation
-    px = float(pose.orientation.x)
-    py = float(pose.orientation.y)
-    pz = float(pose.orientation.z)
-    pw = float(pose.orientation.w)
-    values = (
-        rw * px + rx * pw + ry * pz - rz * py,
-        rw * py - rx * pz + ry * pw + rz * px,
-        rw * pz + rx * py - ry * px + rz * pw,
-        rw * pw - rx * px - ry * py - rz * pz,
-    )
-    norm = math.sqrt(sum(value * value for value in values))
-    if norm < 1e-12:
-        raise ValueError("Rotated welding orientation is invalid")
-    result = copy.deepcopy(pose)
-    (
-        result.orientation.x,
-        result.orientation.y,
-        result.orientation.z,
-        result.orientation.w,
-    ) = (value / norm for value in values)
-    return result
-
-
-def correct_remaining_passes(
-    passes, anchor_pass, measured_start, measured_goal, maximum_degrees=30.0
-):
-    """Cumulatively register one pass and propagate only to later passes.
-
-    ``passes`` is the current working state, not the immutable source logs.
-    Earlier passes remain byte-for-byte independent deep copies. START and
-    GOAL offsets use their respective measured anchor, while one minimal
-    direction rotation updates offsets and welding attitudes.
-    """
-    if set(passes) != {1, 2, 3, 4}:
-        raise ValueError("Exactly four current pass states are required")
-    anchor_pass = int(anchor_pass)
-    if anchor_pass not in passes:
-        raise ValueError("Anchor pass must be 1, 2, 3, or 4")
-    if not all(
-        pose is not None and pose_is_valid(pose)
-        for pose in (measured_start, measured_goal)
-    ):
-        raise ValueError("Measured START and GOAL are required")
-    current = passes[anchor_pass]
-    old_start = current["start"]
-    old_goal = current["goal"]
-    old_direction = seam_direction(old_start, old_goal)
-    new_direction = seam_direction(measured_start, measured_goal)
-    rotation, angle_degrees = _minimal_direction_rotation(
-        old_direction, new_direction, maximum_degrees
-    )
-    corrected = copy.deepcopy(passes)
-    old_start_xyz = _pose_position_tuple(old_start)
-    old_goal_xyz = _pose_position_tuple(old_goal)
-    measured_start_xyz = _pose_position_tuple(measured_start)
-    measured_goal_xyz = _pose_position_tuple(measured_goal)
-
-    # The selected pass is directly taught, not transformed. Preserve its
-    # WAIT poses and use the captured TCP positions AND orientations exactly.
-    corrected[anchor_pass]["start"] = copy.deepcopy(measured_start)
-    corrected[anchor_pass]["goal"] = copy.deepcopy(measured_goal)
-    for number in range(anchor_pass + 1, 5):
-        for endpoint, old_anchor_xyz, new_anchor_xyz in (
-            ("start_wait", old_start_xyz, measured_start_xyz),
-            ("start", old_start_xyz, measured_start_xyz),
-            ("goal_wait", old_goal_xyz, measured_goal_xyz),
-            ("goal", old_goal_xyz, measured_goal_xyz),
-        ):
-            current_pose = passes[number][endpoint]
-            offset = tuple(
-                value - old_anchor_xyz[index]
-                for index, value in enumerate(_pose_position_tuple(current_pose))
-            )
-            rotated_offset = _rotate_vector_by_quaternion(offset, rotation)
-            result = _rotate_pose_orientation_left(current_pose, rotation)
-            result.position.x, result.position.y, result.position.z = tuple(
-                new_anchor_xyz[index] + rotated_offset[index]
-                for index in range(3)
-            )
-            corrected[number][endpoint] = result
-
-    metadata = {
-        "anchor_pass": anchor_pass,
-        "direction_change_deg": angle_degrees,
-        "rotation_xyzw": tuple(float(value) for value in rotation),
-        "start_translation_m": tuple(
-            measured_start_xyz[index] - old_start_xyz[index]
-            for index in range(3)
-        ),
-        "goal_translation_m": tuple(
-            measured_goal_xyz[index] - old_goal_xyz[index]
-            for index in range(3)
-        ),
-        "later_passes_updated": list(range(anchor_pass + 1, 5)),
-    }
-    return corrected, metadata
-
-
-def correct_four_pass_references(references, corrected_root_start, corrected_root_goal):
-    """Compatibility wrapper for a Pass-1 sequential registration."""
-    current = {
-        number: {
-            endpoint: copy.deepcopy(reference[endpoint])
-            for endpoint in ("start_wait", "start", "goal_wait", "goal")
-        }
-        for number, reference in references.items()
-    }
-    corrected, metadata = correct_remaining_passes(
-        current, 1, corrected_root_start, corrected_root_goal
-    )
-    return corrected, metadata["direction_change_deg"]
-
-
-def correct_seam_from_measured_start(predicted_start, predicted_goal, measured_start):
-    """Translate a predicted seam by one physically measured START.
-
-    A START-only measurement cannot observe seam yaw or length. Preserve the
-    predicted START-to-GOAL vector and both logged welding attitudes, and apply
-    only the measured XYZ translation to the complete seam.
-    """
-    if not all(
-        pose is not None and pose_is_valid(pose)
-        for pose in (predicted_start, predicted_goal, measured_start)
-    ):
-        raise ValueError("Predicted START/GOAL and measured START are required")
-    if math.dist(
-        _pose_position_tuple(predicted_start),
-        _pose_position_tuple(predicted_goal),
-    ) < 0.001:
-        raise ValueError("Predicted seam is shorter than 1 mm")
-    delta = tuple(
-        measured - predicted
-        for measured, predicted in zip(
-            _pose_position_tuple(measured_start),
-            _pose_position_tuple(predicted_start),
-        )
-    )
-    corrected_start = copy.deepcopy(predicted_start)
-    corrected_goal = copy.deepcopy(predicted_goal)
-    for index, axis in enumerate(("x", "y", "z")):
-        setattr(
-            corrected_start.position,
-            axis,
-            getattr(measured_start.position, axis),
-        )
-        setattr(
-            corrected_goal.position,
-            axis,
-            getattr(predicted_goal.position, axis) + delta[index],
-        )
-    return corrected_start, corrected_goal, delta
 
 
 def save_seam_touch_yaml(
@@ -6192,6 +5393,19 @@ class WeldActionGui:
     """Tk GUI for acquiring, editing, visualizing, and running weld paths."""
 
     POSE_FIELDS = ("x", "y", "z", "qx", "qy", "qz", "qw")
+
+    @property
+    def sequence_steps(self):
+        # Laziness keeps lightweight GUI test doubles compatible with __new__.
+        if not hasattr(self, "sequence_model"):
+            self.sequence_model = SequenceModel()
+        return self.sequence_model.steps
+
+    @sequence_steps.setter
+    def sequence_steps(self, steps):
+        if not hasattr(self, "sequence_model"):
+            self.sequence_model = SequenceModel()
+        self.sequence_model.replace(steps)
 
     def _create_toggle_section(
         self,
@@ -14700,7 +13914,7 @@ class WeldActionGui:
         if index is None:
             self.error("Select a sequence step")
             return
-        del self.sequence_steps[index]
+        self.sequence_model.delete(index)
         if not self.sequence_steps:
             self.sequence_parallel_slot.set(1)
         self.refresh_sequence_table()
@@ -14712,18 +13926,12 @@ class WeldActionGui:
             return False
         try:
             steps = self.torch_cleaner_panel.build_sequence_steps()
-            retained = [step for step in self.sequence_steps
-                        if not step.get("torch_clean_scenario")]
-            next_slot = max((int(step.get("parallel_slot", 0)) for step in retained), default=0)
-            if next_slot + len(steps) > 999:
-                raise ValueError("Cleaner steps exceed the maximum parallel slot 999")
-            for offset, step in enumerate(steps, 1):
-                step["parallel_slot"] = next_slot + offset
-            validate_managed_weld_sequence(retained + steps)
+            replacement = self.sequence_model.with_replaced_cleaner(steps)
+            validate_managed_weld_sequence(replacement)
         except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
             self.error(f"Cannot build Torch Clean: {error}")
             return False
-        self.sequence_steps = retained + steps
+        self.sequence_steps = replacement
         self.refresh_sequence_table(select_last=True)
         self.torch_cleaner_panel.status.set(
             f"Torch Clean: {len(steps)} steps added to Sequence Builder"
@@ -14749,12 +13957,9 @@ class WeldActionGui:
         if index is None:
             self.error("Select a sequence step")
             return
-        target = index + offset
-        if not 0 <= target < len(self.sequence_steps):
+        target = self.sequence_model.move(index, offset)
+        if target is None:
             return
-        self.sequence_steps[index], self.sequence_steps[target] = (
-            self.sequence_steps[target], self.sequence_steps[index]
-        )
         self.refresh_sequence_table()
         self.sequence_table.selection_set(str(target))
 

@@ -1,9 +1,6 @@
 """Task/teaching library. Execution remains owned by the existing Sequence Builder."""
 import copy
-import math
-import os
 import re
-import tempfile
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -12,6 +9,14 @@ from tkinter import filedialog, messagebox, ttk
 import yaml
 
 from .teaching_paths import teaching_config_dir
+from .task_teaching_model import (
+    atomic_yaml,
+    build_task_path_steps,
+    decode,
+    encode,
+    validate_task_group,
+    validated_task_speed,
+)
 
 
 TASK_GROUPS = {
@@ -19,71 +24,6 @@ TASK_GROUPS = {
     "Right · Torch cleaner": "right_manipulator",
     "Left · Spray path": "left_manipulator",
 }
-
-
-def encode(value):
-    """Serialize only data and explicitly supported ROS message types, never pickle."""
-    if hasattr(value, "get_fields_and_field_types"):
-        from rosidl_runtime_py.convert import message_to_ordereddict
-        name = type(value).__name__
-        if name not in ("Pose", "RobotTrajectory"):
-            raise ValueError(f"Unsupported saved message: {name}")
-        return {"ros_type": name, "fields": encode(dict(message_to_ordereddict(value)))}
-    if isinstance(value, dict):
-        return {str(k): encode(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [encode(v) for v in value]
-    if isinstance(value, float) and not math.isfinite(value):
-        raise ValueError("Non-finite value in task")
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    raise ValueError(f"Unsupported saved data: {type(value).__name__}")
-
-
-def decode(value):
-    if isinstance(value, list):
-        return [decode(v) for v in value]
-    if isinstance(value, dict):
-        if "ros_type" in value:
-            from geometry_msgs.msg import Pose
-            from moveit_msgs.msg import RobotTrajectory
-            from rosidl_runtime_py.set_message import set_message_fields
-            classes = {"Pose": Pose, "RobotTrajectory": RobotTrajectory}
-            if value["ros_type"] not in classes:
-                raise ValueError("Unsupported ROS message in task")
-            message = classes[value["ros_type"]]()
-            set_message_fields(message, value["fields"])
-            return message
-        return {k: decode(v) for k, v in value.items()}
-    return value
-
-
-def atomic_yaml(path, document):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         delete=False) as stream:
-            temporary = stream.name
-            yaml.safe_dump(document, stream, sort_keys=False, allow_unicode=True)
-        os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def validate_task_group(steps, group):
-    """Reject cross-arm motion and welding/output steps in the left spray library."""
-    if not steps:
-        raise ValueError("Task is empty")
-    for step in steps:
-        kind = step.get("type")
-        if kind == "planned_trajectory":
-            raise ValueError("Save taught targets, not cached RViz trajectories")
-        if step.get("planning_group", group) != group or kind == "head_motion":
-            raise ValueError("Task contains another arm/head; split it into separate tasks")
-        if group == "left_manipulator" and kind not in ("named_pose", "motion", "sleep"):
-            raise ValueError("Left spray task currently supports motion/wait only; no process output mapping")
 
 
 class TaskTeachingPanel:
@@ -235,29 +175,13 @@ class TaskTeachingPanel:
             self.status.set("Cleaner imported to Sequence Builder; verify the plan before execution.")
 
     def build_path(self):
-        speed = float(self.speed.get())
-        if not math.isfinite(speed) or not 0 < speed <= 50:
-            raise ValueError("TCP speed must be >0 and <=50 mm/s")
+        speed = validated_task_speed(self.speed.get())
         names = self.order.get(0, tk.END)
         if not names:
             raise ValueError("Add taught poses to visit order")
         group = TASK_GROUPS[self.category.get()]
         stored = [self.load_pose(self.base() / "poses" / f"{self.safe_name(name)}.yaml") for name in names]
-        if any(p[0] != group for p in stored):
-            raise ValueError("Visit order contains another arm")
-        _, joints, positions, tcp = stored[0]
-        steps = [{"type": "named_pose", "pose_name": "task_start", "pose_label": names[0],
-                  "planning_group": group, "joint_names": joints, "positions": positions,
-                  "tcp_pose": tcp, "use_joint_planning": True, "velocity_scale": 0.05,
-                  "tcp_speed_m_s": speed / 1000, "parallel_slot": 1, "duration": 0.0,
-                  "touch_guard": False, "continue_after_touch": False}]
-        if len(stored) > 1:
-            steps.append({"type": "motion", "planning_group": group, "points": [p[3] for p in stored],
-                          "velocity_scale": 0.05, "tcp_speed_m_s": speed / 1000,
-                          "interpolation_step": 0.005, "path_kind": "taught continuous path",
-                          "parallel_slot": 2, "duration": 0.0, "touch_guard": False,
-                          "continue_after_touch": False})
-        self.replace_builder(steps)
+        self.replace_builder(build_task_path_steps(names, stored, group, speed))
 
     def save_task(self):
         g = self.gui
