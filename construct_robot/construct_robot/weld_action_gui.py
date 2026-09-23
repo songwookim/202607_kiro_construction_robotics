@@ -6837,11 +6837,14 @@ class WeldActionGui:
         probe_actions.pack(fill=tk.X, pady=3)
         manual_probe_actions = ttk.Frame(probe_actions)
         manual_probe_actions.pack(fill=tk.X, pady=(1, 2))
+        ttk.Label(manual_probe_actions, text="1. Probe").pack(
+            side=tk.LEFT, padx=(3, 9)
+        )
         for label, kind in (
-            ("1 · START wall", "start_wall"),
-            ("2 · START base", "start_floor"),
-            ("3 · GOAL wall", "goal_wall"),
-            ("4 · GOAL base", "goal_floor"),
+            ("START wall", "start_wall"),
+            ("START base", "start_floor"),
+            ("GOAL wall", "goal_wall"),
+            ("GOAL base", "goal_floor"),
         ):
             ttk.Button(
                 manual_probe_actions,
@@ -6850,24 +6853,33 @@ class WeldActionGui:
                     self.start_automatic_touch_probe(selected)
                 ),
             ).pack(side=tk.LEFT, padx=3)
+
+        manual_compute_actions = ttk.Frame(probe_actions)
+        manual_compute_actions.pack(fill=tk.X, pady=(1, 2))
+        ttk.Label(manual_compute_actions, text="2. Compute").pack(
+            side=tk.LEFT, padx=(3, 9)
+        )
         ttk.Button(
-            manual_probe_actions,
+            manual_compute_actions,
             text="Compute START",
             command=lambda: self.compute_seam_endpoint("start"),
-        ).pack(side=tk.LEFT, padx=(12, 3))
+        ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            manual_probe_actions,
+            manual_compute_actions,
             text="Compute GOAL",
             command=lambda: self.compute_seam_endpoint("goal"),
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            manual_probe_actions,
+            manual_compute_actions,
             text="Compute full seam + save",
             command=self.compute_two_touch_seam,
-        ).pack(side=tk.LEFT, padx=7)
+        ).pack(side=tk.LEFT, padx=3)
 
         manual_visual_actions = ttk.Frame(probe_actions)
         manual_visual_actions.pack(fill=tk.X, pady=(1, 2))
+        ttk.Label(manual_visual_actions, text="3. Inspect").pack(
+            side=tk.LEFT, padx=(3, 9)
+        )
         ttk.Button(
             manual_visual_actions,
             text="RViz seam",
