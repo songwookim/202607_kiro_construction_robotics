@@ -1,0 +1,17 @@
+joint_state:
+  names:
+  - right_manipulator_joint1
+  - right_manipulator_joint2
+  - right_manipulator_joint3
+  - right_manipulator_joint4
+  - right_manipulator_joint5
+  - right_manipulator_joint6
+  positions_rad:
+  - 5.3644144384943155
+  - 1.1386124198263305
+  - 1.0667621312497286
+  - 5.712574814122555
+  - 0.5791613041060308
+  - -0.5448973065476667
+planning_group: right_manipulator
+schema: torch_cleaner_joints_v1

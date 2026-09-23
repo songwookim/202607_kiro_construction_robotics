@@ -11,6 +11,8 @@ from tkinter import filedialog, messagebox, ttk
 
 import yaml
 
+from .teaching_paths import teaching_config_dir
+
 
 TASK_GROUPS = {
     "Right · Welding": "right_manipulator",
@@ -88,7 +90,7 @@ class TaskTeachingPanel:
     def __init__(self, gui, parent, save_pose, load_pose):
         self.gui, self.save_pose, self.load_pose = gui, save_pose, load_pose
         self.busy = False
-        self.folder = tk.StringVar(value=str(Path.cwd() / "robot_tasks"))
+        self.folder = tk.StringVar(value=str(teaching_config_dir() / "robot_tasks"))
         self.category = tk.StringVar(value="Left · Spray path")
         self.name = tk.StringVar(value="task_1")
         self.pose_name = tk.StringVar(value="point_1")
@@ -128,7 +130,8 @@ class TaskTeachingPanel:
             ttk.Button(row, text=label, command=lambda c=callback: self.call(c)).pack(side=tk.LEFT)
         ttk.Button(row, text="STOP ALL", command=gui.emergency_stop_all).pack(side=tk.LEFT)
         ttk.Label(parent, textvariable=self.status, wraplength=900).pack(anchor=tk.W)
-        ttk.Label(parent, text="Right weld/cleaner: save existing Builder steps. Left: first pose joint approach, then one continuous TCP path.\n"
+        ttk.Label(parent, text="Right weld: build in Sequence Builder, select Right · Welding here, then Plan/Execute Builder.\n"
+                  "Right cleaner: use its own Plan/Execute panel. Left: first pose joint approach, then one continuous TCP path.\n"
                   "No automatic spray output. Separate arm tasks; execution is sequential. Inspect planned paths before execution.").pack(anchor=tk.W)
         self.refresh()
 
@@ -227,38 +230,9 @@ class TaskTeachingPanel:
             raise ValueError("Select Right · Torch cleaner first")
         cleaner = self.gui.torch_cleaner_panel
         cleaner.idle()
-        steps = []
-        for index, token in enumerate(cleaner.order.get().split(",")):
-            token = token.strip()
-            if not token:
-                continue
-            common = {"parallel_slot": index + 1, "duration": 0.0}
-            if ":" in token:
-                port, value = cleaner.output_step(token)
-                from .weld_action_gui import FASTECH_TOUCH_BACKEND
-                steps.append(dict(common, type="digital_output", port=port, value=value != "OFF",
-                                  io_backend=FASTECH_TOUCH_BACKEND,
-                                  task_cleaner_output=True,
-                                  duration=float(value) if value not in ("ON", "OFF") else 0.0))
-            else:
-                path = cleaner.path(token)
-                document = yaml.safe_load(path.read_text(encoding="utf-8"))
-                if document.get("schema") == "torch_cleaner_joints_v1":
-                    group = document["planning_group"]
-                    joints = document["joint_state"]["names"]
-                    positions = document["joint_state"]["positions_rad"]
-                    tcp = None
-                    expected = {f"right_manipulator_joint{i}" for i in range(1, 7)}
-                    if len(joints) != 6 or set(joints) != expected or len(positions) != 6 or not all(math.isfinite(float(v)) for v in positions):
-                        raise ValueError(f"Invalid cleaner teaching: {path}")
-                else:
-                    group, joints, positions, tcp = self.load_pose(path)
-                steps.append(dict(common, type="named_pose", pose_name="task_cleaner", pose_label=token,
-                                  planning_group=group, joint_names=joints, positions=positions,
-                                  tcp_pose=tcp, use_joint_planning=True, velocity_scale=0.05,
-                                  touch_guard=False, continue_after_touch=False))
+        steps = cleaner.build_sequence_steps()
         if self.replace_builder(steps):
-            self.status.set("Cleaner imported. Builder Execute runs continuously; use existing cleaner Next panel for per-step confirmation.")
+            self.status.set("Cleaner imported to Sequence Builder; verify the plan before execution.")
 
     def build_path(self):
         speed = float(self.speed.get())
@@ -304,7 +278,7 @@ class TaskTeachingPanel:
 
     def load_task(self):
         path = self.base() / (self.safe_name(self.name.get().strip()) + ".yaml")
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
         if not isinstance(document, dict) or document.get("schema") != "robot_task_v1" or document.get("category") != self.category.get():
             raise ValueError("Task schema/category mismatch")
         steps = decode(document["steps"])

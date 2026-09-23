@@ -1,0 +1,17 @@
+positions:
+- start
+- cleaner1_top
+- cleaner1_inside
+- DO7:ON
+- DO7:OFF
+- cleaner1_top
+- cleaner2_top
+- cleaner2_entry
+- DO6:2
+- cleaner2_top
+- cleaner1_return_top
+- cleaner1_return_inside
+- DO7:1
+- cleaner1_return_top
+- end
+schema: torch_cleaner_sequence_v2

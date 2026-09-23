@@ -8,6 +8,8 @@ from tkinter import filedialog, ttk
 
 import yaml
 
+from .teaching_paths import teaching_config_dir
+
 
 class TorchCleanerPanel:
     def __init__(self, gui, parent, save_pose, load_pose):
@@ -16,30 +18,140 @@ class TorchCleanerPanel:
         self.active = False
         self.steps = []
         self.index = 0
-        self.folder = tk.StringVar(value=str(Path.cwd() / "torch_cleaner_teaching"))
-        self.selected = tk.StringVar(value="point_1")
+        self.folder = tk.StringVar(value=str(teaching_config_dir() / "torch_cleaner_teaching"))
+        self.selected = tk.StringVar(value="start")
+        self.selected_label = tk.StringVar()
+        self.position_names = []
         self.order = tk.StringVar(value="start, cleaner1_top, cleaner1_inside, DO7:ON, DO7:OFF, cleaner1_top, cleaner2_top, cleaner2_entry, DO6:2, cleaner2_top, cleaner1_return_top, cleaner1_return_inside, DO7:1, cleaner1_return_top, end")
-        self.status = tk.StringVar(value="Select a position name and save current position; edit visit order below")
+        self.status = tk.StringVar(value="Select a numbered teaching pose, or build the cleaner sequence")
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
-        ttk.Entry(row, textvariable=self.folder, width=55).pack(side=tk.LEFT)
-        ttk.Button(row, text="Browse folder", command=self.browse).pack(side=tk.LEFT)
-        ttk.Button(row, text="Create supplied teaching YAMLs", command=self.seed).pack(side=tk.LEFT)
+        ttk.Label(row, textvariable=self.folder).pack(side=tk.LEFT)
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
-        self.positions = ttk.Combobox(row, textvariable=self.selected, values=[f"point_{i}" for i in range(1, 9)], width=20)
+        ttk.Label(row, text="Teaching index").pack(side=tk.LEFT)
+        self.positions = ttk.Combobox(row, textvariable=self.selected_label, state="readonly", width=30)
         self.positions.pack(side=tk.LEFT)
-        ttk.Button(row, text="Save current position", command=self.capture).pack(side=tk.LEFT)
-        ttk.Label(parent, text="Order: position names / DO7:ON / DO7:OFF / DO6:2 (2-second pulse). Each step requires Next.").pack(anchor=tk.W)
-        ttk.Entry(parent, textvariable=self.order, width=80).pack(fill=tk.X)
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X)
-        ttk.Button(row, text="Save order YAML", command=self.save_order).pack(side=tk.LEFT)
-        ttk.Button(row, text="Prepare sequence", command=self.prepare).pack(side=tk.LEFT)
-        ttk.Button(row, text="Confirm / Next motion", command=self.next).pack(side=tk.LEFT)
-        ttk.Button(row, text="STOP", command=self.stop).pack(side=tk.LEFT)
+        self.positions.bind("<<ComboboxSelected>>", self.select_position)
+        ttk.Button(row, text="Save current right-arm pose", command=self.capture).pack(side=tk.LEFT)
+        ttk.Button(row, text="Build → Sequence Builder", command=self.send_to_sequence).pack(side=tk.LEFT)
+        ttk.Button(row, text="Plan", command=lambda: self.plan_or_execute(False)).pack(side=tk.LEFT)
+        ttk.Button(row, text="Execute", command=lambda: self.plan_or_execute(True)).pack(side=tk.LEFT)
         ttk.Label(parent, textvariable=self.status, wraplength=850).pack(anchor=tk.W)
         ttk.Label(parent, text="Cleaner 1 = DO7 · Cleaner 2 = DO6 · Cleaner 3 = DO5. Right arm only; left arm/head are not commanded.").pack(anchor=tk.W)
+        self.refresh_teaching_index()
+
+    def select_position(self, _event=None):
+        index = self.positions.current()
+        if 0 <= index < len(self.position_names):
+            self.selected.set(self.position_names[index])
+
+    def refresh_teaching_index(self):
+        folder = Path(self.folder.get())
+        selected = self.selected.get()
+        ordered = []
+        order_path = folder / "sequence.yaml"
+        if order_path.is_file():
+            document = yaml.load(order_path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+            if (not isinstance(document, dict)
+                    or document.get("schema") not in ("torch_cleaner_sequence_v1", "torch_cleaner_sequence_v2")
+                    or not isinstance(document.get("positions"), list)
+                    or not all(isinstance(value, str) for value in document["positions"])):
+                raise ValueError(f"Invalid cleaner sequence YAML: {order_path}")
+            tokens = document["positions"]
+            if document.get("schema") == "torch_cleaner_sequence_v1":
+                tokens = ["DO7:" + value[4:] if value.startswith("DO5:") else
+                          "DO5:" + value[4:] if value.startswith("DO7:") else value
+                          for value in tokens]
+            self.order.set(", ".join(tokens))
+            ordered = list(dict.fromkeys(token for token in tokens if ":" not in token))
+        extra = sorted(path.stem for path in folder.glob("*.yaml")
+                       if path.stem not in ordered and path.stem != "sequence")
+        self.position_names = ordered + extra
+        self.positions.configure(values=[f"{index:02d}. {name}" for index, name
+                                         in enumerate(self.position_names, 1)])
+        if self.position_names:
+            selected = selected if selected in self.position_names else self.position_names[0]
+            self.selected.set(selected)
+            self.positions.current(self.position_names.index(selected))
+
+    def send_to_sequence(self):
+        self.gui.build_torch_clean_sequence()
+
+    def plan_or_execute(self, execute):
+        try:
+            self.idle()
+            steps = self.build_sequence_steps()
+        except Exception as error:
+            self.gui.error(f"Cleaner: {error}")
+            return
+        self.gui.run_sequence(True, execute, steps_override=steps)
+
+    def build_sequence_steps(self):
+        """Read the latest teaching YAMLs; this function does not command motion."""
+        self.refresh_teaching_index()
+        order_path = Path(self.folder.get()) / "sequence.yaml"
+        if not order_path.is_file():
+            raise ValueError(f"Cleaner order is missing: {order_path}")
+        tokens = [name.strip() for name in self.order.get().split(",") if name.strip()]
+        if not tokens:
+            raise ValueError("Cleaner sequence is empty")
+        pulse_reference = {}
+        for token in tokens:
+            if ":" in token:
+                port, value = self.output_step(token)
+                if value not in ("ON", "OFF"):
+                    pulse_reference[port] = float(value)
+        steps = []
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            common = {"parallel_slot": len(steps) + 1, "duration": 0.0,
+                      "torch_clean_scenario": True}
+            if ":" in token:
+                port, value = self.output_step(token)
+                if value == "ON":
+                    if index + 1 >= len(tokens) or tokens[index + 1] != f"DO{port}:OFF":
+                        raise ValueError(f"DO{port}:ON needs an adjacent DO{port}:OFF for automatic execution")
+                    # The former manual ON/confirm/OFF pair becomes one timed
+                    # pulse. Use that output's explicit numeric pulse as its
+                    # reference (DO7:1 in the supplied cleaner order).
+                    duration = pulse_reference.get(port, 1.0)
+                    index += 2
+                else:
+                    duration = float(value) if value != "OFF" else 0.0
+                    index += 1
+                steps.append(dict(common, type="digital_output", port=port,
+                                  value=value != "OFF", io_backend="fastech_ethernet",
+                                  task_cleaner_output=True,
+                                  duration=duration))
+                continue
+            path = self.path(token)
+            document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+            if not isinstance(document, dict):
+                raise ValueError(f"Invalid cleaner pose: {path}")
+            if document.get("schema") == "torch_cleaner_joints_v1":
+                group = document.get("planning_group")
+                joint_state = document.get("joint_state", {})
+                names = tuple(joint_state.get("names", ()))
+                positions = tuple(float(value) for value in joint_state.get("positions_rad", ()))
+                tcp = None
+            else:
+                group, names, positions, tcp = self.load_pose(path)
+            expected = {f"right_manipulator_joint{i}" for i in range(1, 7)}
+            if (group != "right_manipulator" or len(names) != 6 or set(names) != expected
+                    or len(positions) != 6 or not all(math.isfinite(value) for value in positions)):
+                raise ValueError(f"Cleaner pose must contain six right-arm joints: {path}")
+            joint_approach = token in ("start", "end")
+            steps.append(dict(common, type="named_pose", pose_name=(
+                "cleaner_joint" if joint_approach else "weld_start"),
+                pose_label=f"Cleaner {token}", planning_group=group,
+                joint_names=names, positions=positions, tcp_pose=tcp,
+                resolve_tcp_from_joints=tcp is None, use_joint_planning=joint_approach,
+                velocity_scale=max(0.01, min(1.0, float(self.gui.velocity_percent.get()) / 100.0)),
+                touch_guard=False, continue_after_touch=False))
+            index += 1
+        return steps
 
     def seed(self):
         try:
@@ -57,6 +169,7 @@ class TorchCleanerPanel:
             self.positions.configure(values=list(JOINT_POSITIONS))
             self.selected.set("start")
             self.save_order()
+            self.refresh_teaching_index()
         except Exception as error:
             self.gui.error(f"Cleaner: {error}")
 
@@ -87,7 +200,7 @@ class TorchCleanerPanel:
             self.positions.configure(values=sorted(names))
             path = Path(folder) / "sequence.yaml"
             if path.exists():
-                data = yaml.safe_load(path.read_text())
+                data = yaml.load(path.read_text(), Loader=yaml.CSafeLoader)
                 if not isinstance(data, dict) or not isinstance(data.get("positions"), list):
                     raise ValueError("Invalid cleaner sequence YAML")
                 positions = data["positions"]
@@ -112,9 +225,7 @@ class TorchCleanerPanel:
         try:
             self.idle()
             path = self.path(self.selected.get().strip())
-            group = self.gui.planning_group.get()
-            if group not in ("left_manipulator", "right_manipulator"):
-                raise ValueError("Select one robot arm")
+            group = "right_manipulator"
             self.busy = True
             self.steps = []
             self.status.set("Capturing measured TCP and joint positions...")
@@ -133,6 +244,7 @@ class TorchCleanerPanel:
     def finished_capture(self, message):
         self.busy = False
         self.status.set(message)
+        self.refresh_teaching_index()
 
     def save_order(self):
         try:
@@ -166,7 +278,7 @@ class TorchCleanerPanel:
                     steps.append((name, None))
                     continue
                 path = self.path(name)
-                data = yaml.safe_load(path.read_text())
+                data = yaml.load(path.read_text(), Loader=yaml.CSafeLoader)
                 if data.get("schema") == "torch_cleaner_joints_v1":
                     joints = data["joint_state"]
                     positions = tuple(float(v) for v in joints["positions_rad"])

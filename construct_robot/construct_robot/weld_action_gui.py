@@ -1927,7 +1927,7 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp, p
         # Do not report a successful teaching update unless the final target
         # file can be read back and contains exactly what was requested.
         with path.open("r", encoding="utf-8") as stream:
-            persisted = yaml.safe_load(stream)
+            persisted = yaml.load(stream, Loader=yaml.CSafeLoader)
         if persisted != document:
             raise OSError(f"YAML read-back verification failed: {path}")
     finally:
@@ -2470,7 +2470,7 @@ def read_teaching_and_touch_snapshot(path):
         if not text:
             return {}
         try:
-            loaded = yaml.safe_load(text)
+            loaded = yaml.load(text, Loader=yaml.CSafeLoader)
         except yaml.YAMLError:
             return {}
         return loaded if isinstance(loaded, dict) else {}
@@ -2545,7 +2545,7 @@ def read_pass_teaching_reference(path, expected_pass):
     if not path.is_file():
         raise ValueError(f"Pass teaching reference is missing: {path}")
     raw = path.read_bytes()
-    document = yaml.safe_load(raw.decode("utf-8")) or {}
+    document = yaml.load(raw.decode("utf-8"), Loader=yaml.CSafeLoader) or {}
     if document.get("schema") != "construct_robot_pass_teaching_v1":
         raise ValueError(f"Unsupported pass teaching schema: {path.name}")
     if int(document.get("pass", 0)) != int(expected_pass):
@@ -2913,7 +2913,7 @@ def _pose_from_yaml_dict(data, description="pose"):
 def load_initial_state_yaml(path):
     """Load and validate a TCP teaching YAML file."""
     with Path(path).open("r", encoding="utf-8") as stream:
-        document = yaml.safe_load(stream)
+        document = yaml.load(stream, Loader=yaml.CSafeLoader)
     if not isinstance(document, dict):
         raise ValueError("YAML root must be a mapping")
     if document.get("format_version") != 1:
@@ -3028,7 +3028,7 @@ def save_seam_teaching_reference_yaml(path, planning_group, references):
 
 def load_seam_teaching_reference_yaml(path):
     with Path(path).open("r", encoding="utf-8") as stream:
-        document = yaml.safe_load(stream)
+        document = yaml.load(stream, Loader=yaml.CSafeLoader)
     poses = {}
     for name, data in document.get("poses", {}).items():
         pose = Pose()
@@ -5900,6 +5900,14 @@ class WeldGuiNode(Node):
 
     def run_sequence_named_pose(self, step, execute_requested):
         """Plan or plan-and-execute one taught joint pose."""
+        if step.get("resolve_tcp_from_joints"):
+            try:
+                step = dict(step)
+                step["tcp_pose"] = self._fk_pose_for_joints(
+                    step["planning_group"], step["joint_names"], step["positions"]
+                )
+            except (RuntimeError, ValueError) as error:
+                return False, f"Cleaner teaching FK failed: {error}"
         try:
             self.validate_named_pose_recall(
                 step.get("pose_name"), step["planning_group"],
@@ -7827,125 +7835,16 @@ class WeldActionGui:
         )
         sequence_buttons = ttk.Frame(sequence)
         sequence_buttons.pack(fill=tk.X, pady=(0, 4))
-        for index, (text, command) in enumerate((
-            ("Add motion path", self.add_motion_sequence_step),
-            ("Add latest RViz plan", self.add_latest_rviz_plan_step),
-            ("Add Go To selected pose", self.add_named_pose_sequence_step),
-            ("Add D-WELD ON", lambda: self.add_digital_weld_step("on")),
-            ("Add D-WELD OFF", lambda: self.add_digital_weld_step("off")),
-            ("Add D-WELD SET", lambda: self.add_digital_weld_step("set")),
-            (
-                "Build weld scenario",
-                self.build_sensed_weld_sequence,
-            ),
-            (
-                "Build Initial Scenario (pose→head sweep→wait→finish)",
-                self.build_initial_scenario,
-            ),
-            ("Add Sleep", self.add_sleep_sequence_step),
-            ("Add Head Move J", self.add_head_motion_sequence_step),
+        for text, command in (
+            ("Build Weld Scenario", self.build_sensed_weld_sequence),
+            ("Build Torch Clean", self.build_torch_clean_sequence),
             ("Delete", self.delete_sequence_step),
             ("Delete All", self.delete_all_sequence_steps),
-            ("↑", lambda: self.move_sequence_step(-1)),
-            ("↓", lambda: self.move_sequence_step(1)),
-            ("Edit selected...", self.open_sequence_step_editor),
-            ("Plan selected", lambda: self.run_sequence(False, False)),
-            ("Plan all", lambda: self.run_sequence(True, False)),
-            ("Execute selected", lambda: self.run_sequence(False, True)),
-            ("Execute all", lambda: self.run_sequence(True, True)),
-            ("STOP NOW · Robot + Welder", self.stop_sequence),
-        )):
-            ttk.Button(sequence_buttons, text=text, command=command).grid(
-                row=index // 7, column=index % 7, padx=2, pady=2, sticky=tk.W
+            ("STOP", self.stop_sequence),
+        ):
+            ttk.Button(sequence_buttons, text=text, command=command).pack(
+                side=tk.LEFT, padx=2, pady=2
             )
-        sleep_editor = ttk.Frame(sequence)
-        sleep_editor.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(sleep_editor, text="Parallel slot").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            sleep_editor,
-            from_=1,
-            to=999,
-            increment=1,
-            textvariable=self.sequence_parallel_slot,
-            width=5,
-        ).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(
-            sleep_editor,
-            text="Output duration s (0 = until explicit OFF)",
-        ).pack(side=tk.LEFT)
-        ttk.Spinbox(
-            sleep_editor,
-            from_=0.0,
-            to=3600.0,
-            increment=0.1,
-            textvariable=self.sequence_duration_seconds,
-            width=8,
-        ).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(sleep_editor, text="Sleep seconds").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            sleep_editor,
-            from_=0.0,
-            to=3600.0,
-            increment=0.1,
-            textvariable=self.sequence_sleep_seconds,
-            width=8,
-        ).pack(side=tk.LEFT, padx=4)
-        ttk.Label(sleep_editor, text="Selected motion speed %").pack(
-            side=tk.LEFT, padx=(12, 2)
-        )
-        ttk.Spinbox(
-            sleep_editor,
-            from_=1.0,
-            to=100.0,
-            increment=1.0,
-            textvariable=self.sequence_edit_velocity_percent,
-            width=6,
-        ).pack(side=tk.LEFT, padx=4)
-        ttk.Label(sleep_editor, text="TCP mm/s (0=scale)").pack(
-            side=tk.LEFT, padx=(8, 2)
-        )
-        ttk.Spinbox(
-            sleep_editor,
-            from_=0.0,
-            to=500.0,
-            increment=0.5,
-            textvariable=self.sequence_edit_tcp_speed_mm_s,
-            width=7,
-        ).pack(side=tk.LEFT, padx=4)
-        ttk.Checkbutton(
-            sleep_editor,
-            text="Fastech DI0 guard",
-            variable=self.sequence_edit_touch_guard,
-        ).pack(side=tk.LEFT, padx=6)
-        ttk.Checkbutton(
-            sleep_editor,
-            text="continue after Fastech DI0 stop",
-            variable=self.sequence_edit_continue_after_touch,
-        ).pack(side=tk.LEFT, padx=6)
-        head_editor = ttk.Frame(sequence)
-        head_editor.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(head_editor, text="Head J1 target °").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            head_editor,
-            from_=-180.0,
-            to=180.0,
-            increment=1.0,
-            textvariable=self.sequence_head_joint1_deg,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(head_editor, text="Head J2 target °").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            head_editor,
-            from_=-180.0,
-            to=180.0,
-            increment=1.0,
-            textvariable=self.sequence_head_joint2_deg,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(
-            head_editor,
-            text="(uses the shared parallel slot / Output duration s above as move time)",
-        ).pack(side=tk.LEFT)
         self.sequence_table = ttk.Treeview(
             sequence,
             columns=("order", "type", "detail"),
@@ -7963,7 +7862,9 @@ class WeldActionGui:
         self.sequence_table.bind(
             "<Double-1>", self.open_sequence_step_editor
         )
-        self.sequence_status = ttk.Label(sequence, text="Sequence idle")
+        self.sequence_status = ttk.Label(
+            sequence, text="Sequence idle · Plan/Execute weld from Task Library → Right · Welding"
+        )
         self.sequence_status.pack(anchor=tk.W, pady=(3, 0))
 
         planned_path = self._create_toggle_section(
@@ -8169,7 +8070,7 @@ class WeldActionGui:
 
         from .torch_cleaner_panel import TorchCleanerPanel
         cleaner = self._create_toggle_section(
-            outer, "torch_cleaner", "Torch Cleaner · Teaching / Confirm each step"
+            outer, "torch_cleaner", "Torch Cleaner · Teaching / Sequence"
         )
         self.torch_cleaner_panel = TorchCleanerPanel(
             self, cleaner, save_initial_state_yaml, load_initial_state_yaml
@@ -10579,8 +10480,8 @@ class WeldActionGui:
         )
         for manifest_path in candidates:
             try:
-                manifest = yaml.safe_load(
-                    manifest_path.read_text(encoding="utf-8")
+                manifest = yaml.load(
+                    manifest_path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader
                 ) or {}
                 schema = manifest.get("schema")
                 if schema not in (
@@ -10596,10 +10497,10 @@ class WeldActionGui:
                     raise ValueError("manifest does not list exactly Pass 1..4")
                 records = {}
                 for number in range(1, 5):
-                    record = yaml.safe_load(
+                    record = yaml.load(
                         (manifest_path.parent / entries[number]).read_text(
                             encoding="utf-8"
-                        )
+                        ), Loader=yaml.CSafeLoader
                     ) or {}
                     accepted_hashes = {references[number]["sha256"]}
                     for key in ("source_reference_sha256", "source_log_sha256"):
@@ -11344,7 +11245,7 @@ class WeldActionGui:
         path = self._selected_pass_teaching_path(number)
         if not path.is_file():
             return None
-        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
         if document.get("schema") != "construct_robot_pass_teaching_v1":
             raise ValueError(f"Unsupported pass teaching schema: {path}")
         if int(document.get("pass", 0)) != int(number):
@@ -11482,7 +11383,7 @@ class WeldActionGui:
             finally:
                 if temporary_path is not None and temporary_path.exists():
                     temporary_path.unlink()
-            persisted = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            persisted = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
             if persisted != document:
                 raise OSError(f"Pass teaching YAML read-back failed: {path}")
             replaces_loaded_reference = (
@@ -14248,8 +14149,7 @@ class WeldActionGui:
             )
         self.sequence_status.configure(
             text=(
-                f"Editing sequence #{index + 1} · panel values apply "
-                "automatically on Plan/Execute · double-click for all fields"
+                f"Sequence #{index + 1} selected · double-click the row to edit"
             )
         )
 
@@ -14805,16 +14705,37 @@ class WeldActionGui:
             self.sequence_parallel_slot.set(1)
         self.refresh_sequence_table()
 
+    def build_torch_clean_sequence(self):
+        """Refresh cleaner rows from config YAML without executing equipment."""
+        if self.sequence_running:
+            self.error("Cannot build Torch Clean while a sequence is running")
+            return False
+        try:
+            steps = self.torch_cleaner_panel.build_sequence_steps()
+            retained = [step for step in self.sequence_steps
+                        if not step.get("torch_clean_scenario")]
+            next_slot = max((int(step.get("parallel_slot", 0)) for step in retained), default=0)
+            if next_slot + len(steps) > 999:
+                raise ValueError("Cleaner steps exceed the maximum parallel slot 999")
+            for offset, step in enumerate(steps, 1):
+                step["parallel_slot"] = next_slot + offset
+            validate_managed_weld_sequence(retained + steps)
+        except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.error(f"Cannot build Torch Clean: {error}")
+            return False
+        self.sequence_steps = retained + steps
+        self.refresh_sequence_table(select_last=True)
+        self.torch_cleaner_panel.status.set(
+            f"Torch Clean: {len(steps)} steps added to Sequence Builder"
+        )
+        self.log(f"Built Torch Clean from {self.torch_cleaner_panel.folder.get()} · {len(steps)} steps")
+        return True
+
     def delete_all_sequence_steps(self):
         if self.sequence_running:
             self.error("Cannot delete the sequence while Plan/Execute is running")
             return
         if not self.sequence_steps:
-            return
-        if not messagebox.askyesno(
-            "Delete all sequence steps",
-            f"Delete all {len(self.sequence_steps)} Sequence Builder rows?",
-        ):
             return
         count = len(self.sequence_steps)
         self.sequence_steps.clear()
@@ -15099,33 +15020,32 @@ class WeldActionGui:
             "steps": recorded_steps,
         }
 
-    def run_sequence(self, run_all, execute_requested):
+    def run_sequence(self, run_all, execute_requested, steps_override=None):
         if self.sequence_running:
             self.error("A sequence is already running")
             return
-        # Whatever is currently shown in the Sequence Builder edit panel for
-        # the selected row commits automatically -- Plan/Execute always run
-        # the values on screen directly, with no separate commit button.
-        selected_index = self._selected_sequence_index()
-        if selected_index is not None and 0 <= selected_index < len(
-            self.sequence_steps
-        ):
-            success, error = self._commit_selected_sequence_step_edits(
-                selected_index
-            )
-            if not success:
-                self.error(f"Sequence edit failed: {error}")
-                return
-            self.refresh_sequence_table()
-        if run_all:
-            indices = list(range(len(self.sequence_steps)))
+        if steps_override is not None:
+            indices = list(range(len(steps_override)))
+            steps = [copy.deepcopy(step) for step in steps_override]
         else:
-            selected = self._selected_sequence_index()
-            indices = [] if selected is None else [selected]
+            # Generated rows are editable by double-click. Capture the selected
+            # row's current values before running the visible Builder sequence.
+            selected_index = self._selected_sequence_index()
+            if selected_index is not None and 0 <= selected_index < len(self.sequence_steps):
+                success, error = self._commit_selected_sequence_step_edits(selected_index)
+                if not success:
+                    self.error(f"Sequence edit failed: {error}")
+                    return
+                self.refresh_sequence_table()
+            if run_all:
+                indices = list(range(len(self.sequence_steps)))
+            else:
+                selected = self._selected_sequence_index()
+                indices = [] if selected is None else [selected]
+            steps = [copy.deepcopy(self.sequence_steps[index]) for index in indices]
         if not indices:
             self.error("Add or select a sequence step")
             return
-        steps = [copy.deepcopy(self.sequence_steps[index]) for index in indices]
         try:
             execution_conditions = self._sequence_execution_conditions(
                 steps, indices, execute_requested, run_all
@@ -15223,7 +15143,9 @@ class WeldActionGui:
                 f"Execute {len(steps)} stored step(s) on physical equipment?",
             ):
                 return
-            if self.hicomm_client is not None:
+            if self.hicomm_client is not None and (
+                steps_override is None or contains_weld_command
+            ):
                 self.hicomm_client.allow_outputs()
         self._sequence_fake_arc_snapshot = bool(self.fake_arc_enabled.get())
         with self.weld_feedback_lock:
@@ -17294,43 +17216,21 @@ class WeldActionGui:
             )
         self._refresh_initial_position_controls()
 
-# /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config
     def _initial_state_yaml_path(self, planning_group=None, pose_name=None):
+        from .teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         selected_pose = pose_name or self._selected_teaching_pose_name()
-        return (
-            Path.home()
-            / "ros2_ws"
-            / "src"
-            / "construct_robot_ros2"
-            / "construct_description"
-            / "config"
-            / f"{group}_{selected_pose}_state.yaml"
-        )
+        return teaching_config_dir() / f"{group}_{selected_pose}_state.yaml"
 
     def _seam_reference_yaml_path(self, planning_group=None):
+        from .teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
-        return (
-            Path.home()
-            / "ros2_ws"
-            / "src"
-            / "construct_robot_ros2"
-            / "construct_description"
-            / "config"
-            / f"{group}_seam_teaching_reference.yaml"
-        )
+        return teaching_config_dir() / f"{group}_seam_teaching_reference.yaml"
 
     def _seam_touch_yaml_path(self, planning_group=None):
+        from .teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
-        return (
-            Path.home()
-            / "ros2_ws"
-            / "src"
-            / "construct_robot_ros2"
-            / "construct_description"
-            / "config"
-            / f"{group}_seam_touch_points.yaml"
-        )
+        return teaching_config_dir() / f"{group}_seam_touch_points.yaml"
 
     def _auto_load_teaching_states(self):
         """Load every named teaching pose found at its default YAML path."""
@@ -17363,7 +17263,7 @@ class WeldActionGui:
                 copy.deepcopy(tcp),
             )
             try:
-                provenance = yaml.safe_load(path.read_text(encoding="utf-8")).get(
+                provenance = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader).get(
                     "capture_provenance")
                 if isinstance(provenance, dict):
                     self.teaching_capture_provenance[pose_name] = provenance
@@ -17441,7 +17341,7 @@ class WeldActionGui:
             planning_group, joint_names, positions, tcp = (
                 load_initial_state_yaml(path)
             )
-            loaded_document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+            loaded_document = yaml.load(Path(path).read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
             provenance = loaded_document.get("capture_provenance")
         except (OSError, ValueError, yaml.YAMLError) as error:
             self.error(f"Failed to load initial state YAML: {error}")

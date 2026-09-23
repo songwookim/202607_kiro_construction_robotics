@@ -16,10 +16,10 @@ def test_pose_task_roundtrip(tmp_path):
     steps = [{"type": "motion", "planning_group": "left_manipulator", "points": [pose]}]
     path = tmp_path / "task.yaml"
     atomic_yaml(path, {"steps": encode(steps)})
-    restored = decode(yaml.safe_load(path.read_text())["steps"])
+    restored = decode(yaml.load(path.read_text(), Loader=yaml.CSafeLoader)["steps"])
     assert restored[0]["points"][0] == pose
     atomic_yaml(path, {"steps": []})
-    assert yaml.safe_load(path.read_text()) == {"steps": []}
+    assert yaml.load(path.read_text(), Loader=yaml.CSafeLoader) == {"steps": []}
 
 
 @pytest.mark.parametrize("step", [
@@ -39,6 +39,15 @@ def test_unsafe_serialization_rejected():
         decode({"ros_type": "Unknown", "fields": {}})
     with pytest.raises(ValueError):
         TaskTeachingPanel.safe_name("../other")
+
+
+def test_right_weld_builder_remains_runnable_from_task_library():
+    validate_task_group([
+        {"type": "digital_output", "io_backend": "fastech_ethernet", "port": 0},
+        {"type": "digital_weld", "command": "on"},
+        {"type": "motion", "planning_group": "right_manipulator"},
+        {"type": "digital_weld", "command": "off"},
+    ], "right_manipulator")
 
 
 def test_continuous_path_preserves_order_and_arm(tmp_path):
