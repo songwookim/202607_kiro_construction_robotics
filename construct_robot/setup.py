@@ -24,11 +24,13 @@ setup(
         'test': [
             'pytest',
         ],
+        'qt': ['PySide6-Essentials>=6.5,<7'],
     },
     entry_points={
         'console_scripts': [
             'cartesian_path_server = construct_robot.cartesian_path_server:main',
             'weld_action_gui = construct_robot.weld_action_gui:main',
+            'weld_action_gui_qt = construct_robot.gui_qt.launch:main',
             'weld_feedback_plot = construct_robot.weld_feedback_plot:main',
             'controller_spawner = construct_robot.controller_spawner:main',
             'fastech_io_node = construct_robot.fastech_io_node:main',

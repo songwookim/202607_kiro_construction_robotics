@@ -28,22 +28,40 @@ class SequenceModel:
 
     def __init__(self, steps=None):
         self.steps = list(steps) if steps is not None else []
+        self._listeners = []
         self.selected_index = None
         self.running = False
         self.current_indices = ()
+        self.current_step_indices = ()
         self.current_slot = None
         self.group_progress = (0, 0)
         self.status = "idle"
+
+    def subscribe(self, callback):
+        """Observe state changes; callbacks run on the caller's thread."""
+        self._listeners.append(callback)
+
+        def unsubscribe():
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+
+        return unsubscribe
+
+    def _notify(self, event):
+        for callback in tuple(self._listeners):
+            callback(event)
 
     def replace(self, steps):
         self.steps = list(steps)
         if self.selected_index is not None and self.selected_index >= len(self.steps):
             self.selected_index = None
+        self._notify("steps")
 
     def select(self, index):
         self.selected_index = (
             index if index is not None and 0 <= index < len(self.steps) else None
         )
+        self._notify("selection")
         return self.selected_index
 
     def execution_snapshot(self, run_all, steps_override=None):
@@ -60,32 +78,60 @@ class SequenceModel:
     def start(self, indices, execute_requested):
         self.running = True
         self.current_indices = tuple(indices)
+        self.current_step_indices = ()
         self.current_slot = None
         self.group_progress = (0, 0)
         self.status = "execute" if execute_requested else "plan"
+        self._notify("execution")
 
-    def set_progress(self, slot, current_group, total_groups):
+    def set_progress(self, slot, current_group, total_groups, step_indices=()):
         self.current_slot = slot
         self.group_progress = (current_group, total_groups)
+        self.current_step_indices = tuple(step_indices)
+        self._notify("progress")
 
     def finish(self, success, message):
         self.running = False
         self.current_indices = ()
+        self.current_step_indices = ()
         self.current_slot = None
         self.status = "complete" if success else f"stopped/failed: {message}"
+        self._notify("execution")
 
     def validate(self, require_complete=False):
         return validate_managed_weld_sequence(self.steps, require_complete)
 
     def add(self, step):
         self.steps.append(step)
+        self._notify("steps")
         return len(self.steps) - 1
 
     def extend(self, steps):
         self.steps.extend(steps)
+        self._notify("steps")
 
     def edit(self, index, step):
         self.steps[index] = step
+        self._notify("steps")
+
+    def update_fields(self, index, updates):
+        """Validate a field edit before committing it to the working rows."""
+        if not 0 <= index < len(self.steps):
+            raise IndexError("Sequence step index is out of range")
+        protected = {"type", "weld_scenario_id", "weld_scenario_stage"}
+        if protected.intersection(updates):
+            raise ValueError("Sequence step identity cannot be edited")
+        candidate = copy.deepcopy(self.steps)
+        for key, value in updates.items():
+            if key not in candidate[index]:
+                raise ValueError(f"Unknown sequence field: {key}")
+            if key == "parallel_slot" and not 1 <= int(value) <= 999:
+                raise ValueError("Sequence parallel slot must be in 1..999")
+            if key in ("seconds", "duration") and not 0.0 <= float(value) <= 3600.0:
+                raise ValueError("Sequence duration must be in 0..3600 seconds")
+            candidate[index][key] = value
+        validate_managed_weld_sequence(candidate, require_complete=True)
+        self.replace(candidate)
 
     def delete(self, index):
         result = self.steps.pop(index)
@@ -93,12 +139,14 @@ class SequenceModel:
             self.selected_index = None
         elif self.selected_index is not None and self.selected_index > index:
             self.selected_index -= 1
+        self._notify("steps")
         return result
 
     def clear(self):
         count = len(self.steps)
         self.steps.clear()
         self.selected_index = None
+        self._notify("steps")
         return count
 
     def move(self, index, offset):
@@ -110,10 +158,12 @@ class SequenceModel:
             self.selected_index = target
         elif self.selected_index == target:
             self.selected_index = index
+        self._notify("steps")
         return target
 
     def duplicate(self, index):
         self.steps.insert(index + 1, copy.deepcopy(self.steps[index]))
+        self._notify("steps")
         return index + 1
 
     def with_replaced_cleaner(self, cleaner_steps):

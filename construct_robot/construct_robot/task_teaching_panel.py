@@ -6,25 +6,20 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import yaml
-
 from .teaching_paths import teaching_config_dir
 from .task_teaching_model import (
+    TASK_GROUPS,
     atomic_yaml,
     build_task_path_steps,
     decode,
     encode,
     TaskOrderState,
+    load_task_file,
     validate_task_group,
     validated_task_speed,
+    task_base_path,
+    safe_task_name,
 )
-
-
-TASK_GROUPS = {
-    "Right · Welding": "right_manipulator",
-    "Right · Torch cleaner": "right_manipulator",
-    "Left · Spray path": "left_manipulator",
-}
 
 
 class TaskTeachingPanel:
@@ -91,15 +86,11 @@ class TaskTeachingPanel:
             self.gui.error(f"Task library: {error}")
 
     def base(self):
-        return Path(self.folder.get()).expanduser().resolve() / self.category.get().split(" · ")[0].lower() / {
-            "Right · Welding": "welding", "Right · Torch cleaner": "cleaner", "Left · Spray path": "spray"
-        }[self.category.get()]
+        return task_base_path(self.folder.get(), self.category.get())
 
     @staticmethod
     def safe_name(name):
-        if not re.fullmatch(r"[\w-]+", name):
-            raise ValueError("Name must contain only letters, digits, _ or -")
-        return name
+        return safe_task_name(name)
 
     def browse(self):
         folder = filedialog.askdirectory(parent=self.gui.root, initialdir=self.folder.get())
@@ -210,10 +201,7 @@ class TaskTeachingPanel:
 
     def load_task(self):
         path = self.base() / (self.safe_name(self.name.get().strip()) + ".yaml")
-        document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
-        if not isinstance(document, dict) or document.get("schema") != "robot_task_v1" or document.get("category") != self.category.get():
-            raise ValueError("Task schema/category mismatch")
-        steps = decode(document["steps"])
+        document, steps = load_task_file(path, self.category.get())
         if self.replace_builder(steps):
             names = [self.safe_name(name) for name in document.get("visit_order", [])]
             self.order_state.replace(names)

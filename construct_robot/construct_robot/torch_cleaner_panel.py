@@ -14,6 +14,7 @@ from .torch_cleaner_teaching import (
     build_cleaner_sequence_steps,
     cleaner_output_step,
     cleaner_pose_path,
+    load_cleaner_order,
 )
 
 
@@ -60,17 +61,7 @@ class TorchCleanerPanel:
         ordered = []
         order_path = folder / "sequence.yaml"
         if order_path.is_file():
-            document = yaml.load(order_path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
-            if (not isinstance(document, dict)
-                    or document.get("schema") not in ("torch_cleaner_sequence_v1", "torch_cleaner_sequence_v2")
-                    or not isinstance(document.get("positions"), list)
-                    or not all(isinstance(value, str) for value in document["positions"])):
-                raise ValueError(f"Invalid cleaner sequence YAML: {order_path}")
-            tokens = document["positions"]
-            if document.get("schema") == "torch_cleaner_sequence_v1":
-                tokens = ["DO7:" + value[4:] if value.startswith("DO5:") else
-                          "DO5:" + value[4:] if value.startswith("DO7:") else value
-                          for value in tokens]
+            tokens = load_cleaner_order(folder)
             self.order.set(", ".join(tokens))
             if hasattr(self, "state"):
                 self.state.set_order(tokens)

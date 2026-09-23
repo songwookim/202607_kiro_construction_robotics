@@ -1,9 +1,42 @@
 """Task-teaching serialization, validation, and path data without Tkinter."""
 import math
 import os
+import re
 import tempfile
+from pathlib import Path
 
 import yaml
+
+
+TASK_GROUPS = {
+    "Right · Welding": "right_manipulator",
+    "Right · Torch cleaner": "right_manipulator",
+    "Left · Spray path": "left_manipulator",
+}
+
+TEACHING_POSES = {
+    "robot_start": "1 · Initial pose",
+    "weld_wait": "2 · Weld wait pose",
+    "weld_start_wait": "3 · Weld start wait pose",
+    "weld_start": "4 · Reference TCP 1 / Weld start",
+    "weld_goal_wait": "5 · Weld goal wait pose",
+    "weld_end": "6 · Reference TCP 2 / Weld goal",
+    "weld_finish": "7 · Weld end pose",
+}
+
+
+def task_base_path(folder, category):
+    if category not in TASK_GROUPS:
+        raise ValueError("Unknown task category")
+    suffix = {"Right · Welding": "welding", "Right · Torch cleaner": "cleaner",
+              "Left · Spray path": "spray"}[category]
+    return Path(folder).expanduser().resolve() / category.split(" · ")[0].lower() / suffix
+
+
+def safe_task_name(name):
+    if not re.fullmatch(r"[\w-]+", name):
+        raise ValueError("Name must contain only letters, digits, _ or -")
+    return name
 
 
 class TeachingState:
@@ -116,6 +149,18 @@ def validate_task_group(steps, group):
             raise ValueError("Task contains another arm/head; split it into separate tasks")
         if group == "left_manipulator" and kind not in ("named_pose", "motion", "sleep"):
             raise ValueError("Left spray task currently supports motion/wait only; no process output mapping")
+
+
+def load_task_file(path, expected_category=None):
+    """Read existing task YAML without widgets, motion, or output commands."""
+    document = yaml.load(Path(path).read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+    if (not isinstance(document, dict) or document.get("schema") != "robot_task_v1"
+            or document.get("category") not in TASK_GROUPS
+            or (expected_category is not None and document["category"] != expected_category)):
+        raise ValueError("Task schema/category mismatch")
+    steps = decode(document["steps"])
+    validate_task_group(steps, TASK_GROUPS[document["category"]])
+    return document, steps
 
 def validated_task_speed(speed):
     speed = float(speed)

@@ -36,6 +36,23 @@ def cleaner_output_step(name):
     return int(channel[2:]), value
 
 
+def load_cleaner_order(folder):
+    """Read the operator's cleaner order, including the v1 DO5/DO7 rename."""
+    path = Path(folder) / "sequence.yaml"
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+    if (not isinstance(document, dict)
+            or document.get("schema") not in ("torch_cleaner_sequence_v1", "torch_cleaner_sequence_v2")
+            or not isinstance(document.get("positions"), list)
+            or not all(isinstance(value, str) for value in document["positions"])):
+        raise ValueError(f"Invalid cleaner sequence YAML: {path}")
+    tokens = document["positions"]
+    if document["schema"] == "torch_cleaner_sequence_v1":
+        tokens = ["DO7:" + value[4:] if value.startswith("DO5:") else
+                  "DO5:" + value[4:] if value.startswith("DO7:") else value
+                  for value in tokens]
+    return tokens
+
+
 def build_cleaner_sequence_steps(folder, tokens, velocity_percent, load_pose):
     """Build existing cleaner rows from YAML without Tk or robot commands."""
     tokens = [name.strip() for name in tokens if name.strip()]
