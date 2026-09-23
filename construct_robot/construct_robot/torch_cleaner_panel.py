@@ -1,4 +1,5 @@
 """Operator-confirmed cleaner teaching and motion, using existing GUI motion APIs."""
+import math
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ import yaml
 
 from .teaching_paths import teaching_config_dir
 from .torch_cleaner_teaching import (
+    CleanerTeachingState,
     build_cleaner_sequence_steps,
     cleaner_output_step,
     cleaner_pose_path,
@@ -23,6 +25,7 @@ class TorchCleanerPanel:
         self.steps = []
         self.index = 0
         self.folder = tk.StringVar(value=str(teaching_config_dir() / "torch_cleaner_teaching"))
+        self.state = CleanerTeachingState(Path(self.folder.get()))
         self.selected = tk.StringVar(value="start")
         self.selected_label = tk.StringVar()
         self.position_names = []
@@ -49,6 +52,7 @@ class TorchCleanerPanel:
         index = self.positions.current()
         if 0 <= index < len(self.position_names):
             self.selected.set(self.position_names[index])
+            self.state.selected = self.position_names[index]
 
     def refresh_teaching_index(self):
         folder = Path(self.folder.get())
@@ -68,6 +72,8 @@ class TorchCleanerPanel:
                           "DO5:" + value[4:] if value.startswith("DO7:") else value
                           for value in tokens]
             self.order.set(", ".join(tokens))
+            if hasattr(self, "state"):
+                self.state.set_order(tokens)
             ordered = list(dict.fromkeys(token for token in tokens if ":" not in token))
         extra = sorted(path.stem for path in folder.glob("*.yaml")
                        if path.stem not in ordered and path.stem != "sequence")
@@ -77,6 +83,8 @@ class TorchCleanerPanel:
         if self.position_names:
             selected = selected if selected in self.position_names else self.position_names[0]
             self.selected.set(selected)
+            if hasattr(self, "state"):
+                self.state.selected = selected
             self.positions.current(self.position_names.index(selected))
 
     def send_to_sequence(self):
@@ -98,6 +106,9 @@ class TorchCleanerPanel:
         if not order_path.is_file():
             raise ValueError(f"Cleaner order is missing: {order_path}")
         tokens = [name.strip() for name in self.order.get().split(",") if name.strip()]
+        if hasattr(self, "state"):
+            self.state.set_order(tokens)
+            tokens = self.state.tokens
         return build_cleaner_sequence_steps(
             self.folder.get(), tokens, self.gui.velocity_percent.get(), self.load_pose
         )
@@ -137,6 +148,7 @@ class TorchCleanerPanel:
             if not folder:
                 return
             self.folder.set(folder)
+            self.state.folder = Path(folder)
             self.steps = []
             names = [p.stem for p in Path(folder).glob("*.yaml") if p.name != "sequence.yaml"]
             self.positions.configure(values=sorted(names))
@@ -154,6 +166,7 @@ class TorchCleanerPanel:
                     ]
                     self.gui.log("Cleaner sequence v1 loaded: swapped DO5/DO7; Save order YAML to persist v2")
                 self.order.set(", ".join(positions))
+                self.state.set_order(positions)
             self.status.set(f"Loaded folder: {folder}")
         except Exception as error:
             self.gui.error(f"Cleaner: {error}")

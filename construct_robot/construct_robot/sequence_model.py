@@ -28,9 +28,54 @@ class SequenceModel:
 
     def __init__(self, steps=None):
         self.steps = list(steps) if steps is not None else []
+        self.selected_index = None
+        self.running = False
+        self.current_indices = ()
+        self.current_slot = None
+        self.group_progress = (0, 0)
+        self.status = "idle"
 
     def replace(self, steps):
         self.steps = list(steps)
+        if self.selected_index is not None and self.selected_index >= len(self.steps):
+            self.selected_index = None
+
+    def select(self, index):
+        self.selected_index = (
+            index if index is not None and 0 <= index < len(self.steps) else None
+        )
+        return self.selected_index
+
+    def execution_snapshot(self, run_all, steps_override=None):
+        """Freeze the requested rows without reading GUI selection or widgets."""
+        if steps_override is not None:
+            indices = list(range(len(steps_override)))
+            source = steps_override
+        else:
+            indices = (list(range(len(self.steps))) if run_all else
+                       ([] if self.selected_index is None else [self.selected_index]))
+            source = self.steps
+        return indices, [copy.deepcopy(source[index]) for index in indices]
+
+    def start(self, indices, execute_requested):
+        self.running = True
+        self.current_indices = tuple(indices)
+        self.current_slot = None
+        self.group_progress = (0, 0)
+        self.status = "execute" if execute_requested else "plan"
+
+    def set_progress(self, slot, current_group, total_groups):
+        self.current_slot = slot
+        self.group_progress = (current_group, total_groups)
+
+    def finish(self, success, message):
+        self.running = False
+        self.current_indices = ()
+        self.current_slot = None
+        self.status = "complete" if success else f"stopped/failed: {message}"
+
+    def validate(self, require_complete=False):
+        return validate_managed_weld_sequence(self.steps, require_complete)
 
     def add(self, step):
         self.steps.append(step)
@@ -43,11 +88,17 @@ class SequenceModel:
         self.steps[index] = step
 
     def delete(self, index):
-        return self.steps.pop(index)
+        result = self.steps.pop(index)
+        if self.selected_index == index:
+            self.selected_index = None
+        elif self.selected_index is not None and self.selected_index > index:
+            self.selected_index -= 1
+        return result
 
     def clear(self):
         count = len(self.steps)
         self.steps.clear()
+        self.selected_index = None
         return count
 
     def move(self, index, offset):
@@ -55,6 +106,10 @@ class SequenceModel:
         if not 0 <= target < len(self.steps):
             return None
         self.steps[index], self.steps[target] = self.steps[target], self.steps[index]
+        if self.selected_index == index:
+            self.selected_index = target
+        elif self.selected_index == target:
+            self.selected_index = index
         return target
 
     def duplicate(self, index):
@@ -281,4 +336,3 @@ def validate_managed_weld_sequence(steps, require_complete=False):
         #         "Generated weld scenario is incomplete: " + ", ".join(missing)
         #     )
     return True
-

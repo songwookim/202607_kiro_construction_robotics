@@ -92,6 +92,7 @@ from construct_robot.seam_geometry import (
     seam_direction,
 )
 from construct_robot.multipass import (
+    MultiPassState,
     correct_four_pass_references,
     correct_remaining_passes,
     correct_seam_from_measured_start,
@@ -102,6 +103,7 @@ from construct_robot.weld_logging import (
     save_weld_feedback_log,
     weld_weave_settings_text,
 )
+from construct_robot.task_teaching_model import TeachingState
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
 FASTECH_GUI_CHANNELS = {
     0: "Touch sensing",
@@ -5395,6 +5397,84 @@ class WeldActionGui:
     POSE_FIELDS = ("x", "y", "z", "qx", "qy", "qz", "qw")
 
     @property
+    def multipass_state(self):
+        if not hasattr(self, "_multipass_state"):
+            self._multipass_state = MultiPassState()
+        return self._multipass_state
+
+    @property
+    def four_pass_references(self):
+        return self.multipass_state.references
+
+    @four_pass_references.setter
+    def four_pass_references(self, value):
+        self.multipass_state.references = value
+
+    @property
+    def four_pass_loaded_folder(self):
+        return self.multipass_state.loaded_folder
+
+    @four_pass_loaded_folder.setter
+    def four_pass_loaded_folder(self, value):
+        self.multipass_state.loaded_folder = value
+
+    @property
+    def four_pass_corrected(self):
+        return self.multipass_state.corrected
+
+    @four_pass_corrected.setter
+    def four_pass_corrected(self, value):
+        self.multipass_state.corrected = value
+
+    @property
+    def four_pass_output_folder(self):
+        return self.multipass_state.output_folder
+
+    @four_pass_output_folder.setter
+    def four_pass_output_folder(self, value):
+        self.multipass_state.output_folder = value
+
+    @property
+    def four_pass_history(self):
+        return self.multipass_state.history
+
+    @four_pass_history.setter
+    def four_pass_history(self, value):
+        self.multipass_state.history = value
+
+    @property
+    def multi_pass_registration(self):
+        return self.multipass_state.registration
+
+    @multi_pass_registration.setter
+    def multi_pass_registration(self, value):
+        self.multipass_state.registration = value
+
+    @property
+    def taught_robot_poses(self):
+        if not hasattr(self, "teaching_state"):
+            self.teaching_state = TeachingState(TEACHING_POSES)
+        return self.teaching_state.poses
+
+    @taught_robot_poses.setter
+    def taught_robot_poses(self, poses):
+        if not hasattr(self, "teaching_state"):
+            self.teaching_state = TeachingState(TEACHING_POSES)
+        self.teaching_state.poses = poses
+
+    @property
+    def teaching_capture_provenance(self):
+        if not hasattr(self, "teaching_state"):
+            self.teaching_state = TeachingState(TEACHING_POSES)
+        return self.teaching_state.provenance
+
+    @teaching_capture_provenance.setter
+    def teaching_capture_provenance(self, provenance):
+        if not hasattr(self, "teaching_state"):
+            self.teaching_state = TeachingState(TEACHING_POSES)
+        self.teaching_state.provenance = provenance
+
+    @property
     def sequence_steps(self):
         # Laziness keeps lightweight GUI test doubles compatible with __new__.
         if not hasattr(self, "sequence_model"):
@@ -5406,6 +5486,18 @@ class WeldActionGui:
         if not hasattr(self, "sequence_model"):
             self.sequence_model = SequenceModel()
         self.sequence_model.replace(steps)
+
+    @property
+    def sequence_running(self):
+        if not hasattr(self, "sequence_model"):
+            self.sequence_model = SequenceModel()
+        return self.sequence_model.running
+
+    @sequence_running.setter
+    def sequence_running(self, running):
+        if not hasattr(self, "sequence_model"):
+            self.sequence_model = SequenceModel()
+        self.sequence_model.running = bool(running)
 
     def _create_toggle_section(
         self,
@@ -5728,6 +5820,7 @@ class WeldActionGui:
         self.four_pass_status = tk.StringVar(
             value="Load 1.log..4.log · WAIT/START/GOAL WAIT/GOAL come from each log"
         )
+        self.multipass_state.status = self.four_pass_status.get()
         self.four_pass_references = {}
         self.four_pass_loaded_folder = None
         self.four_pass_corrected = {}
@@ -6946,10 +7039,14 @@ class WeldActionGui:
         pass_probe_row = ttk.Frame(four_pass)
         pass_probe_row.pack(fill=tk.X, pady=2)
         ttk.Label(pass_probe_row, text="Pass").pack(side=tk.LEFT, padx=3)
-        ttk.Combobox(
+        pass_selection = ttk.Combobox(
             pass_probe_row, textvariable=self.selected_pass_number,
             values=(1, 2, 3, 4), width=4, state="readonly",
-        ).pack(side=tk.LEFT, padx=3)
+        )
+        pass_selection.pack(side=tk.LEFT, padx=3)
+        pass_selection.bind(
+            "<<ComboboxSelected>>", lambda _event: self._selected_pass()
+        )
         ttk.Button(
             pass_probe_row, text="Load Selected Pass",
             command=self.apply_selected_pass_correction,
@@ -9552,7 +9649,7 @@ class WeldActionGui:
             self.four_pass_corrected = {}
             self.four_pass_history = []
             self.multi_pass_registration = None
-            self.four_pass_status.set("Folder changed · load four references")
+            self._set_four_pass_status("Folder changed · load four references")
 
     def load_four_pass_references(self):
         folder = Path(self.four_pass_folder.get()).expanduser().resolve()
@@ -9658,7 +9755,7 @@ class WeldActionGui:
             if self.four_pass_output_folder is not None
             else " · no saved cumulative correction; using loaded reference set"
         )
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Loaded {reference_set_kind} for pass 1–4 · seam lengths "
             + "/".join(f"{length:.1f}" for length in lengths)
             + f" mm{restore_note}"
@@ -9802,6 +9899,14 @@ class WeldActionGui:
             return corrected, manifest_path.parent, copy.deepcopy(history)
         return None
 
+    def _set_four_pass_status(self, text):
+        self.multipass_state.status = text
+        self.four_pass_status.set(text)
+
+    def _selected_pass(self):
+        """Copy the operator's pass choice into the application working state."""
+        return self.multipass_state.select(self.selected_pass_number.get())
+
     def run_four_pass_correction(self):
         if self.multi_pass_registration is not None:
             self.error("A multi-pass registration is already in progress")
@@ -9819,7 +9924,7 @@ class WeldActionGui:
         ) and not self.load_four_pass_references():
             return
         try:
-            number = int(self.selected_pass_number.get())
+            number = self._selected_pass()
             if number not in (1, 2, 3, 4):
                 raise ValueError("Select Pass 1, 2, 3, or 4")
             self._validate_four_pass_source_hashes()
@@ -9868,7 +9973,7 @@ class WeldActionGui:
             "measured_start": None,
             "measured_goal": None,
         }
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} correction · moving to corrected logged START WAIT"
         )
         threading.Thread(
@@ -9934,7 +10039,7 @@ class WeldActionGui:
     def stop_multi_pass_correction(self):
         """Invalidate registration and use the existing all-motion stop path."""
         self.emergency_stop_all()
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             "Multi-pass STOP requested · all robot motion stopping · restart correction to continue"
         )
 
@@ -9958,7 +10063,7 @@ class WeldActionGui:
             self.error(f"Pass {number} START WAIT move failed: {message}")
             return
         session["phase"] = "waiting_start_capture"
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} correction · waiting for START capture (I) · "
             "enable Keyboard Teaching and jog to the real START"
         )
@@ -9984,13 +10089,13 @@ class WeldActionGui:
             )
             return
         if self.keyboard_velocity_switching:
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {number} correction · waiting for Keyboard Teaching · "
                 f"then press {expected_key.upper()}"
             )
             return
         self.keyboard_jog_enabled.set(True)
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} correction · enabling Keyboard Teaching for "
             f"{expected_key.upper()} capture"
         )
@@ -10017,7 +10122,7 @@ class WeldActionGui:
             return
         if error is not None:
             self.keyboard_jog_status.set(f"{key.upper()} · capture rejected")
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {number} correction · {key.upper()} capture FAILED · retry"
             )
             self.error(f"Pass {number} {key.upper()} capture rejected: {error}")
@@ -10029,7 +10134,7 @@ class WeldActionGui:
             session["phase"] = "moving_goal_wait"
             self.keyboard_velocity_switching = True
             self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {number} correction · I accepted / START captured · "
                 "restoring trajectory controller and moving to GOAL WAIT"
             )
@@ -10044,7 +10149,7 @@ class WeldActionGui:
             return
         session["measured_goal"] = copy.deepcopy(pose)
         session["goal_capture_provenance"] = copy.deepcopy(provenance)
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} correction · J accepted / GOAL captured · "
             "calculating cumulative correction"
         )
@@ -10109,7 +10214,7 @@ class WeldActionGui:
             self.error(f"Pass {number} GOAL WAIT move failed: {message}")
             return
         session["phase"] = "waiting_goal_capture"
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} correction · START captured · "
             "waiting for GOAL capture (J) · enable Keyboard Teaching"
         )
@@ -10143,7 +10248,7 @@ class WeldActionGui:
             session["phase"] = "moving_end"
             self.keyboard_velocity_switching = True
             self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {number} correction saved · moving to Weld end"
             )
             threading.Thread(
@@ -10153,7 +10258,7 @@ class WeldActionGui:
         self.multi_pass_registration = None
         later = transform["later_passes_updated"]
         later_text = "/".join(str(value) for value in later) or "none"
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} corrected · later predictions updated: {later_text} · "
             "verify corrected START/GOAL before welding"
         )
@@ -10190,7 +10295,7 @@ class WeldActionGui:
             f"Pass {session['pass']} correction saved · Weld end reached"
             if success else f"Correction saved, but Weld end move stopped/failed: {message}"
         )
-        self.four_pass_status.set(text)
+        self._set_four_pass_status(text)
         self.keyboard_jog_status.set("Keyboard teaching locked")
         (self.pipeline_result if success else self.error)(text)
 
@@ -10382,7 +10487,7 @@ class WeldActionGui:
     def go_to_corrected_pass_endpoint(self, endpoint):
         endpoint = str(endpoint).strip().lower()
         try:
-            number = int(self.selected_pass_number.get())
+            number = self._selected_pass()
             if endpoint not in ("start", "goal"):
                 raise ValueError("Endpoint must be START or GOAL")
             target = copy.deepcopy(self.four_pass_corrected[number][endpoint])
@@ -10502,7 +10607,7 @@ class WeldActionGui:
     def save_teaching_to_selected_pass(self):
         """Save current Teaching Detail poses without modifying N.log sources."""
         try:
-            number = int(self.selected_pass_number.get())
+            number = self._selected_pass()
             if number not in (1, 2, 3, 4):
                 raise ValueError("Select Pass 1, 2, 3, or 4")
             pose_records = {}
@@ -10613,7 +10718,7 @@ class WeldActionGui:
             self.error(f"Cannot save selected-pass teaching: {error}")
             return
         self.four_pass_corrected[number] = current
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} Teaching Detail saved · {path}"
         )
         self.pipeline_result(
@@ -10637,7 +10742,7 @@ class WeldActionGui:
     def _apply_selected_pass_teaching(self, use_saved_teaching):
         """Apply either cumulative correction or explicit saved teaching."""
         try:
-            number = int(self.selected_pass_number.get())
+            number = self._selected_pass()
             if number not in (1, 2, 3, 4):
                 raise ValueError("Select Pass 1, 2, 3, or 4")
             if not use_saved_teaching:
@@ -10770,7 +10875,7 @@ class WeldActionGui:
                 self.error(f"Saved pass teaching restore failed: {error}")
                 return
             load_completion = "saved joint/TCP pairs restored exactly"
-        self.four_pass_status.set(
+        self._set_four_pass_status(
             f"Pass {number} corrected WAIT/START/GOAL WAIT/GOAL loaded into "
             f"Teaching Detail · {teaching_source} · {load_completion}"
         )
@@ -13164,8 +13269,9 @@ class WeldActionGui:
     def _selected_sequence_index(self):
         selected = self.sequence_table.selection()
         if not selected:
+            self.sequence_model.select(None)
             return None
-        return int(selected[0])
+        return self.sequence_model.select(int(selected[0]))
 
     def refresh_sequence_table(self, select_last=False):
         selected = self._selected_sequence_index() if self.sequence_table.get_children() else None
@@ -14230,8 +14336,9 @@ class WeldActionGui:
             self.error("A sequence is already running")
             return
         if steps_override is not None:
-            indices = list(range(len(steps_override)))
-            steps = [copy.deepcopy(step) for step in steps_override]
+            indices, steps = self.sequence_model.execution_snapshot(
+                run_all, steps_override
+            )
         else:
             # Generated rows are editable by double-click. Capture the selected
             # row's current values before running the visible Builder sequence.
@@ -14242,12 +14349,9 @@ class WeldActionGui:
                     self.error(f"Sequence edit failed: {error}")
                     return
                 self.refresh_sequence_table()
-            if run_all:
-                indices = list(range(len(self.sequence_steps)))
-            else:
-                selected = self._selected_sequence_index()
-                indices = [] if selected is None else [selected]
-            steps = [copy.deepcopy(self.sequence_steps[index]) for index in indices]
+            if not run_all:
+                self._selected_sequence_index()
+            indices, steps = self.sequence_model.execution_snapshot(run_all)
         if not indices:
             self.error("Add or select a sequence step")
             return
@@ -14355,7 +14459,7 @@ class WeldActionGui:
         self._sequence_fake_arc_snapshot = bool(self.fake_arc_enabled.get())
         with self.weld_feedback_lock:
             self._weld_feedback_stopped = False
-        self.sequence_running = True
+        self.sequence_model.start(indices, execute_requested)
         self.sequence_stop_requested = False
         mode = "EXECUTE" if execute_requested else "PLAN"
         self._set_sequence_status(
@@ -14428,6 +14532,10 @@ class WeldActionGui:
                 )
 
     def _sequence_worker_body(self, steps, indices, execute_requested):
+        # The worker may also be exercised without the GUI constructor by
+        # tests; keep its application state lazy like sequence_steps.
+        if not hasattr(self, "sequence_model"):
+            self.sequence_model = SequenceModel()
         success = True
         message = "complete"
         groups = []
@@ -14448,6 +14556,7 @@ class WeldActionGui:
                 success, message = False, "stopped by operator"
                 break
             slot_label = key[1] if key[0] == "slot" else "sleep"
+            self.sequence_model.set_progress(slot_label, group_index, len(groups))
             self.post(
                 self._set_sequence_status,
                 f"Parallel slot {slot_label} · group "
@@ -14723,11 +14832,12 @@ class WeldActionGui:
         return False, "unsupported sequence step"
 
     def _set_sequence_status(self, text):
+        self.sequence_model.status = text
         self.sequence_status.configure(text=text)
         self.pipeline_waiting(f"SEQUENCE STATUS · {text}")
 
     def _sequence_finished(self, success, message):
-        self.sequence_running = False
+        self.sequence_model.finish(success, message)
         text = (
             f"Sequence {'complete' if success else 'stopped/failed'} · "
             f"{message}"
@@ -15009,7 +15119,7 @@ class WeldActionGui:
                 self.keyboard_jog_status.set(
                     f"READY RIGHT · jog then press {expected_key} to capture"
                 )
-                self.four_pass_status.set(
+                self._set_four_pass_status(
                     f"Pass {number} correction · Keyboard Teaching READY · "
                     f"waiting for {expected_key} capture"
                 )
@@ -15035,7 +15145,7 @@ class WeldActionGui:
         self.keyboard_jog_status.set(f"VELOCITY MODE FAILED · {message}")
         if self.multi_pass_registration is not None:
             number = self.multi_pass_registration["pass"]
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {number} correction · automatic Keyboard Teaching enable "
                 "FAILED · use Enable Keyboard Teaching to retry"
             )
@@ -15282,7 +15392,7 @@ class WeldActionGui:
         registration = self.multi_pass_registration
         if not self.keyboard_jog_enabled.get():
             if registration is not None and key in ("i", "j"):
-                self.four_pass_status.set(
+                self._set_four_pass_status(
                     f"Pass {registration['pass']} correction · {key.upper()} received, "
                     "but Keyboard Teaching is not ready"
                 )
@@ -15294,7 +15404,7 @@ class WeldActionGui:
             return None
         if not self._keyboard_focus_allows_jog():
             if registration is not None and key in ("i", "j"):
-                self.four_pass_status.set(
+                self._set_four_pass_status(
                     f"Pass {registration['pass']} correction · {key.upper()} received, "
                     "but keyboard focus is in an input field"
                 )
@@ -15364,7 +15474,7 @@ class WeldActionGui:
         self.keyboard_teaching_capture_in_progress = True
         if registration is not None and key in ("i", "j"):
             endpoint = "START" if key == "i" else "GOAL"
-            self.four_pass_status.set(
+            self._set_four_pass_status(
                 f"Pass {registration['pass']} correction · {key.upper()} received · "
                 f"capturing {endpoint}..."
             )
@@ -16389,11 +16499,12 @@ class WeldActionGui:
 
     def _selected_teaching_pose_name(self):
         selected_label = self.teaching_pose_name.get()
-        return next(
+        name = next(
             name
             for name, label in TEACHING_POSES.items()
             if label == selected_label
         )
+        return self.teaching_state.select(name)
 
     def teaching_pose_changed(self, _event=None):
         pose_name = self._selected_teaching_pose_name()

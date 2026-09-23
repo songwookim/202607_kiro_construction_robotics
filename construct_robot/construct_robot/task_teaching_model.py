@@ -6,6 +6,53 @@ import tempfile
 import yaml
 
 
+class TeachingState:
+    """Named TCP/joint snapshots and provenance, independent of widgets."""
+
+    def __init__(self, names):
+        self.poses = {name: None for name in names}
+        self.provenance = {}
+        self.selected_name = next(iter(self.poses), None)
+
+    def select(self, name):
+        if name not in self.poses:
+            raise ValueError(f"Unknown teaching pose: {name}")
+        self.selected_name = name
+        return name
+
+    def store(self, name, snapshot, provenance=None):
+        if name not in self.poses:
+            raise ValueError(f"Unknown teaching pose: {name}")
+        self.poses[name] = snapshot
+        if provenance is None:
+            self.provenance.pop(name, None)
+        else:
+            self.provenance[name] = provenance
+
+
+class TaskOrderState:
+    """Ordered taught-pose names used by Task Teaching, without a Listbox."""
+
+    def __init__(self, names=()):
+        self.names = list(names)
+
+    def replace(self, names):
+        self.names = list(names)
+
+    def add(self, name):
+        self.names.append(name)
+
+    def move(self, index, direction):
+        target = index + direction
+        if not 0 <= target < len(self.names):
+            return None
+        self.names[index], self.names[target] = self.names[target], self.names[index]
+        return target
+
+    def remove(self, index):
+        return self.names.pop(index)
+
+
 def encode(value):
     """Serialize only data and explicitly supported ROS message types, never pickle."""
     if hasattr(value, "get_fields_and_field_types"):

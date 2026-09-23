@@ -14,6 +14,7 @@ from .task_teaching_model import (
     build_task_path_steps,
     decode,
     encode,
+    TaskOrderState,
     validate_task_group,
     validated_task_speed,
 )
@@ -30,6 +31,7 @@ class TaskTeachingPanel:
     def __init__(self, gui, parent, save_pose, load_pose):
         self.gui, self.save_pose, self.load_pose = gui, save_pose, load_pose
         self.busy = False
+        self.order_state = TaskOrderState()
         self.folder = tk.StringVar(value=str(teaching_config_dir() / "robot_tasks"))
         self.category = tk.StringVar(value="Left · Spray path")
         self.name = tk.StringVar(value="task_1")
@@ -107,6 +109,7 @@ class TaskTeachingPanel:
 
     def refresh(self):
         self.poses.configure(values=sorted(p.stem for p in (self.base() / "poses").glob("*.yaml")))
+        self.order_state.replace(())
         self.order.delete(0, tk.END)
         self.status.set(f"{TASK_GROUPS[self.category.get()]} · {self.base()}")
 
@@ -137,20 +140,24 @@ class TaskTeachingPanel:
         group, *_ = self.load_pose(self.base() / "poses" / f"{name}.yaml")
         if group != TASK_GROUPS[self.category.get()]:
             raise ValueError("Pose belongs to another arm")
+        self.order_state.add(name)
         self.order.insert(tk.END, name)
 
     def move(self, direction):
         selection = self.order.curselection()
         if selection and 0 <= selection[0] + direction < self.order.size():
             index = selection[0]
-            value = self.order.get(index)
+            value = self.order_state.names[index]
+            self.order_state.move(index, direction)
             self.order.delete(index)
             self.order.insert(index + direction, value)
             self.order.selection_set(index + direction)
 
     def remove(self):
         if self.order.curselection():
-            self.order.delete(self.order.curselection()[0])
+            index = self.order.curselection()[0]
+            self.order_state.remove(index)
+            self.order.delete(index)
 
     def replace_builder(self, steps):
         validate_task_group(steps, TASK_GROUPS[self.category.get()])
@@ -176,7 +183,8 @@ class TaskTeachingPanel:
 
     def build_path(self):
         speed = validated_task_speed(self.speed.get())
-        names = self.order.get(0, tk.END)
+        names = (tuple(self.order_state.names) if hasattr(self, "order_state")
+                 else self.order.get(0, tk.END))
         if not names:
             raise ValueError("Add taught poses to visit order")
         group = TASK_GROUPS[self.category.get()]
@@ -196,7 +204,7 @@ class TaskTeachingPanel:
         if path.exists() and not messagebox.askyesno("Replace task", f"Overwrite {path}?", parent=g.root):
             return
         atomic_yaml(path, {"schema": "robot_task_v1", "category": self.category.get(),
-                          "visit_order": list(self.order.get(0, tk.END)),
+                          "visit_order": list(self.order_state.names),
                           "steps": encode(g.sequence_steps)})
         self.status.set(f"Saved latest Builder values: {path}")
 
@@ -207,6 +215,8 @@ class TaskTeachingPanel:
             raise ValueError("Task schema/category mismatch")
         steps = decode(document["steps"])
         if self.replace_builder(steps):
+            names = [self.safe_name(name) for name in document.get("visit_order", [])]
+            self.order_state.replace(names)
             self.order.delete(0, tk.END)
-            for name in document.get("visit_order", []):
-                self.order.insert(tk.END, self.safe_name(name))
+            for name in names:
+                self.order.insert(tk.END, name)

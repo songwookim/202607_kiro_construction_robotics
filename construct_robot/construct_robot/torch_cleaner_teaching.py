@@ -1,8 +1,21 @@
 """Operator supplied right-arm joint teaching, ordered joint1..joint6, radians."""
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 
 import yaml
+
+
+@dataclass
+class CleanerTeachingState:
+    """Cleaner teaching folder, ordered tokens, and selected pose."""
+
+    folder: Path
+    tokens: list = field(default_factory=list)
+    selected: str = "start"
+
+    def set_order(self, tokens):
+        self.tokens = list(tokens)
 
 
 def cleaner_pose_path(folder, name):

@@ -1,6 +1,7 @@
 """Cumulative four-pass registration; no GUI or robot side effects."""
 import copy
 import math
+from dataclasses import dataclass, field
 
 from construct_robot.cartesian_path_common import pose_is_valid
 from construct_robot.seam_geometry import (
@@ -10,6 +11,27 @@ from construct_robot.seam_geometry import (
     _vector_dot,
     seam_direction,
 )
+
+
+@dataclass
+class MultiPassState:
+    """Current registration working set; source references are kept separate."""
+
+    references: dict = field(default_factory=dict)
+    loaded_folder: object = None
+    corrected: dict = field(default_factory=dict)
+    output_folder: object = None
+    history: list = field(default_factory=list)
+    registration: dict | None = None
+    selected_pass: int = 1
+    status: str = "idle"
+
+    def select(self, number):
+        number = int(number)
+        if number not in (1, 2, 3, 4):
+            raise ValueError("Select Pass 1, 2, 3, or 4")
+        self.selected_pass = number
+        return number
 
 
 def _minimal_direction_rotation(old_direction, new_direction, maximum_degrees=30.0):

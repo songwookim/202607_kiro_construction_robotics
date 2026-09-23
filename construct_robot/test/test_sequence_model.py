@@ -44,3 +44,20 @@ def test_validation_and_slot_assignment_remain_pure():
             {"type": "motion", "parallel_slot": 2},
             {"type": "digital_weld", "command": "on", "parallel_slot": 2},
         ])
+
+
+def test_selected_snapshot_and_execution_progress_are_not_widget_state():
+    model = SequenceModel([{"type": "sleep", "seconds": 1.0},
+                           {"type": "sleep", "seconds": 2.0}])
+    assert model.select(1) == 1
+    indices, steps = model.execution_snapshot(False)
+    assert indices == [1]
+    steps[0]["seconds"] = 99.0
+    assert model.steps[1]["seconds"] == 2.0
+    model.start(indices, True)
+    model.set_progress(4, 1, 3)
+    assert model.running and model.current_indices == (1,)
+    assert model.current_slot == 4 and model.group_progress == (1, 3)
+    model.finish(True, "done")
+    assert not model.running and model.status == "complete"
+    assert model.current_indices == ()
