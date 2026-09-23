@@ -174,6 +174,12 @@ class WeldConfigurationState:
                 if key in self.motion:
                     self.set_motion(key, value)
 
+    def replace(self, recipe, motion):
+        """Atomically replace an offline draft from current builder defaults."""
+        candidate = WeldConfigurationState(recipe, motion)
+        self.recipe = candidate.recipe
+        self.motion = candidate.motion
+
     def set_recipe(self, key, value):
         if key not in DEFAULT_DIGITAL_WELD_SETTINGS or key in ("voltage",):
             raise ValueError(f"Unsupported weld setting: {key}")

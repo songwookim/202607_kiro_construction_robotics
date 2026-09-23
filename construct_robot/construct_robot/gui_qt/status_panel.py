@@ -12,6 +12,8 @@ class StatusPanel(QWidget):
             ("left", "LEFT robot"), ("right", "RIGHT robot"),
             ("sequence", "Sequence"), ("selected", "Selected step"),
             ("current", "Current step"), ("progress", "Progress"),
+            ("active_motion", "Active motion"), ("welding", "Welding"),
+            ("runtime_error", "Last production error"),
             ("error", "Validation / error"),
         )):
             layout.addWidget(QLabel(title), row, 0)
@@ -38,6 +40,11 @@ class StatusPanel(QWidget):
         self.labels["current"].setText(", ".join(str(index + 1) for index in current) or "—")
         group, total = snapshot.get("progress", (0, 0))
         self.labels["progress"].setText(f"{group}/{total}" if total else "—")
+        active = snapshot.get("active_motion")
+        self.labels["active_motion"].setText(
+            "Unknown" if active is None else "Active" if active else "Idle")
+        self.labels["welding"].setText(str(snapshot.get("welding") or "Unknown"))
+        self.labels["runtime_error"].setText(str(snapshot.get("error") or "—"))
 
     def set_error(self, message):
         self.labels["error"].setText(message or "—")

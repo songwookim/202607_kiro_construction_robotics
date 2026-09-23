@@ -15682,6 +15682,8 @@ class WeldActionGui:
             self._set_pipeline_status("WAITING", text)
 
     def _set_pipeline_status(self, state, message):
+        if state == "ERROR":
+            self.latest_pipeline_error = str(message)
         colors = {
             "WAITING": ("#eeeeee", "#202124"),
             "ERROR": ("#fce8e6", "#b3261e"),
@@ -16414,6 +16416,10 @@ class WeldActionGui:
         )
         if not path:
             return
+        self.load_initial_state_from_path(path, pose_name)
+
+    def load_initial_state_from_path(self, path, pose_name):
+        """Apply a selected teaching YAML through the production invalidation path."""
         try:
             planning_group, joint_names, positions, tcp = (
                 load_initial_state_yaml(path)

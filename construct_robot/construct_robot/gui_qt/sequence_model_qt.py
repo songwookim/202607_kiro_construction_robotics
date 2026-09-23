@@ -75,32 +75,50 @@ class SequenceTableModel(QAbstractTableModel):
     def select_row(self, row):
         return self.state.select(row)
 
+    def _can_edit(self):
+        if self.state.running:
+            self.validation_error.emit("Finish the running sequence before editing Builder rows")
+            return False
+        return True
+
     def add_wait(self):
+        if not self._can_edit():
+            return None
         index = self.state.add({"type": "sleep", "seconds": 1.0,
                                 "parallel_slot": len(self.state.steps) + 1})
         self.state.select(index)
         return index
 
     def delete_selected(self):
+        if not self._can_edit():
+            return None
         index = self.state.selected_index
         if index is not None:
             self.state.delete(index)
 
     def delete_all(self):
+        if not self._can_edit():
+            return None
         self.state.clear()
 
     def duplicate_selected(self):
+        if not self._can_edit():
+            return None
         index = self.state.selected_index
         if index is not None:
             self.state.select(self.state.duplicate(index))
 
     def move_selected(self, offset):
+        if not self._can_edit():
+            return None
         index = self.state.selected_index
         if index is not None:
             return self.state.move(index, offset)
         return None
 
     def update_selected_field(self, key, value):
+        if not self._can_edit():
+            raise ValueError("Finish the running sequence before editing Builder rows")
         index = self.state.selected_index
         if index is None:
             raise ValueError("Select a sequence step")

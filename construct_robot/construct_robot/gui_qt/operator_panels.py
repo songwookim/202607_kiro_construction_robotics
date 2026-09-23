@@ -27,10 +27,13 @@ from construct_robot.torch_cleaner_teaching import (
 
 class TeachingPanel(QWidget):
     error = Signal(str)
+    capture_requested = Signal(str, str)
+    load_requested = Signal(str, str, str)
 
     def __init__(self, state, parent=None):
         super().__init__(parent)
         self.state = state
+        self.use_runtime_loader = False
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Named teaching snapshots · selection is offline; capture/motion requires production runtime"))
         self.table = QTableWidget(len(TEACHING_POSES), 4)
@@ -40,11 +43,20 @@ class TeachingPanel(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         layout.addWidget(self.table)
         self.table.itemSelectionChanged.connect(self._select)
+        group_row = QHBoxLayout()
+        group_row.addWidget(QLabel("Capture arm"))
+        self.planning_group = QComboBox()
+        self.planning_group.addItems(("right_manipulator", "left_manipulator"))
+        group_row.addWidget(self.planning_group)
+        group_row.addStretch()
+        layout.addLayout(group_row)
         self.load_button = QPushButton("Load selected pose YAML · no motion")
         self.load_button.clicked.connect(self._choose_file)
         layout.addWidget(self.load_button)
         self.capture_button = QPushButton("Capture current pose · runtime required")
         self.capture_button.setEnabled(False)
+        self.capture_button.clicked.connect(lambda: self.capture_requested.emit(
+            self.state.selected_name or "", self.planning_group.currentText()))
         layout.addWidget(self.capture_button)
         self.refresh()
 
@@ -60,6 +72,9 @@ class TeachingPanel(QWidget):
         name = self.state.selected_name
         if name not in TEACHING_POSES:
             raise ValueError("Select a named teaching pose")
+        if self.use_runtime_loader:
+            self.load_requested.emit(name, self.planning_group.currentText(), str(path))
+            return None
         snapshot = load_initial_state_yaml(path)
         self.state.store(name, snapshot, {"source": str(Path(path))})
         self.refresh()
@@ -95,11 +110,31 @@ class TeachingPanel(QWidget):
 
 class MultiPassPanel(QWidget):
     error = Signal(str)
+    references_requested = Signal(str)
+    begin_requested = Signal(int)
+    start_capture_requested = Signal()
+    goal_capture_requested = Signal()
+    load_requested = Signal(int)
+    stop_requested = Signal()
 
     def __init__(self, state, parent=None):
         super().__init__(parent)
         self.state = state
+        self.start_capture_available = False
+        self.goal_capture_available = False
+        self.load_available = False
+        self.stop_available = False
+        self.references_available = False
         layout = QVBoxLayout(self)
+        folder_row = QHBoxLayout()
+        self.folder_edit = QLineEdit()
+        folder_row.addWidget(self.folder_edit)
+        self.references_button = QPushButton("Load 4 references")
+        self.references_button.setEnabled(False)
+        self.references_button.clicked.connect(
+            lambda: self.references_requested.emit(self.folder_edit.text().strip()))
+        folder_row.addWidget(self.references_button)
+        layout.addLayout(folder_row)
         selector = QHBoxLayout()
         selector.addWidget(QLabel("Selected pass"))
         self.pass_combo = QComboBox()
@@ -122,7 +157,26 @@ class MultiPassPanel(QWidget):
             layout.addWidget(label)
         self.correct_button = QPushButton("Physical correction · production runtime required")
         self.correct_button.setEnabled(False)
+        self.correct_button.clicked.connect(lambda: self.begin_requested.emit(self.state.selected_pass))
         layout.addWidget(self.correct_button)
+        capture_row = QHBoxLayout()
+        self.start_capture_button = QPushButton("Capture START (I path)")
+        self.goal_capture_button = QPushButton("Capture GOAL (J path)")
+        for button, signal in ((self.start_capture_button, self.start_capture_requested),
+                               (self.goal_capture_button, self.goal_capture_requested)):
+            button.setEnabled(False)
+            button.clicked.connect(signal.emit)
+            capture_row.addWidget(button)
+        layout.addLayout(capture_row)
+        self.load_button = QPushButton("Load selected corrected pass · runtime required")
+        self.load_button.setEnabled(False)
+        self.load_button.clicked.connect(lambda: self.load_requested.emit(self.state.selected_pass))
+        layout.addWidget(self.load_button)
+        self.stop_button = QPushButton("STOP multi-pass correction")
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_requested.emit)
+        layout.addWidget(self.stop_button)
+        layout.addWidget(QLabel("I/J capture delegates to the existing Tk keyboard-teaching guards; the Tk host remains visible"))
         self.refresh()
 
     def _select(self, index):
@@ -135,6 +189,9 @@ class MultiPassPanel(QWidget):
 
     @Slot()
     def refresh(self):
+        self.references_button.setEnabled(self.references_available and not bool(self.state.registration))
+        if self.state.loaded_folder is not None and not self.folder_edit.text():
+            self.folder_edit.setText(str(self.state.loaded_folder))
         with QSignalBlocker(self.pass_combo):
             self.pass_combo.setCurrentIndex(self.state.selected_pass - 1)
         self.folder_label.setText(f"Reference folder: {self.state.loaded_folder or '—'} · Corrected folder: {self.state.output_folder or '—'}")
@@ -148,6 +205,14 @@ class MultiPassPanel(QWidget):
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(value))
         registration = self.state.registration or {}
+        phase = registration.get("phase")
+        self.start_capture_button.setEnabled(
+            self.start_capture_available and phase == "waiting_start_capture")
+        self.goal_capture_button.setEnabled(
+            self.goal_capture_available and phase == "waiting_goal_capture")
+        self.stop_button.setEnabled(self.stop_available and bool(registration))
+        self.load_button.setEnabled(
+            self.load_available and bool(self.state.corrected.get(self.state.selected_pass)))
         self.registration_label.setText(
             f"Registration: {registration.get('status', registration.get('phase', '—'))} · "
             f"START {'measured' if registration.get('measured_start') is not None else '—'} · "
@@ -177,6 +242,8 @@ class MultiPassPanel(QWidget):
 
 class WeldingPanel(QWidget):
     error = Signal(str)
+    apply_requested = Signal(object)
+    reload_requested = Signal()
 
     def __init__(self, state, parent=None):
         super().__init__(parent)
@@ -217,10 +284,19 @@ class WeldingPanel(QWidget):
         self._number(form, "Panel crater voltage ref [V]", "crater_panel_voltage_ref_v", 3, 80, 0.1)
         self._number(form, "Panel crater time ref [s]", "crater_panel_time_ref_s", 0, 30, 0.1)
         self._number(form, "Wire consumable allowance [mm]", "wire_consumable_alpha_mm", -1000, 1000, 1)
-        form.addRow(QLabel("Offline draft only · no Hi-COMM setpoint/ARC command is sent"))
+        form.addRow(QLabel("Editing never sends Hi-COMM setpoints or ARC commands"))
         scroll.setWidget(body)
         layout = QVBoxLayout(self)
         layout.addWidget(scroll)
+        self.apply_button = QPushButton("Apply to future production Builder defaults")
+        self.apply_button.setEnabled(False)
+        self.apply_button.clicked.connect(lambda: self.apply_requested.emit(self.state))
+        layout.addWidget(self.apply_button)
+        self.reload_button = QPushButton("Reload current production Builder defaults")
+        self.reload_button.setEnabled(False)
+        self.reload_button.clicked.connect(self.reload_requested.emit)
+        layout.addWidget(self.reload_button)
+        layout.addWidget(QLabel("Existing Sequence Builder rows keep their snapshotted settings; rebuild to apply changes"))
         self.refresh()
 
     def _number(self, form, label, key, minimum, maximum, step, motion=False, scale=1):
@@ -272,6 +348,8 @@ class WeldingPanel(QWidget):
 
 class TorchCleanerPanel(QWidget):
     error = Signal(str)
+    plan_requested = Signal()
+    execute_requested = Signal()
 
     def __init__(self, state: CleanerTeachingState, sequence_state: SequenceModel,
                  load_pose=None, parent=None):
@@ -302,7 +380,16 @@ class TorchCleanerPanel(QWidget):
         self.build_button = QPushButton("Build → Sequence Builder")
         self.build_button.clicked.connect(self._build_clicked)
         layout.addWidget(self.build_button)
-        layout.addWidget(QLabel("DO5/6/7 and motion execution are not connected in this Qt migration slice"))
+        actions = QHBoxLayout()
+        self.plan_button = QPushButton("Plan cleaner rows")
+        self.execute_button = QPushButton("Execute cleaner rows")
+        for button, signal in ((self.plan_button, self.plan_requested),
+                               (self.execute_button, self.execute_requested)):
+            button.setEnabled(False)
+            button.clicked.connect(signal.emit)
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        layout.addWidget(QLabel("DO5/6/7 execute only through the existing production Sequence runner; no direct output controls"))
         self.refresh()
 
     def _folder_changed(self):
@@ -364,6 +451,8 @@ class TorchCleanerPanel(QWidget):
 
 class TaskLibraryPanel(QWidget):
     error = Signal(str)
+    plan_requested = Signal()
+    execute_requested = Signal()
 
     def __init__(self, sequence_state: SequenceModel, order_state=None,
                  folder=None, load_pose=None, parent=None):
@@ -417,6 +506,15 @@ class TaskLibraryPanel(QWidget):
         self.save_button.clicked.connect(self._save_clicked)
         actions.addWidget(self.save_button)
         layout.addLayout(actions)
+        execution = QHBoxLayout()
+        self.plan_button = QPushButton("Plan Builder")
+        self.execute_button = QPushButton("Execute Builder")
+        for button, signal in ((self.plan_button, self.plan_requested),
+                               (self.execute_button, self.execute_requested)):
+            button.setEnabled(False)
+            button.clicked.connect(signal.emit)
+            execution.addWidget(button)
+        layout.addLayout(execution)
         self.status = QLabel("Loading/saving never moves a robot")
         layout.addWidget(self.status)
         self.refresh()
