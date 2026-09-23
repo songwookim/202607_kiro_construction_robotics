@@ -7,6 +7,7 @@ from construct_robot.weld_action_gui import WeldActionGui
 def test_sequence_failure_keeps_touch_output_unchanged():
     gui = object.__new__(WeldActionGui)
     gui.sequence_stop_requested = False
+    gui.fake_arc_enabled = SimpleNamespace(get=lambda: False)
     gui.post = Mock()
     gui._set_sequence_status = Mock()
     gui._sequence_finished = Mock()

@@ -83,9 +83,9 @@ FASTECH_GUI_CHANNELS = {
     0: "Touch sensing",
     3: "test 1",
     4: "test 2",
-    5: "Torch cleaner 1",
+    5: "Torch cleaner 3",
     6: "Torch cleaner 2",
-    7: "Torch cleaner 3",
+    7: "Torch cleaner 1",
 }
 FASTECH_TOUCH_INPUT_PORT = 4
 FASTECH_TOUCH_OUTPUT_PORT = 0
@@ -223,6 +223,7 @@ DEFAULT_DIGITAL_WELD_SETTINGS = {
     "hot_start_hold_adjustment": 0,
     "custom_hot_start_enabled": True,
     "custom_hot_start_hold_s": 0.15,
+    "custom_hot_start_percent": 20.0,
     "expect_native_crater": True,
     # The shared Hi-COMM TX table has no crater setpoint fields. These two
     # values mirror the welder-panel test recipe and are logged as references.
@@ -288,7 +289,7 @@ def validate_digital_weld_settings(settings):
     for key in (
         "correction",
         "hot_start_percent", "hot_start_hold_adjustment",
-        "custom_hot_start_hold_s",
+        "custom_hot_start_hold_s", "custom_hot_start_percent",
         "crater_panel_time_ref_s",
         "crater_panel_current_ref_a", "crater_panel_voltage_ref_v",
         "software_crater_ratio_percent", "software_crater_voltage_v",
@@ -298,6 +299,11 @@ def validate_digital_weld_settings(settings):
         normalized[key] = float(normalized[key])
     normalized["hot_start_enabled"] = bool(normalized["hot_start_enabled"])
     normalized["custom_hot_start_enabled"] = bool(normalized["custom_hot_start_enabled"])
+    boost = normalized["custom_hot_start_percent"]
+    if not math.isfinite(boost) or not 0 <= boost <= 100:
+        raise ValueError("Custom hot start boost must be in 0..100 percent")
+    if normalized["custom_hot_start_enabled"] and not 30 <= round(normalized["current_a"] * (1 + boost / 100)) <= 400:
+        raise ValueError("Custom hot start boosted current must be in 30..400 A")
     if not 0.01 <= normalized["custom_hot_start_hold_s"] <= 5.0:
         raise ValueError("custom hot start hold must be in 0.01..5.0 seconds")
     normalized["expect_native_crater"] = bool(normalized["expect_native_crater"])
@@ -2364,6 +2370,7 @@ def read_last_execution_settings(path):
         ("hot_start_percent", float),
         ("hot_start_hold_adjustment", lambda v: int(round(float(v)))),
         ("custom_hot_start_hold_s", float),
+        ("custom_hot_start_percent", float),
         ("crater_panel_current_ref_a", float),
         ("crater_panel_voltage_ref_v", float),
         ("crater_panel_time_ref_s", float),
@@ -2510,12 +2517,25 @@ def read_weld_pass_reference(path):
     if math.dist(_pose_position_tuple(poses["start"]),
                  _pose_position_tuple(poses["goal"])) < 0.001:
         raise ValueError(f"{path.name} seam is shorter than 1 mm")
+    additional_pose_entries = {}
+    for name in ("robot_start", "weld_wait", "weld_finish"):
+        entry = teaching.get(name)
+        if (
+            isinstance(entry, dict)
+            and entry.get("planning_group") == "right_manipulator"
+        ):
+            try:
+                _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
+            except (TypeError, ValueError):
+                continue
+            additional_pose_entries[name] = copy.deepcopy(entry)
     return {
         "path": str(path.resolve()),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "reference_kind": "completed_weld_log",
         **poses,
         "joint_states": joint_states,
+        "additional_pose_entries": additional_pose_entries,
     }
 
 
@@ -2556,12 +2576,28 @@ def read_pass_teaching_reference(path, expected_pass):
         _pose_position_tuple(poses["goal"]),
     ) < 0.001:
         raise ValueError(f"{path.name} seam is shorter than 1 mm")
+    additional_pose_entries = {
+        pose_name: copy.deepcopy(entries[pose_name])
+        for pose_name in ("robot_start", "weld_wait", "weld_finish")
+        if pose_name in entries
+    }
     return {
         "path": str(path.resolve()),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "reference_kind": "saved_pass_teaching",
+        "source_reference": document.get("source_reference"),
+        "source_reference_sha256": document.get("source_reference_sha256"),
+        "source_log": document.get("source_log"),
+        "source_log_sha256": document.get("source_log_sha256"),
+        "requires_ik": bool(document.get("requires_ik", False)),
+        "correction_history": copy.deepcopy(
+            document.get("correction_history", [])
+            if isinstance(document.get("correction_history", []), list)
+            else []
+        ),
         **poses,
         "joint_states": joint_states,
+        "additional_pose_entries": additional_pose_entries,
     }
 
 
@@ -2664,7 +2700,11 @@ def correct_remaining_passes(
     measured_start_xyz = _pose_position_tuple(measured_start)
     measured_goal_xyz = _pose_position_tuple(measured_goal)
 
-    for number in range(anchor_pass, 5):
+    # The selected pass is directly taught, not transformed. Preserve its
+    # WAIT poses and use the captured TCP positions AND orientations exactly.
+    corrected[anchor_pass]["start"] = copy.deepcopy(measured_start)
+    corrected[anchor_pass]["goal"] = copy.deepcopy(measured_goal)
+    for number in range(anchor_pass + 1, 5):
         for endpoint, old_anchor_xyz, new_anchor_xyz in (
             ("start_wait", old_start_xyz, measured_start_xyz),
             ("start", old_start_xyz, measured_start_xyz),
@@ -4985,6 +5025,12 @@ class WeldGuiNode(Node):
 
     def set_keyboard_velocity_controller_enabled(self, arm, enable):
         """Atomically exchange JTC and the native Cartesian-speed owner."""
+        if not enable:
+            self.clear_keyboard_velocity()
+            # A fixed 100 ms delay does not prove braking has finished.
+            # JTC must sample a stationary measured pose when taking ownership.
+            if not self.wait_until_arm_stopped(arm, timeout=3.0):
+                return False, "Keyboard exit blocked: measured joints have not stopped"
         trajectory_controller = CONTROLLER_NAMES[arm]
         velocity_controller = KEYBOARD_VELOCITY_CONTROLLER_NAMES[arm]
         activate = velocity_controller if enable else trajectory_controller
@@ -6147,7 +6193,11 @@ class WeldActionGui:
         expanded=False,
     ):
         container = ttk.Frame(parent)
-        container.pack(fill=tk.X, pady=2)
+        # Keep backing widgets alive for shared callbacks, but retire these
+        # panels from the operator UI.
+        visible = key not in {"path_test", "planned_path", "digital_io"}
+        if visible:
+            container.pack(fill=tk.X, pady=2)
         section_styles = (
             "SectionBlue.TButton",
             "SectionGreen.TButton",
@@ -6165,7 +6215,11 @@ class WeldActionGui:
             "body": body,
             "button": button,
             "title": title,
-            "number": len(self.motion_sections) + 1,
+            "number": 1 + sum(
+                section.get("visible", True)
+                for section in self.motion_sections.values()
+            ),
+            "visible": visible,
             "expanded": bool(expanded),
         }
         if expanded:
@@ -6328,7 +6382,6 @@ class WeldActionGui:
         self.straight_start_z = tk.DoubleVar(value=0.0)
         self.straight_distance_mm = tk.DoubleVar(value=150.0)
         self.straight_count = tk.IntVar(value=5)
-        self.tcp_line_count = tk.IntVar(value=10)
         self.tcp_line_direction = tk.StringVar(value="TCP 1 → TCP 2")
         self.straight_roll_deg = tk.DoubleVar(value=0.0)
         self.straight_pitch_deg = tk.DoubleVar(value=0.0)
@@ -6546,6 +6599,9 @@ class WeldActionGui:
         )
         self.weld_custom_hot_start_hold_s = tk.DoubleVar(
             value=weld_defaults["custom_hot_start_hold_s"]
+        )
+        self.weld_custom_hot_start_percent = tk.DoubleVar(
+            value=weld_defaults["custom_hot_start_percent"]
         )
         self.weld_expect_native_crater = tk.BooleanVar(
             value=weld_defaults["expect_native_crater"]
@@ -7015,16 +7071,6 @@ class WeldActionGui:
         feedback_tools.pack(fill=tk.X, pady=2)
         ttk.Button(
             feedback_tools,
-            text="Open latest .log",
-            command=self.open_latest_weld_feedback_log,
-        ).pack(side=tk.LEFT, padx=5, pady=3)
-        ttk.Button(
-            feedback_tools,
-            text="Plot latest current / voltage",
-            command=self.plot_latest_weld_feedback,
-        ).pack(side=tk.LEFT, padx=5, pady=3)
-        ttk.Button(
-            feedback_tools,
             text="Suggest ARC OFF lead from log",
             command=self.apply_arc_off_lead_from_log,
         ).pack(side=tk.LEFT, padx=5, pady=3)
@@ -7103,11 +7149,6 @@ class WeldActionGui:
         self.hicomm_all_off_button.pack(side=tk.LEFT, padx=8)
         self.hicomm_test_status = ttk.Label(wire_test, text="test locked")
         self.hicomm_test_status.pack(side=tk.LEFT, padx=8)
-        ttk.Button(
-            wire_test,
-            text="Reset inch length",
-            command=self.reset_inching_distance,
-        ).pack(side=tk.LEFT, padx=4)
 
         digital = ttk.LabelFrame(
             welder_test, text="ARC SET / ARC ON / ARC OFF"
@@ -7197,7 +7238,7 @@ class WeldActionGui:
             textvariable=self.weld_hot_start_hold_adjustment, width=5,
         ).grid(row=2, column=8, padx=(1, 3))
         ttk.Checkbutton(
-            digital, text="Custom Hot Start (Motion Hold)",
+            digital, text="Custom Hot Start (Current boost + Hold)",
             variable=self.weld_custom_hot_start_enabled,
         ).grid(row=3, column=0, padx=(3, 2), pady=3, sticky=tk.W)
         ttk.Label(digital, text="Hold Time s").grid(row=3, column=1, padx=(2, 1))
@@ -7205,6 +7246,11 @@ class WeldActionGui:
             digital, from_=0.01, to=5.0, increment=0.05,
             textvariable=self.weld_custom_hot_start_hold_s, width=5,
         ).grid(row=3, column=2, padx=(1, 3))
+        ttk.Label(digital, text="Custom boost %").grid(row=3, column=3)
+        ttk.Spinbox(
+            digital, from_=0, to=100, increment=1,
+            textvariable=self.weld_custom_hot_start_percent, width=5,
+        ).grid(row=3, column=4)
         ttk.Checkbutton(
             digital, text="Observe panel native crater (RX only)", variable=self.weld_expect_native_crater
         ).grid(row=4, column=0, padx=(3, 2), pady=3, sticky=tk.W)
@@ -7249,101 +7295,6 @@ class WeldActionGui:
         self.hicomm_rx_bit_status.grid(
             row=7, column=0, columnspan=9, padx=8, pady=3, sticky=tk.W
         )
-
-        tcp_teaching = self._create_toggle_section(
-            outer, "tcp_teaching", "TCP Teaching · Seam Reference", expanded=True
-        )
-
-        reference_row = ttk.Frame(tcp_teaching)
-        reference_row.pack(fill=tk.X, pady=2)
-        ttk.Label(
-            reference_row,
-            text="Reference seam",
-            font=("Sans", 10, "bold"),
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(
-            reference_row,
-            text="Teach TCP 1 / START",
-            command=lambda: self.capture_linear_tcp(0),
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        self.tcp_1_status = ttk.Label(reference_row, text="not saved")
-        self.tcp_1_status.pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Button(
-            reference_row,
-            text="Teach TCP 2 / GOAL",
-            command=lambda: self.capture_linear_tcp(1),
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        self.tcp_2_status = ttk.Label(reference_row, text="not saved")
-        self.tcp_2_status.pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Button(
-            reference_row,
-            text="Load reference YAML",
-            command=self.load_seam_reference,
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(reference_row, text="preview points").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            reference_row,
-            from_=2,
-            to=200,
-            increment=1,
-            textvariable=self.tcp_line_count,
-            width=5,
-        ).pack(side=tk.LEFT, padx=(3, 5))
-        self.generate_tcp_line_button = ttk.Button(
-            reference_row,
-            text="Preview reference line",
-            command=self.acquire_two_tcp,
-            state=tk.DISABLED,
-        )
-        self.generate_tcp_line_button.pack(side=tk.LEFT)
-
-        reference_status = ttk.Frame(tcp_teaching)
-        reference_status.pack(fill=tk.X, pady=(0, 3))
-        for variable in (
-            self.reference_yaw_status,
-            self.reference_length_status,
-            self.sensed_yaw_status,
-            self.delta_yaw_status,
-        ):
-            ttk.Label(reference_status, textvariable=variable).pack(
-                side=tk.LEFT, padx=(0, 16)
-            )
-        ttk.Label(
-            reference_status,
-            text="TCP 1/2 are the immutable nominal seam reference used for yaw correction.",
-        ).pack(side=tk.LEFT, padx=(4, 0))
-
-        auxiliary_row = ttk.Frame(tcp_teaching)
-        auxiliary_row.pack(fill=tk.X, pady=(2, 2))
-        ttk.Label(
-            auxiliary_row,
-            text="Auxiliary poses",
-            font=("Sans", 10, "bold"),
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        for text, pose_name in (
-            ("Teach Weld WAIT", "weld_wait"),
-            ("Teach START WAIT", "weld_start_wait"),
-            ("Teach GOAL WAIT", "weld_goal_wait"),
-            ("Teach Weld END", "weld_finish"),
-        ):
-            ttk.Button(
-                auxiliary_row,
-                text=text,
-                command=lambda name=pose_name: self.quick_capture_teaching_pose(name),
-            ).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(
-            auxiliary_row, textvariable=self.quick_teaching_status
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
-        ttk.Label(
-            tcp_teaching,
-            text=(
-                "Seam correction reference: legacy modes use TCP 1 + TCP 2; "
-                "Wait + fixed-tilt mode derives the seam from START/GOAL WAIT. "
-                "Corrected START/GOAL are generated automatically; Weld END is "
-                "required for the final return move."
-            ),
-        ).pack(anchor=tk.W, pady=(0, 2))
 
         teaching = ttk.LabelFrame(outer, text="Teaching Detail · Plan / Execute / YAML")
         teaching.pack(fill=tk.X, pady=(7, 0))
@@ -7766,8 +7717,8 @@ class WeldActionGui:
         ttk.Label(
             four_pass,
             text=(
-                "Browse the work folder: pass_teaching/pass_N_teaching.yaml "
-                "overrides N.log for each pass"
+                "Browse the work folder: pass_N.yaml overrides N.log "
+                "for each pass"
             ),
         ).pack(anchor=tk.W, padx=3, pady=(0, 2))
         pass_probe_row = ttk.Frame(four_pass)
@@ -7786,20 +7737,12 @@ class WeldActionGui:
             command=self.save_teaching_to_selected_pass,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            pass_probe_row, text="Load Saved Teaching",
-            command=self.load_saved_teaching_for_selected_pass,
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
             pass_probe_row, text="Multi-pass Seam Correction",
             command=self.run_four_pass_correction,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Button(
-            pass_probe_row, text="Go Corrected START",
-            command=lambda: self.go_to_corrected_pass_endpoint("start"),
-        ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            pass_probe_row, text="Go Corrected GOAL",
-            command=lambda: self.go_to_corrected_pass_endpoint("goal"),
+            pass_probe_row, text="STOP MULTI-PASS (ALL MOTION)",
+            command=self.stop_multi_pass_correction,
         ).pack(side=tk.LEFT, padx=3)
         ttk.Label(four_pass, textvariable=self.four_pass_status).pack(
             anchor=tk.W, padx=3
@@ -7810,7 +7753,7 @@ class WeldActionGui:
                 "Each N.log supplies that pass's START WAIT, START, GOAL WAIT and GOAL. "
                 "Select Pass N, move from its corrected START WAIT, jog to the real START "
                 "and press I; then use its corrected GOAL WAIT, jog to GOAL and press J. "
-                "All four poses for N..4 are corrected cumulatively. No welding starts."
+                "Selected pass: captured TCP1/2, WAIT unchanged. Transform only N+1..4. No welding starts."
             ),
             foreground="#b3261e",
         ).pack(anchor=tk.W, padx=3)
@@ -7862,11 +7805,6 @@ class WeldActionGui:
             text="RViz touches",
             command=self.show_touch_geometry_in_rviz,
         ).pack(side=tk.LEFT, padx=3)
-        ttk.Button(
-            manual_visual_actions,
-            text="PyPlot touches",
-            command=self.show_touch_geometry_pyplot,
-        ).pack(side=tk.LEFT, padx=3)
         self.corner_touch_status = ttk.Label(
             touch_corner,
             text=(
@@ -7875,6 +7813,14 @@ class WeldActionGui:
             ),
         )
         self.corner_touch_status.pack(anchor=tk.W, pady=(3, 0))
+
+        from .task_teaching_panel import TaskTeachingPanel
+        tasks = self._create_toggle_section(
+            outer, "task_library", "Task Library · Both arms / Teaching / YAML", expanded=False
+        )
+        self.task_teaching_panel = TaskTeachingPanel(
+            self, tasks, save_initial_state_yaml, load_initial_state_yaml
+        )
 
         sequence = self._create_toggle_section(
             outer, "sequence", "Sequence Builder", expanded=False
@@ -8220,6 +8166,14 @@ class WeldActionGui:
             on_button.grid(row=row, column=4, padx=3, pady=3)
             off_button.grid(row=row, column=5, padx=3, pady=3)
             self.fastech_output_buttons.extend((on_button, off_button))
+
+        from .torch_cleaner_panel import TorchCleanerPanel
+        cleaner = self._create_toggle_section(
+            outer, "torch_cleaner", "Torch Cleaner · Teaching / Confirm each step"
+        )
+        self.torch_cleaner_panel = TorchCleanerPanel(
+            self, cleaner, save_initial_state_yaml, load_initial_state_yaml
+        )
 
         io_monitor = self._create_toggle_section(
             outer,
@@ -8768,6 +8722,11 @@ class WeldActionGui:
         return touches
 
     def _begin_weld_feedback_record(self, settings, execution_conditions=None):
+        with self.weld_feedback_lock:
+            if getattr(self, "_weld_feedback_stopped", False):
+                return
+            if self.active_weld_feedback_session is not None:
+                return
         conditions = copy.deepcopy(
             execution_conditions or {"mode": "manual_arc"}
         )
@@ -8781,6 +8740,8 @@ class WeldActionGui:
             for step in conditions.get("steps", ())
         )
         with self.weld_feedback_lock:
+            if getattr(self, "_weld_feedback_stopped", False):
+                return
             if self.active_weld_feedback_session is not None:
                 return
             self.active_weld_feedback_session = {
@@ -9111,34 +9072,7 @@ class WeldActionGui:
     def _latest_weld_feedback_path(self):
         return self._weld_feedback_directory() / "latest_weld_feedback.log"
 
-    def open_latest_weld_feedback_log(self):
-        path = self._latest_weld_feedback_path()
-        if not path.is_file():
-            self.error(f"No weld feedback log yet: {path}")
-            return
-        try:
-            subprocess.Popen(("xdg-open", str(path)))
-        except OSError as error:
-            self.error(f"Cannot open weld feedback log: {error}")
 
-    def plot_latest_weld_feedback(self):
-        path = self._latest_weld_feedback_path()
-        if not path.is_file():
-            self.error(f"No weld feedback log yet: {path}")
-            return
-        workspace_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
-        python = str(workspace_python if workspace_python.is_file() else sys.executable)
-        try:
-            subprocess.Popen((
-                python,
-                "-m",
-                "construct_robot.weld_feedback_plot",
-                str(path),
-            ))
-        except OSError as error:
-            self.error(f"Cannot launch weld feedback plot: {error}")
-            return
-        self.log(f"Weld feedback plot requested · {path}")
 
     def apply_arc_off_lead_from_log(self):
         """Show the log-measured ARC extinction delay and apply it on confirm."""
@@ -9679,13 +9613,6 @@ class WeldActionGui:
                 self.inching_reverse_mm,
             )
 
-    def reset_inching_distance(self):
-        with self.inching_distance_lock:
-            self.inching_total_mm = 0.0
-            self.inching_forward_mm = 0.0
-            self.inching_reverse_mm = 0.0
-            self.inching_last_status_time = None
-        self.log("Hi-COMM estimated inching length reset to 0 mm")
 
     def fake_arc_changed(self):
         enabled = self.fake_arc_enabled.get()
@@ -9753,6 +9680,8 @@ class WeldActionGui:
             return
         if enabled:
             self.hicomm_client.allow_outputs()
+            with self.weld_feedback_lock:
+                self._weld_feedback_stopped = False
         execution_conditions = (
             {
                 "mode": "manual_arc_button",
@@ -9801,6 +9730,7 @@ class WeldActionGui:
                 ),
                 "custom_hot_start_enabled": self.weld_custom_hot_start_enabled.get(),
                 "custom_hot_start_hold_s": self.weld_custom_hot_start_hold_s.get(),
+                "custom_hot_start_percent": self.weld_custom_hot_start_percent.get(),
                 "expect_native_crater": self.weld_expect_native_crater.get(),
                 "crater_panel_current_ref_a": self.weld_crater_panel_current_ref_a.get(),
                 "crater_panel_voltage_ref_v": self.weld_crater_panel_voltage_ref_v.get(),
@@ -9854,7 +9784,7 @@ class WeldActionGui:
         settings = validate_digital_weld_settings(step["settings"])
         hold_s = settings["custom_hot_start_hold_s"]
         client = self.hicomm_client
-        fake = bool(self.fake_arc_enabled.get())
+        fake = WeldActionGui._execution_fake_arc(self)
         if not self.weld_arc_established_event.is_set() or not self.weld_arc_on_success:
             self._custom_hot_start_record(status="ARC_NOT_ESTABLISHED")
             return False, "Custom Hot Start blocked: ARC was not established"
@@ -9865,7 +9795,30 @@ class WeldActionGui:
         started = None
         max_drift_mm = 0.0
         end_xyz = None
+        boosted = False
+        target_current = round(settings["current_a"] * (1 + settings["custom_hot_start_percent"] / 100))
         try:
+            if self.sequence_stop_requested:
+                raise RuntimeError("sequence stopped before Custom Hot Start")
+            if not fake:
+                boosted = True
+                client.update_setpoints(target_current, settings["voltage_tenths"])
+                self._custom_hot_start_record(
+                    requested_boost_percent=settings["custom_hot_start_percent"],
+                    target_current_a=target_current, main_current_a=settings["current_a"],
+                    target_voltage_v=settings["voltage_tenths"] / 10.0,
+                    setpoint_tx="SENT",
+                )
+                deadline = time.monotonic() + 2.0
+                while True:
+                    if self.sequence_stop_requested or not client.comm_alive():
+                        raise RuntimeError("Custom boost confirmation interrupted")
+                    status = client.latest_status() or {}
+                    if status.get("arc_established") and abs(float(status.get("feedback_current_a", 0)) - target_current) <= max(10, target_current * 0.10):
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Custom boost feedback did not reach target within 2 s")
+                    time.sleep(0.02)
             reference = self.node._current_tcp_pose(step["planning_group"])
             start_xyz = _pose_position_tuple(reference)
             expected = step.get("expected_start_tcp")
@@ -9914,6 +9867,10 @@ class WeldActionGui:
                     break
                 time.sleep(min(0.02, remaining))
             end = time.monotonic()
+            if not fake:
+                client.update_setpoints(settings["current_a"], settings["voltage_tenths"])
+                boosted = False
+                self._custom_hot_start_record(main_restored=True)
             self._custom_hot_start_record(
                 hold_end_elapsed_s=end - started if started is not None else None,
                 actual_hold_s=end - begin,
@@ -9924,6 +9881,14 @@ class WeldActionGui:
             self.post(self.log, f"CUSTOM HOT START END · actual={end - begin:.3f} s · TCP drift={max_drift_mm:.3f} mm")
             return True, f"Custom Hot Start completed · hold={end - begin:.3f} s · drift={max_drift_mm:.3f} mm"
         except Exception as error:
+            if not fake and client is not None:
+                client.inhibit_outputs()
+                if boosted:
+                    try:
+                        client.update_setpoints(settings["current_a"], settings["voltage_tenths"])
+                        self._custom_hot_start_record(main_restored=True)
+                    except Exception as restore_error:
+                        self._custom_hot_start_record(restore_error=str(restore_error))
             partial = {"status": "ABORTED", "failure": str(error),
                        "max_tcp_drift_mm": max_drift_mm}
             if begin is not None:
@@ -9945,7 +9910,7 @@ class WeldActionGui:
     def _execute_software_crater(self, step):
         """Hold at the measured endpoint with reduced ARC-ON setpoints."""
         settings = validate_digital_weld_settings(step["settings"])
-        if self.fake_arc_enabled.get():
+        if WeldActionGui._execution_fake_arc(self):
             return True, "FAKE software_crater · no setpoint or ARC command sent"
         client = self.hicomm_client
         target = round(settings["current_a"] * settings["software_crater_ratio_percent"] / 100.0)
@@ -10054,7 +10019,7 @@ class WeldActionGui:
         self, kind, settings, execution_conditions=None, *, finalize_feedback=True,
         apply_crater=True,
     ):
-        if self.fake_arc_enabled.get():
+        if WeldActionGui._execution_fake_arc(self):
             return self._execute_fake_arc(kind)
         client = self.hicomm_client
         if client is None or not client.connected:
@@ -10202,7 +10167,7 @@ class WeldActionGui:
 
     def _execute_triggered_arc_off(self, step):
         """Turn ARC off before GOAL without breaking the continuous TCP motion."""
-        if self.fake_arc_enabled.get():
+        if WeldActionGui._execution_fake_arc(self):
             # Dry runs finish at motion completion; no geometric pre-OFF or
             # welder-feedback timing is needed. Call the fake handler directly
             # so changing the checkbox cannot send a real OFF from this branch.
@@ -10481,15 +10446,12 @@ class WeldActionGui:
                 raise ValueError(f"4-pass work folder does not exist: {folder}")
 
             # Feedback logs are immutable execution evidence.  Editable pass
-            # teaching is stored as YAML beside them.  Let operators browse
-            # either the work root or pass_teaching itself, and resolve each
-            # pass independently so a newly taught pass can coexist with log
-            # fallbacks for the other passes.
+            # teaching is stored directly in the browsed folder as
+            # pass_N.yaml.  The former pass_teaching/pass_N_teaching.yaml
+            # layout remains read-only compatible during migration.
             if folder.name == "pass_teaching":
-                teaching_folder = folder
                 log_folder = folder.parent
             else:
-                teaching_folder = folder / "pass_teaching"
                 log_folder = folder
 
             references = {}
@@ -10497,13 +10459,23 @@ class WeldActionGui:
             log_count = 0
             missing = []
             for number in range(1, 5):
-                teaching_path = (
-                    teaching_folder / f"pass_{number}_teaching.yaml"
+                teaching_path = folder / f"pass_{number}.yaml"
+                legacy_paths = (
+                    folder / f"pass_{number}_teaching.yaml",
+                    folder / "pass_teaching" / f"pass_{number}_teaching.yaml",
                 )
                 log_path = log_folder / f"{number}.log"
                 if teaching_path.is_file():
                     references[number] = read_pass_teaching_reference(
                         teaching_path, number
+                    )
+                    yaml_count += 1
+                elif any(path.is_file() for path in legacy_paths):
+                    legacy_path = next(
+                        path for path in legacy_paths if path.is_file()
+                    )
+                    references[number] = read_pass_teaching_reference(
+                        legacy_path, number
                     )
                     yaml_count += 1
                 elif log_path.is_file():
@@ -10546,7 +10518,13 @@ class WeldActionGui:
         )
         if restored is None:
             self.four_pass_output_folder = None
-            self.four_pass_history = []
+            histories = [
+                reference.get("correction_history", [])
+                for reference in references.values()
+            ]
+            self.four_pass_history = copy.deepcopy(
+                max(histories, key=len, default=[])
+            )
         else:
             (
                 self.four_pass_corrected,
@@ -10579,8 +10557,23 @@ class WeldActionGui:
 
     def _load_latest_sequential_four_pass_state(self, folder, references):
         """Restore the newest valid cumulative correction for these source logs."""
+        # Canonical pass YAMLs already contain the current corrected/manual
+        # teaching. Source ancestry hashes are not evidence that an older
+        # manifest should overwrite those newly saved poses.
+        if any(
+            reference.get("reference_kind") == "saved_pass_teaching"
+            for reference in references.values()
+        ):
+            return None
         candidates = sorted(
-            folder.glob("sequential_corrected_*/manifest.yaml"),
+            [
+                path
+                for path in (
+                    folder / "manifest.yaml",
+                    *folder.glob("sequential_corrected_*/manifest.yaml"),
+                )
+                if path.is_file()
+            ],
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
@@ -10608,7 +10601,15 @@ class WeldActionGui:
                             encoding="utf-8"
                         )
                     ) or {}
-                    if record.get("source_log_sha256") != references[number]["sha256"]:
+                    accepted_hashes = {references[number]["sha256"]}
+                    for key in ("source_reference_sha256", "source_log_sha256"):
+                        source_hash = references[number].get(key)
+                        if source_hash:
+                            accepted_hashes.add(source_hash)
+                    record_source_hash = record.get("source_log_sha256") or record.get(
+                        "source_reference_sha256"
+                    )
+                    if record_source_hash not in accepted_hashes:
                         raise ValueError(
                             f"Pass {number} source hash no longer matches"
                         )
@@ -10617,18 +10618,35 @@ class WeldActionGui:
                 if not isinstance(history, list):
                     raise ValueError("manifest history is not a list")
                 if schema.endswith("_v3"):
-                    corrected = {
-                        number: {
-                            endpoint: _pose_from_yaml_dict(
-                                records[number][f"current_{endpoint}"],
-                                f"Pass {number} current {endpoint}",
-                            )
-                            for endpoint in (
-                                "start_wait", "start", "goal_wait", "goal"
-                            )
-                        }
+                    if all(
+                        f"current_{endpoint}" in records[number]
                         for number in range(1, 5)
-                    }
+                        for endpoint in ("start_wait", "start", "goal_wait", "goal")
+                    ):
+                        corrected = {
+                            number: {
+                                endpoint: _pose_from_yaml_dict(
+                                    records[number][f"current_{endpoint}"],
+                                    f"Pass {number} current {endpoint}",
+                                )
+                                for endpoint in (
+                                    "start_wait", "start", "goal_wait", "goal"
+                                )
+                            }
+                            for number in range(1, 5)
+                        }
+                    else:
+                        corrected = {
+                            number: {
+                                endpoint: read_pass_teaching_reference(
+                                    manifest_path.parent / entries[number], number
+                                )[endpoint]
+                                for endpoint in (
+                                    "start_wait", "start", "goal_wait", "goal"
+                                )
+                            }
+                            for number in range(1, 5)
+                        }
                 else:
                     # v2 stored corrected START/GOAL only. Replay its measured
                     # anchor events on today's full log references so the
@@ -10694,6 +10712,16 @@ class WeldActionGui:
                 endpoint: self._multi_pass_translated_wait(number, endpoint)
                 for endpoint in ("start", "goal")
             }
+            end_entry = self.four_pass_references[number].get(
+                "additional_pose_entries", {}
+            ).get("weld_finish")
+            if end_entry is None:
+                raise ValueError("Save this pass's Weld end pose before correction")
+            end_group, _, _, end_pose = parse_teaching_snapshot_entry(
+                "weld_finish", end_entry
+            )
+            if end_group != "right_manipulator":
+                raise ValueError("Weld end pose must belong to the right arm")
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
             self.error(f"Cannot start multi-pass correction: {error}")
             return
@@ -10706,8 +10734,9 @@ class WeldActionGui:
             "The robot uses this pass's corrected WAIT poses loaded from its log. "
             "Keyboard Teaching enables automatically after START WAIT; jog to the real "
             "START and press I. It will then move to GOAL WAIT; jog to the real "
-            "GOAL and press J.\n\n"
-            f"Passes {number}–4 will be updated cumulatively. No arc or welding "
+            "GOAL and press J; save correction, then move to Weld end.\n"
+            "START WAIT to GOAL WAIT stops on touch contact.\n\n"
+            f"Pass {number}: save captured TCP1/2, keep WAIT. Transform later passes only. No arc or welding "
             "command will be sent.",
             parent=self.root,
         ):
@@ -10717,6 +10746,7 @@ class WeldActionGui:
             "phase": "moving_start_wait",
             "previous": copy.deepcopy(self.four_pass_corrected),
             "waits": waits,
+            "end_pose": copy.deepcopy(end_pose),
             "velocity_scale": max(
                 0.01, min(1.0, float(self.velocity_percent.get()) / 100.0)
             ),
@@ -10785,6 +10815,13 @@ class WeldActionGui:
             "continue_after_touch": False,
             "allow_initial_touch_motion": False,
         }, True)
+
+    def stop_multi_pass_correction(self):
+        """Invalidate registration and use the existing all-motion stop path."""
+        self.emergency_stop_all()
+        self.four_pass_status.set(
+            "Multi-pass STOP requested · all robot motion stopping · restart correction to continue"
+        )
 
     def _multi_pass_start_wait_worker(self, number, target):
         session = self.multi_pass_registration
@@ -10855,6 +10892,9 @@ class WeldActionGui:
             return
         number = session["pass"]
         expected_key = "i" if session["phase"] == "waiting_start_capture" else "j"
+        if session["phase"] not in ("waiting_start_capture", "waiting_goal_capture"):
+            self.error("Wait for automatic multi-pass motion to finish before capturing")
+            return
         if key != expected_key:
             self.error(
                 f"Pass {number} expects {expected_key.upper()} capture, not {key.upper()}"
@@ -10914,6 +10954,8 @@ class WeldActionGui:
                 f"trajectory controller restore failed: {switch_message}",
             )
             return
+        if self.multi_pass_registration is not session:
+            return
         # Leave the workpiece along the pass log's corrected START-WAIT route before
         # traversing to the far GOAL WAIT.  A direct real-START -> GOAL-WAIT
         # Cartesian segment can cut through the groove or an existing bead.
@@ -10928,10 +10970,13 @@ class WeldActionGui:
                 number, False, f"START WAIT retract failed: {message}",
             )
             return
+        if self.multi_pass_registration is not session:
+            return
         success, message = self._run_multi_pass_tcp_move(
             target,
             f"Pass {number} corrected logged GOAL WAIT",
             session["velocity_scale"],
+            touch_guard=True,
         )
         self.post(self._multi_pass_goal_wait_finished, number, success, message)
 
@@ -10979,6 +11024,17 @@ class WeldActionGui:
             self.error(f"Pass {number} correction failed: {error}")
             return
         self.four_pass_corrected = corrected
+        if "end_pose" in session:
+            session["phase"] = "moving_end"
+            self.keyboard_velocity_switching = True
+            self.keyboard_jog_enable_button.configure(state=tk.DISABLED)
+            self.four_pass_status.set(
+                f"Pass {number} correction saved · moving to Weld end"
+            )
+            threading.Thread(
+                target=self._multi_pass_end_worker, args=(session,), daemon=True
+            ).start()
+            return
         self.multi_pass_registration = None
         later = transform["later_passes_updated"]
         later_text = "/".join(str(value) for value in later) or "none"
@@ -10995,17 +11051,39 @@ class WeldActionGui:
             f"PASS {number} CORRECTION COMPLETE · verify corrected START/GOAL"
         )
 
+    def _multi_pass_end_worker(self, session):
+        try:
+            success, message = self.node.set_keyboard_velocity_controller_enabled("right", False)
+            if success and self.multi_pass_registration is session:
+                success, message = self._run_multi_pass_tcp_move(
+                    session["end_pose"], f"Pass {session['pass']} Weld end",
+                    session["velocity_scale"], touch_guard=False,
+                )
+        except Exception as error:
+            success, message = False, str(error)
+        self.post(self._multi_pass_end_finished, session, success, message)
+
+    def _multi_pass_end_finished(self, session, success, message):
+        self.keyboard_velocity_switching = False
+        self.keyboard_jog_enable_button.configure(state=tk.NORMAL)
+        self.keyboard_jog_enabled.set(False)
+        self.keyboard_velocity_arm = None
+        if self.multi_pass_registration is not session:
+            return
+        self.multi_pass_registration = None
+        text = (
+            f"Pass {session['pass']} correction saved · Weld end reached"
+            if success else f"Correction saved, but Weld end move stopped/failed: {message}"
+        )
+        self.four_pass_status.set(text)
+        self.keyboard_jog_status.set("Keyboard teaching locked")
+        (self.pipeline_result if success else self.error)(text)
+
     def _save_sequential_four_pass_state(self, corrected, session, transform):
         folder = self.four_pass_loaded_folder
         if folder is None:
             raise ValueError("Four-pass source folder is unavailable")
-        output = self.four_pass_output_folder
-        if output is None:
-            output = folder / (
-                "sequential_corrected_" + time.strftime("%Y%m%d_%H%M%S")
-                + f"_{time.monotonic_ns() % 1000000:06d}"
-            )
-            output.mkdir()
+        output = folder
         number = session["pass"]
         previous = session["previous"]
         pose_dict = self._pose_execution_conditions
@@ -11060,10 +11138,11 @@ class WeldActionGui:
         }
 
         def atomic_yaml(path, document):
+            path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = None
             try:
                 with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=output,
+                    mode="w", encoding="utf-8", dir=path.parent,
                     prefix=f".{path.name}.", suffix=".tmp", delete=False,
                 ) as stream:
                     temporary_path = Path(stream.name)
@@ -11106,7 +11185,82 @@ class WeldActionGui:
             file_name = f"pass_{pass_number}.yaml"
             atomic_yaml(output / file_name, record)
             manifest["passes"].append({"pass": pass_number, "file": file_name})
+
+            # The selected work folder is the operational source of truth.
+            # Rewrite all four pass files after every correction so Pass 1
+            # registration immediately propagates to Passes 2..4 without an
+            # extra export/load step.  Joint snapshots are retained only as
+            # IK seeds; corrected Cartesian poses must be solved again.
+            joint_states = reference.get("joint_states", {})
+            pose_entries = {}
+            for endpoint, pose_name in (
+                ("start_wait", "weld_start_wait"),
+                ("start", "weld_start"),
+                ("goal_wait", "weld_goal_wait"),
+                ("goal", "weld_end"),
+            ):
+                names, positions = joint_states[endpoint]
+                pose_entries[pose_name] = {
+                    "planning_group": "right_manipulator",
+                    "joint_state": {
+                        "names": list(names),
+                        "positions_rad": [float(value) for value in positions],
+                    },
+                    "tcp_pose_world": pose_dict(
+                        corrected[pass_number][endpoint]
+                    ),
+                }
+            canonical = {
+                "schema": "construct_robot_pass_teaching_v1",
+                "status": record["status"],
+                "timestamp": timestamp,
+                "pass": pass_number,
+                "requires_ik": True,
+                "correction_anchor_pass": number,
+                "correction_history": copy.deepcopy(history),
+                "poses": pose_entries,
+            }
+            if pass_number == number:
+                additional_pose_entries = copy.deepcopy(
+                    reference.get("additional_pose_entries", {})
+                )
+                for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+                    stored = self.taught_robot_poses.get(pose_name)
+                    if stored is None or stored[0] != "right_manipulator":
+                        continue
+                    group, names, positions, tcp = stored
+                    if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
+                        continue
+                    additional_pose_entries[pose_name] = {
+                        "planning_group": group,
+                        "joint_state": {
+                            "names": list(names),
+                            "positions_rad": [float(value) for value in positions],
+                        },
+                        "tcp_pose_world": pose_dict(tcp),
+                    }
+            else:
+                additional_pose_entries = reference.get(
+                    "additional_pose_entries", {}
+                )
+            canonical["poses"].update(copy.deepcopy(additional_pose_entries))
+            canonical_path = folder / f"pass_{pass_number}.yaml"
+            if Path(reference["path"]).resolve() != canonical_path.resolve():
+                canonical.update({
+                    "source_reference": reference["path"],
+                    "source_reference_kind": reference.get(
+                        "reference_kind", "unknown"
+                    ),
+                    "source_reference_sha256": reference["sha256"],
+                })
+            atomic_yaml(canonical_path, canonical)
         atomic_yaml(output / "manifest.yaml", manifest)
+        self.four_pass_references = {
+            pass_number: read_pass_teaching_reference(
+                folder / f"pass_{pass_number}.yaml", pass_number
+            )
+            for pass_number in range(1, 5)
+        }
         self.four_pass_output_folder = output
         self.four_pass_history = history
 
@@ -11175,13 +11329,15 @@ class WeldActionGui:
             )
 
     def _selected_pass_teaching_path(self, number):
-        folder = self.four_pass_loaded_folder
-        if folder is None:
-            folder = Path(self.four_pass_folder.get()).expanduser().resolve()
-        teaching_folder = folder if folder.name == "pass_teaching" else (
-            folder / "pass_teaching"
-        )
-        return teaching_folder / f"pass_{int(number)}_teaching.yaml"
+        folder_field = getattr(self, "four_pass_folder", None)
+        if folder_field is not None:
+            text = folder_field.get().strip()
+            if not text:
+                raise ValueError("Select a pass folder before saving")
+            folder = Path(text).expanduser().resolve()
+        else:
+            folder = self.four_pass_loaded_folder
+        return folder / f"pass_{int(number)}.yaml"
 
     def _load_saved_pass_teaching(self, number):
         """Return a selected pass's independent manual teaching, if present."""
@@ -11193,26 +11349,13 @@ class WeldActionGui:
             raise ValueError(f"Unsupported pass teaching schema: {path}")
         if int(document.get("pass", 0)) != int(number):
             raise ValueError(f"Saved teaching pass does not match Pass {number}")
-        reference = self.four_pass_references.get(number)
-        reference_is_this_teaching = (
-            reference is not None
-            and reference.get("reference_kind") == "saved_pass_teaching"
-            and Path(reference["path"]).resolve() == path.resolve()
-        )
-        if (
-            reference is not None
-            and not reference_is_this_teaching
-            and document.get("source_log_sha256")
-            and document.get("source_log_sha256") != reference["sha256"]
-        ):
-            raise ValueError(
-                f"Pass {number} saved teaching belongs to a different source log"
-            )
         pose_entries = document.get("poses")
         if not isinstance(pose_entries, dict):
             raise ValueError(f"Pass {number} saved teaching has no poses mapping")
         current = {}
         joint_states = {}
+        for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+            self.taught_robot_poses[pose_name] = None
         for endpoint, pose_name in (
             ("start_wait", "weld_start_wait"),
             ("start", "weld_start"),
@@ -11226,6 +11369,18 @@ class WeldActionGui:
                 raise ValueError(f"{pose_name} is not a right-arm teaching pose")
             current[endpoint] = copy.deepcopy(tcp)
             joint_states[endpoint] = (tuple(names), tuple(positions))
+        for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+            entry = pose_entries.get(pose_name)
+            if entry is None:
+                continue
+            group, names, positions, tcp = parse_teaching_snapshot_entry(
+                pose_name, entry
+            )
+            if group != "right_manipulator":
+                raise ValueError(f"{pose_name} is not a right-arm teaching pose")
+            self.taught_robot_poses[pose_name] = (
+                group, tuple(names), tuple(positions), copy.deepcopy(tcp)
+            )
         self.four_pass_corrected[number] = copy.deepcopy(current)
         return current, joint_states, path
 
@@ -11269,12 +11424,35 @@ class WeldActionGui:
                         provenance
                     )
                 current[endpoint] = copy.deepcopy(tcp)
+            for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+                stored = self.taught_robot_poses.get(pose_name)
+                if stored is None or stored[0] != "right_manipulator":
+                    continue
+                group, names, positions, tcp = stored
+                if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
+                    continue
+                pose_records[pose_name] = {
+                    "planning_group": group,
+                    "joint_state": {
+                        "names": list(names),
+                        "positions_rad": [float(value) for value in positions],
+                    },
+                    "tcp_pose_world": self._pose_execution_conditions(tcp),
+                }
+                provenance = getattr(
+                    self, "teaching_capture_provenance", {}
+                ).get(pose_name)
+                if provenance:
+                    pose_records[pose_name]["capture_provenance"] = copy.deepcopy(
+                        provenance
+                    )
             reference = self.four_pass_references.get(number)
             document = {
                 "schema": "construct_robot_pass_teaching_v1",
                 "status": "manual_teaching_saved",
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "pass": number,
+                "requires_ik": False,
                 "poses": pose_records,
             }
             if reference is not None:
@@ -11321,7 +11499,7 @@ class WeldActionGui:
             return
         self.four_pass_corrected[number] = current
         self.four_pass_status.set(
-            f"Pass {number} Teaching Detail saved separately · {path}"
+            f"Pass {number} Teaching Detail saved · {path}"
         )
         self.pipeline_result(
             f"PASS {number} TEACHING SAVED · WAIT/START/GOAL WAIT/GOAL · "
@@ -11355,9 +11533,10 @@ class WeldActionGui:
                     "joint_states", {}
                 )
                 teaching_source = "latest cumulative seam correction"
-                resolve_corrected_ik = not (
-                    reference.get("reference_kind") == "saved_pass_teaching"
-                    and not self.four_pass_history
+                resolve_corrected_ik = (
+                    bool(reference.get("requires_ik"))
+                    if reference.get("reference_kind") == "saved_pass_teaching"
+                    else True
                 )
             else:
                 saved = self._load_saved_pass_teaching(number)
@@ -11366,8 +11545,19 @@ class WeldActionGui:
                         f"Pass {number} has no separately saved teaching file"
                     )
                 current, joint_states, saved_path = saved
+                reference = read_pass_teaching_reference(saved_path, number)
                 teaching_source = f"saved pass teaching {saved_path}"
-                resolve_corrected_ik = False
+                resolve_corrected_ik = bool(reference.get("requires_ik"))
+            additional_poses = {}
+            for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+                entry = reference.get("additional_pose_entries", {}).get(pose_name)
+                if entry is None:
+                    additional_poses[pose_name] = None
+                    continue
+                stored = parse_teaching_snapshot_entry(pose_name, entry)
+                if stored[0] != "right_manipulator":
+                    raise ValueError(f"Pass {number} {pose_name} is not a right-arm pose")
+                additional_poses[pose_name] = copy.deepcopy(stored)
             required_endpoints = {"start_wait", "start", "goal_wait", "goal"}
             if not required_endpoints.issubset(joint_states):
                 raise ValueError(
@@ -11380,6 +11570,16 @@ class WeldActionGui:
         self._invalidate_seam_correction_runtime(
             f"applying cumulative Pass {number} correction", clear_touches=True
         )
+        # Replace the whole pass-specific teaching context.  Missing optional
+        # poses must not inherit the previously selected pass's teaching.
+        for pose_name, stored in additional_poses.items():
+            self.taught_robot_poses[pose_name] = stored
+        provenance = getattr(self, "teaching_capture_provenance", {})
+        for pose_name in (
+            "robot_start", "weld_wait", "weld_finish", "weld_start_wait",
+            "weld_start", "weld_goal_wait", "weld_end",
+        ):
+            provenance.pop(pose_name, None)
         for endpoint, pose_name in (
             ("start_wait", "weld_start_wait"),
             ("start", "weld_start"),
@@ -11723,33 +11923,6 @@ class WeldActionGui:
             "red=wall, blue=floor, green=seam, yellow=midpoint"
         )
 
-    def show_touch_geometry_pyplot(self, endpoint=None):
-        touch_yaml = self._seam_touch_yaml_path("right_manipulator")
-        if not touch_yaml.is_file():
-            self.error("No saved Fastech DI0 touch YAML exists yet")
-            return False
-        plot_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
-        if not plot_python.is_file():
-            self.error(f"PyPlot Python is unavailable: {plot_python}")
-            return False
-        plot_script = Path(__file__).with_name("seam_touch_plot.py")
-        try:
-            command = [
-                str(plot_python),
-                str(plot_script),
-                str(touch_yaml),
-            ]
-            if endpoint in ("start", "goal"):
-                command.extend(("--endpoint", endpoint))
-            subprocess.Popen(command, start_new_session=True)
-        except (OSError, ValueError, tk.TclError) as error:
-            self.error(f"Cannot open touch-result PyPlot: {error}")
-            return False
-        self.log(
-            "Opened Fastech DI0 touch-result PyPlot · "
-            + (endpoint.upper() if endpoint else "START + GOAL")
-        )
-        return True
 
     def _automatic_seam_correction_worker(self, workflow):
         probe_index = 0
@@ -12574,8 +12747,7 @@ class WeldActionGui:
                 f"({wait_values[0]:.4f}, {wait_values[1]:.4f}, "
                 f"{wait_values[2]:.4f}) · YAML saved"
             )
-        if update_wait_joints:
-            self.show_touch_geometry_pyplot(endpoint)
+        # Geometry plots are opened only by the explicit GUI button.
         return point
 
     def apply_corrected_tcp_joint_state(
@@ -13510,7 +13682,7 @@ class WeldActionGui:
             f"World Δyaw={math.degrees(delta_yaw):+.3f}° · "
             "both wait poses kept as taught standby"
         )
-        self.show_touch_geometry_pyplot()
+        # Do not open a plot window automatically after seam correction.
         # Calculation is the commit point: persist corrected start/goal and
         # wait teaching YAML immediately instead of requiring a second button.
         self.correct_two_touch_seam()
@@ -14062,6 +14234,7 @@ class WeldActionGui:
             )
             self.weld_custom_hot_start_enabled.set(settings["custom_hot_start_enabled"])
             self.weld_custom_hot_start_hold_s.set(settings["custom_hot_start_hold_s"])
+            self.weld_custom_hot_start_percent.set(settings["custom_hot_start_percent"])
             self.weld_expect_native_crater.set(settings["expect_native_crater"])
             self.weld_crater_panel_current_ref_a.set(settings["crater_panel_current_ref_a"])
             self.weld_crater_panel_voltage_ref_v.set(settings["crater_panel_voltage_ref_v"])
@@ -14171,6 +14344,8 @@ class WeldActionGui:
                         "digital_weld", "software_crater", "custom_hot_start"
                     ):
                         row["settings"]["custom_hot_start_hold_s"] = hold_s
+                        row["settings"]["custom_hot_start_percent"] = float(self.weld_custom_hot_start_percent.get())
+                        row["settings"] = validate_digital_weld_settings(row["settings"])
             validate_managed_weld_sequence(
                 self.sequence_steps, require_complete=True
             )
@@ -15050,6 +15225,9 @@ class WeldActionGui:
                 return
             if self.hicomm_client is not None:
                 self.hicomm_client.allow_outputs()
+        self._sequence_fake_arc_snapshot = bool(self.fake_arc_enabled.get())
+        with self.weld_feedback_lock:
+            self._weld_feedback_stopped = False
         self.sequence_running = True
         self.sequence_stop_requested = False
         mode = "EXECUTE" if execute_requested else "PLAN"
@@ -15070,8 +15248,23 @@ class WeldActionGui:
             time.sleep(min(0.05, deadline - time.monotonic()))
         return True
 
+    def _execution_fake_arc(self):
+        # Tk variable reads from workers wait for the GUI event loop. Freeze
+        # this operator setting at Execute rather than at the ARC boundary.
+        if getattr(self, "sequence_running", False) and hasattr(self, "_sequence_fake_arc_snapshot"):
+            return self._sequence_fake_arc_snapshot
+        return bool(self.fake_arc_enabled.get())
+
     def _sequence_worker(self, steps, indices, execute_requested):
         try:
+            if execute_requested:
+                arc_step = next((s for s in steps if s.get("type") == "digital_weld"
+                                 and s.get("command") == "on"), None)
+                if arc_step is not None:
+                    self._finish_weld_feedback_record("closed before new sequence")
+                    self._begin_weld_feedback_record(
+                        arc_step["settings"], arc_step.get("execution_conditions")
+                    )
             self._sequence_worker_body(steps, indices, execute_requested)
         except Exception as error:
             # Otherwise a worker traceback leaves sequence_running latched and
@@ -15097,6 +15290,15 @@ class WeldActionGui:
                 except Exception as feedback_error:
                     self.post(self.error, f"Weld feedback cleanup failed: {feedback_error}")
             self.post(self._sequence_finished, False, f"internal sequence error: {error}")
+        finally:
+            # Normal fake completion keeps recording until STOP or a new run.
+            if execute_requested and (
+                self.sequence_stop_requested or not WeldActionGui._execution_fake_arc(self)
+            ):
+                self._finish_weld_feedback_record(
+                    "stopped" if self.sequence_stop_requested else "sequence ended",
+                    self.hicomm_client.latest_status() if self.hicomm_client is not None else None,
+                )
 
     def _sequence_worker_body(self, steps, indices, execute_requested):
         success = True
@@ -15166,6 +15368,7 @@ class WeldActionGui:
 
             def run_member(result_key, member_step):
                 member_result = (False, "sequence task did not run")
+                task_started = time.monotonic()
                 try:
                     member_result = self._run_sequence_step(
                         member_step, execute_requested
@@ -15177,6 +15380,12 @@ class WeldActionGui:
                             client.inhibit_outputs()
                         self.node.cancel_active_motion()
                 finally:
+                    self.post(self.log,
+                        f"SEQUENCE STEP TIMING · #{result_key + 1} · "
+                        f"stage={member_step.get('weld_scenario_stage', member_step['type'])} · "
+                        f"duration={time.monotonic() - task_started:.3f}s · "
+                        f"success={bool(member_result[0])}"
+                    )
                     if member_step.get("weld_scenario_stage") == "weld_motion":
                         self.weld_motion_success = bool(member_result[0])
                         self.weld_motion_done_event.set()
@@ -15212,8 +15421,9 @@ class WeldActionGui:
                 and step.get("trigger_before_goal", False)
                 for _stored_index, step in members
             ):
-                final_status = self._pending_weld_final_status()
-                self._finish_weld_feedback_record("completed", final_status)
+                if not WeldActionGui._execution_fake_arc(self):
+                    final_status = self._pending_weld_final_status()
+                    self._finish_weld_feedback_record("completed", final_status)
         if execute_requested and (not success or self.sequence_stop_requested):
             client = self.hicomm_client
             if client is not None:
@@ -15230,6 +15440,21 @@ class WeldActionGui:
                 "stopped" if self.sequence_stop_requested else f"failed: {message}",
                 client.latest_status() if client is not None else None,
             )
+        # Imported cleaner tasks must never leave a cutter/cleaner latched ON,
+        # including when a later motion fails. Do not change touch-enable DO0.
+        if execute_requested:
+            cleaner_ports = {
+                int(step["port"]) for step in steps
+                if step.get("task_cleaner_output") and step.get("port") in (5, 6, 7)
+            }
+            for port in sorted(cleaner_ports):
+                try:
+                    off_ok, off_message = self._set_fastech_output_sync(port, False)
+                except Exception as error:
+                    off_ok, off_message = False, str(error)
+                if not off_ok:
+                    success, message = False, f"Cleaner DO{port} cleanup OFF failed: {off_message}"
+                    self.post(self.error, message)
         self.post(self._sequence_finished, success, message)
 
     def _run_sequence_step(self, step, execute_requested):
@@ -15387,15 +15612,20 @@ class WeldActionGui:
             self.error(f"SEQUENCE FAILED · {message}")
 
     def stop_sequence(self):
+        with self.weld_feedback_lock:
+            self._weld_feedback_stopped = True
+        if hasattr(self, "torch_cleaner_panel"):
+            self.torch_cleaner_panel.abort()
         self._stop_keyboard_wire()
         self.sequence_stop_requested = True
         # STOP NOW also invalidates any pending touch dwell/retract.
         self.node.clear_touch_probe()
         if self.hicomm_client is not None:
             self.hicomm_client.inhibit_outputs()
-            self._finish_weld_feedback_record(
-                "operator stop", self.hicomm_client.latest_status()
-            )
+        self._finish_weld_feedback_record(
+            "operator stop",
+            self.hicomm_client.latest_status() if self.hicomm_client is not None else None,
+        )
         self.hicomm_inching_direction = None
         self.hicomm_gas_enabled.set(False)
         self.hicomm_arc_unlocked.set(False)
@@ -15631,6 +15861,10 @@ class WeldActionGui:
         self.keyboard_velocity_switching = False
         self.keyboard_jog_enable_button.configure(state=tk.NORMAL)
         if success and enable:
+            # Jogging invalidates any trajectory preview made from the old pose.
+            self.initial_plan_ready = False
+            self.node.initial_planned_trajectory = None
+            self._refresh_initial_position_controls()
             self.keyboard_velocity_arm = arm
             # Arrow keys are motion controls while teaching is enabled. Move
             # focus away from a speed Spinbox/Combobox so their class binding
@@ -16325,13 +16559,10 @@ class WeldActionGui:
         else:
             self._set_welder_test_controls(self.hicomm_connected)
         self.linear_tcp_endpoints = [None, None]
-        self.tcp_1_status.configure(text="not saved")
-        self.tcp_2_status.configure(text="not saved")
         self.reference_yaw_status.set("Reference yaw: --")
         self.reference_length_status.set("Length: --")
         self.sensed_yaw_status.set("Sensed yaw: --")
         self.delta_yaw_status.set("ΔYaw: --")
-        self.generate_tcp_line_button.configure(state=tk.DISABLED)
         self.path_kind = "empty"
         self.weave_source = []
         self.weave_base_paths = {"linear": [], "circle": [], "corrected": []}
@@ -17163,15 +17394,6 @@ class WeldActionGui:
                     if stored_reference is not None:
                         pose = copy.deepcopy(stored_reference[3])
                         self.linear_tcp_endpoints[index] = pose
-                        label = self.tcp_1_status if index == 0 else self.tcp_2_status
-                        label.configure(
-                            text=(
-                                f"loaded ({pose.position.x:.3f}, {pose.position.y:.3f}, "
-                                f"{pose.position.z:.3f})"
-                            )
-                        )
-                if all(item is not None for item in self.linear_tcp_endpoints):
-                    self.generate_tcp_line_button.configure(state=tk.NORMAL)
                 self._update_seam_yaw_status()
                 self.log(f"Loaded seam teaching reference from {reference_path}")
             except (OSError, ValueError, yaml.YAMLError, KeyError) as error:
@@ -17333,6 +17555,9 @@ class WeldActionGui:
             )
 
     def plan_initial_state(self):
+        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
+            self.error("Disable Keyboard Teaching and wait for controller handover before planning")
+            return
         if self.initial_joint_state is None:
             self.error("Capture or load the selected robot pose first")
             return
@@ -17387,6 +17612,9 @@ class WeldActionGui:
         self.pipeline_result(message)
 
     def execute_initial_plan(self):
+        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
+            self.error("Disable Keyboard Teaching and replan before executing the taught pose")
+            return
         if not self.initial_plan_ready:
             self.error(
                 "Plan and inspect the selected taught-pose trajectory first"
@@ -17480,12 +17708,6 @@ class WeldActionGui:
         status = (
             f"saved ({position.x:.3f}, {position.y:.3f}, {position.z:.3f})"
         )
-        label = self.tcp_1_status if endpoint_index == 0 else self.tcp_2_status
-        label.configure(text=status)
-        ready = all(item is not None for item in self.linear_tcp_endpoints)
-        self.generate_tcp_line_button.configure(
-            state=tk.NORMAL if ready else tk.DISABLED
-        )
         self._update_seam_yaw_status()
         self.quick_teaching_status.set(
             f"Reference TCP {endpoint_index + 1} / {role} saved"
@@ -17495,16 +17717,6 @@ class WeldActionGui:
             f"World XYZ {status} · {reference_path}"
         )
 
-    def quick_capture_teaching_pose(self, pose_name):
-        if pose_name not in TEACHING_POSES:
-            self.error(f"Unknown quick teaching pose: {pose_name}")
-            return
-        self.teaching_pose_name.set(TEACHING_POSES[pose_name])
-        self.teaching_pose_changed()
-        self.quick_teaching_status.set(
-            f"Capturing {TEACHING_POSES[pose_name]}..."
-        )
-        self.capture_initial_state()
 
     def _update_seam_yaw_status(self, sensed_start=None, sensed_goal=None):
         ref_start = self.linear_tcp_endpoints[0]
@@ -17563,80 +17775,7 @@ class WeldActionGui:
             self.sensed_yaw_status.set("Sensed yaw: --")
             self.delta_yaw_status.set("ΔYaw: --")
 
-    def load_seam_reference(self):
-        default_path = self._seam_reference_yaml_path()
-        path = filedialog.askopenfilename(
-            title="Load seam reference TCP 1 / TCP 2",
-            initialdir=str(default_path.parent),
-            initialfile=default_path.name,
-            filetypes=(("YAML", "*.yaml *.yml"), ("All files", "*.*")),
-        )
-        if not path:
-            return
-        try:
-            group, poses = load_seam_teaching_reference_yaml(path)
-        except (OSError, ValueError, yaml.YAMLError, KeyError) as error:
-            self.error(f"Reference YAML load failed: {error}")
-            return
-        if group != self.planning_group.get():
-            self.error(
-                f"Reference YAML is for {group}; selected arm is {self.planning_group.get()}"
-            )
-            return
-        missing = [
-            name for name in ("weld_start", "weld_end") if name not in poses
-        ]
-        if missing:
-            self.error(
-                "Reference YAML must contain TCP1/TCP2: " + ", ".join(missing)
-            )
-            return
-        if self.seam_teaching_reference is None:
-            self.seam_teaching_reference = {}
-        for index, pose_name in enumerate(("weld_start", "weld_end")):
-            pose = copy.deepcopy(poses[pose_name])
-            stored = self.taught_robot_poses.get(pose_name)
-            if stored is not None:
-                self.seam_teaching_reference[pose_name] = (
-                    stored[0], stored[1], stored[2], copy.deepcopy(pose)
-                )
-            else:
-                self.seam_teaching_reference[pose_name] = (
-                    group, tuple(), tuple(), copy.deepcopy(pose)
-                )
-            self.linear_tcp_endpoints[index] = copy.deepcopy(pose)
-            label = self.tcp_1_status if index == 0 else self.tcp_2_status
-            label.configure(
-                text=(
-                    f"loaded ({pose.position.x:.3f}, {pose.position.y:.3f}, "
-                    f"{pose.position.z:.3f})"
-                )
-            )
-        self.generate_tcp_line_button.configure(state=tk.NORMAL)
-        self._update_seam_yaw_status()
-        self.log(f"Loaded TCP1/TCP2 seam reference from {path}")
 
-    def acquire_two_tcp(self):
-        if any(pose is None for pose in self.linear_tcp_endpoints):
-            self.error("Teach or load both reference TCP 1 and TCP 2 first")
-            return
-        try:
-            count = int(self.tcp_line_count.get())
-        except (ValueError, tk.TclError):
-            self.error("TCP line point count is invalid")
-            return
-        start, end = self.linear_tcp_endpoints
-        self.log("Previewing reference seam · TCP 1 / START → TCP 2 / GOAL")
-        threading.Thread(
-            target=self.node.generate_tcp_line,
-            args=(
-                copy.deepcopy(start),
-                copy.deepcopy(end),
-                count,
-                self.show_path.get(),
-            ),
-            daemon=True,
-        ).start()
 
     def replace_with_tcp(self):
         index = self.selected_index()

@@ -887,12 +887,12 @@ class HiCommWelderClient:
                         >= 1.0
                     ):
                         self._last_cadence_warning_monotonic = tx_started
-                        self._dispatch_callback(
-                            self.log_callback,
-                            "Hi-COMM CADENCE WARNING · "
-                            f"TX interval={interval * 1000.0:.1f} ms "
-                            f"(target={PERIOD_SECONDS * 1000.0:.1f} ms)"
-                        )
+                        # self._dispatch_callback(
+                        #     self.log_callback,
+                        #     "Hi-COMM CADENCE WARNING · "
+                        #     f"TX interval={interval * 1000.0:.1f} ms "
+                        #     f"(target={PERIOD_SECONDS * 1000.0:.1f} ms)"
+                        # )
                 frame = build_request(state)
                 if self.tx_frame_callback is not None:
                     try:

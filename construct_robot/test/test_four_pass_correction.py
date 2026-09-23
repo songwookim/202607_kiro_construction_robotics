@@ -89,6 +89,10 @@ def test_selected_anchor_changes_only_itself_and_later_passes(anchor):
 
     assert xyz(corrected[anchor]["start"]) == pytest.approx(xyz(measured_start))
     assert xyz(corrected[anchor]["goal"]) == pytest.approx(xyz(measured_goal))
+    assert corrected[anchor]["start"] == measured_start
+    assert corrected[anchor]["goal"] == measured_goal
+    assert corrected[anchor]["start_wait"] == original[anchor]["start_wait"]
+    assert corrected[anchor]["goal_wait"] == original[anchor]["goal_wait"]
     for number in range(1, anchor):
         assert corrected[number] == original[number]
     for number in range(anchor + 1, 5):
@@ -165,7 +169,7 @@ def test_welding_orientations_follow_minimal_seam_rotation():
     )
 
     assert metadata["direction_change_deg"] > 10.0
-    for number in range(1, 5):
+    for number in range(2, 5):
         for endpoint in ("start_wait", "start", "goal_wait", "goal"):
             assert corrected[number][endpoint].orientation != (
                 current[number][endpoint].orientation
@@ -200,16 +204,10 @@ def test_wait_offsets_propagate_with_selected_start_and_goal_anchors():
         current, 2, measured_start, measured_goal
     )
 
-    assert math.dist(
-        xyz(corrected[2]["start_wait"]), xyz(corrected[2]["start"])
-    ) == pytest.approx(
-        math.dist(xyz(current[2]["start_wait"]), xyz(current[2]["start"]))
-    )
-    assert math.dist(
-        xyz(corrected[2]["goal_wait"]), xyz(corrected[2]["goal"])
-    ) == pytest.approx(
-        math.dist(xyz(current[2]["goal_wait"]), xyz(current[2]["goal"]))
-    )
+    assert corrected[2]["start_wait"] == current[2]["start_wait"]
+    assert corrected[2]["goal_wait"] == current[2]["goal_wait"]
+    assert corrected[3]["start_wait"] != current[3]["start_wait"]
+    assert corrected[3]["goal_wait"] != current[3]["goal_wait"]
     assert corrected[1] == current[1]
 
 
@@ -248,10 +246,13 @@ def test_completed_log_reads_tcp_joint_snapshots_and_provenance(tmp_path):
     source.write_text(
         "WELD FEEDBACK LOG\nresult=completed\n\n[teaching_snapshot_yaml]\n"
         + yaml.safe_dump({
+            "robot_start": encoded((-0.05, 0, 0.10)),
+            "weld_wait": encoded((-0.03, 0, 0.08)),
             "weld_start_wait": encoded((-0.02, 0, 0.03)),
             "weld_start": encoded((0, 0, 0)),
             "weld_goal_wait": encoded((0.12, 0, 0.03)),
             "weld_end": encoded((0.1, 0, 0)),
+            "weld_finish": encoded((0.12, 0, 0.10)),
         }),
         encoding="utf-8",
     )
@@ -263,6 +264,9 @@ def test_completed_log_reads_tcp_joint_snapshots_and_provenance(tmp_path):
         "start_wait", "start", "goal_wait", "goal",
     }
     assert parsed["start_wait"].position.z == pytest.approx(0.03)
+    assert set(parsed["additional_pose_entries"]) == {
+        "robot_start", "weld_wait", "weld_finish",
+    }
     assert len(parsed["sha256"]) == 64
 
 
@@ -301,8 +305,36 @@ def gui_with_sources(tmp_path):
     return gui
 
 
-def test_sequential_save_never_overwrites_source_logs(tmp_path):
+def test_sequential_save_updates_pass_yaml_without_overwriting_source_logs(tmp_path):
     gui = gui_with_sources(tmp_path)
+    def encoded(point):
+        return {
+            "planning_group": "right_manipulator",
+            "joint_state": {
+                "names": [f"joint_{index}" for index in range(6)],
+                "positions_rad": [0.1 * index for index in range(6)],
+            },
+            "tcp_pose_world": {
+                "position_m": {"x": point[0], "y": point[1], "z": point[2]},
+                "orientation_xyzw": {"x": 0, "y": 0, "z": 0, "w": 1},
+            },
+        }
+    for number in (1, 3, 4):
+        gui.four_pass_references[number]["additional_pose_entries"] = {
+            "robot_start": encoded((float(number), 0.0, 0.1))
+        }
+    names = tuple(f"right_manipulator_joint{index}" for index in range(1, 7))
+    gui.taught_robot_poses.update({
+        "robot_start": (
+            "right_manipulator", names, (0.5,) * 6, pose(0.5, 0.0, 0.1)
+        ),
+        "weld_wait": (
+            "right_manipulator", names, (0.6,) * 6, pose(0.6, 0.0, 0.1)
+        ),
+        "weld_finish": (
+            "right_manipulator", names, (0.7,) * 6, pose(0.7, 0.0, 0.1)
+        ),
+    })
     originals = {
         number: Path(gui.four_pass_references[number]["path"]).read_bytes()
         for number in range(1, 5)
@@ -322,23 +354,39 @@ def test_sequential_save_never_overwrites_source_logs(tmp_path):
     gui._save_sequential_four_pass_state(corrected, session, transform)
 
     for number in range(1, 5):
-        assert Path(gui.four_pass_references[number]["path"]).read_bytes() == originals[number]
+        assert (tmp_path / f"{number}.log").read_bytes() == originals[number]
+        assert (tmp_path / f"pass_{number}.yaml").is_file()
+    pass_two = yaml.safe_load((tmp_path / "pass_2.yaml").read_text())
+    pass_one = yaml.safe_load((tmp_path / "pass_1.yaml").read_text())
+    assert pass_two["poses"]["robot_start"]["tcp_pose_world"]["position_m"]["x"] == pytest.approx(0.5)
+    assert pass_two["poses"]["weld_wait"]["tcp_pose_world"]["position_m"]["x"] == pytest.approx(0.6)
+    assert pass_two["poses"]["weld_finish"]["tcp_pose_world"]["position_m"]["x"] == pytest.approx(0.7)
+    assert pass_one["poses"]["robot_start"]["tcp_pose_world"]["position_m"]["x"] == pytest.approx(1.0)
     manifest = yaml.safe_load((gui.four_pass_output_folder / "manifest.yaml").read_text())
     assert manifest["source_logs_immutable"] is True
     assert manifest["current_anchor_pass"] == 2
     assert manifest["history"][-1]["later_passes_updated"] == [3, 4]
     loader = object.__new__(WeldActionGui)
     loader.log = Mock()
-    restored, restored_folder, history = (
-        loader._load_latest_sequential_four_pass_state(
-            tmp_path, gui.four_pass_references
-        )
-    )
-    assert restored_folder == gui.four_pass_output_folder
-    assert xyz(restored[3]["start"]) == pytest.approx(
+    assert loader._load_latest_sequential_four_pass_state(
+        tmp_path, gui.four_pass_references
+    ) is None
+    assert xyz(gui.four_pass_references[3]["start"]) == pytest.approx(
         xyz(corrected[3]["start"])
     )
-    assert len(history) == 1
+    # A later manual save must survive reload even with an old manifest
+    # and the same source ancestry still present beside the pass files.
+    updated = yaml.safe_load((tmp_path / "pass_3.yaml").read_text())
+    updated["poses"]["weld_start"]["tcp_pose_world"]["position_m"]["x"] += 0.007
+    updated["requires_ik"] = False
+    (tmp_path / "pass_3.yaml").write_text(yaml.safe_dump(updated))
+    loader.four_pass_folder = SimpleNamespace(get=lambda: str(tmp_path))
+    loader.four_pass_status = SimpleNamespace(set=Mock())
+    loader.error = Mock()
+    assert loader.load_four_pass_references()
+    assert loader.four_pass_corrected[3]["start"].position.x == pytest.approx(
+        corrected[3]["start"].position.x + 0.007
+    )
 
 
 def test_source_hash_mismatch_is_rejected(tmp_path):
@@ -348,11 +396,36 @@ def test_source_hash_mismatch_is_rejected(tmp_path):
         gui._validate_four_pass_source_hashes()
 
 
+def test_multi_pass_automatic_move_uses_explicit_touch_guard():
+    gui = object.__new__(WeldActionGui)
+    gui.node = SimpleNamespace(
+        _current_tcp_pose=Mock(return_value=pose(0, 0, 0)),
+        run_sequence_cartesian_motion=Mock(return_value=(False, "touch stop")),
+    )
+    assert gui._run_multi_pass_tcp_move(pose(0.1, 0, 0), "WAIT transfer", 0.05) == (
+        False, "touch stop"
+    )
+    step, execute = gui.node.run_sequence_cartesian_motion.call_args.args
+    assert execute is True
+    assert step["touch_guard"] is False
+    assert step["allow_initial_touch_motion"] is False
+    assert step["continue_after_touch"] is False
+    gui._run_multi_pass_tcp_move(pose(0.1, 0, 0), "WAIT transfer", 0.05, touch_guard=True)
+    step, execute = gui.node.run_sequence_cartesian_motion.call_args.args
+    assert step["touch_guard"] is True
+
+
 def test_save_and_load_selected_pass_teaching_is_separate_from_source_logs(tmp_path):
     gui = gui_with_sources(tmp_path)
     gui.selected_pass_number = SimpleNamespace(get=lambda: 3)
     names = tuple(f"right_manipulator_joint{index}" for index in range(1, 7))
     gui.taught_robot_poses = {
+        "robot_start": (
+            "right_manipulator", names, (0.05,) * 6, pose(0.21, -0.01, 0.12)
+        ),
+        "weld_wait": (
+            "right_manipulator", names, (0.06,) * 6, pose(0.25, 0.00, 0.10)
+        ),
         "weld_start_wait": (
             "right_manipulator", names, (0.1,) * 6, pose(0.31, 0.01, 0.08)
         ),
@@ -365,6 +438,9 @@ def test_save_and_load_selected_pass_teaching_is_separate_from_source_logs(tmp_p
         "weld_end": (
             "right_manipulator", names, (0.4,) * 6, pose(0.42, 0.02, 0.03)
         ),
+        "weld_finish": (
+            "right_manipulator", names, (0.45,) * 6, pose(0.44, 0.03, 0.11)
+        ),
     }
     gui.teaching_capture_provenance = {}
     gui.four_pass_status = SimpleNamespace(set=Mock())
@@ -375,7 +451,11 @@ def test_save_and_load_selected_pass_teaching_is_separate_from_source_logs(tmp_p
     gui.save_teaching_to_selected_pass()
 
     gui.error.assert_not_called()
-    saved_path = tmp_path / "pass_teaching" / "pass_3_teaching.yaml"
+    saved_path = tmp_path / "pass_3.yaml"
+    saved_document = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
+    assert {
+        "robot_start", "weld_wait", "weld_finish"
+    }.issubset(saved_document["poses"])
     assert saved_path.is_file()
     assert (tmp_path / "3.log").read_bytes() == source_before
     saved_reference = read_pass_teaching_reference(saved_path, 3)
@@ -384,6 +464,18 @@ def test_save_and_load_selected_pass_teaching_is_separate_from_source_logs(tmp_p
     assert used_path == saved_path
     assert xyz(loaded["start"]) == pytest.approx((0.32, 0.02, 0.03))
     assert joints["goal"][1] == pytest.approx((0.4,) * 6)
+
+    pass_one_document = copy.deepcopy(saved_document)
+    pass_one_document["pass"] = 1
+    for pose_name in ("robot_start", "weld_wait", "weld_finish"):
+        pass_one_document["poses"].pop(pose_name, None)
+    (tmp_path / "pass_1.yaml").write_text(
+        yaml.safe_dump(pass_one_document, sort_keys=False), encoding="utf-8"
+    )
+    stale = gui.taught_robot_poses["weld_wait"]
+    gui._load_saved_pass_teaching(1)
+    assert gui.taught_robot_poses["weld_wait"] is None
+    gui.taught_robot_poses["weld_wait"] = stale
 
     gui.taught_robot_poses = {
         name: None
@@ -439,7 +531,7 @@ def test_save_selected_pass_teaching_requires_no_loaded_reference_set(tmp_path):
     gui.save_teaching_to_selected_pass()
 
     gui.error.assert_not_called()
-    saved_path = tmp_path / "pass_teaching" / "pass_2_teaching.yaml"
+    saved_path = tmp_path / "pass_2.yaml"
     document = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
     assert document["pass"] == 2
     assert "source_log" not in document
@@ -477,6 +569,25 @@ def test_apply_selected_pass_loads_all_four_poses_into_teaching_detail(tmp_path)
     assert gui.linear_tcp_endpoints[0] == gui.four_pass_corrected[2]["start"]
     assert gui.linear_tcp_endpoints[1] == gui.four_pass_corrected[2]["goal"]
 
+    names, positions = gui.four_pass_references[2]["joint_states"]["start"]
+    wait_two = pose(0.23, 0.04, 0.18)
+    gui.four_pass_references[2]["additional_pose_entries"] = {
+        "weld_wait": {
+            "planning_group": "right_manipulator",
+            "joint_state": {"names": list(names), "positions_rad": list(positions)},
+            "tcp_pose_world": gui._pose_execution_conditions(wait_two),
+        }
+    }
+    gui.apply_selected_pass_correction()
+    assert gui.taught_robot_poses["weld_wait"][3] == wait_two
+    gui.selected_pass_number = SimpleNamespace(get=lambda: 1)
+    gui.apply_selected_pass_correction()
+    assert gui.taught_robot_poses["weld_wait"] is None
+    gui.selected_pass_number = SimpleNamespace(get=lambda: 2)
+    gui.apply_selected_pass_correction()
+    assert gui.taught_robot_poses["weld_wait"][3] == wait_two
+    gui.error.assert_not_called()
+
 
 def test_load_four_references_accepts_pass_teaching_folder(tmp_path):
     source_gui = gui_with_sources(tmp_path)
@@ -501,9 +612,9 @@ def test_load_four_references_accepts_pass_teaching_folder(tmp_path):
     source_gui.pipeline_result = Mock()
     source_gui.error = Mock()
     source_gui.save_teaching_to_selected_pass()
-    template = yaml.safe_load(
-        (tmp_path / "pass_teaching" / "pass_1_teaching.yaml").read_text()
-    )
+    template = yaml.safe_load((tmp_path / "pass_1.yaml").read_text())
+    legacy_folder = tmp_path / "pass_teaching"
+    legacy_folder.mkdir()
     for number in range(2, 5):
         document = copy.deepcopy(template)
         document["pass"] = number
@@ -511,9 +622,12 @@ def test_load_four_references_accepts_pass_teaching_folder(tmp_path):
         document["source_log_sha256"] = source_gui.four_pass_references[number][
             "sha256"
         ]
-        (tmp_path / "pass_teaching" / f"pass_{number}_teaching.yaml").write_text(
+        (legacy_folder / f"pass_{number}_teaching.yaml").write_text(
             yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
         )
+    (legacy_folder / "pass_1_teaching.yaml").write_text(
+        yaml.safe_dump(template, sort_keys=False), encoding="utf-8"
+    )
 
     loader = object.__new__(WeldActionGui)
     loader.four_pass_folder = SimpleNamespace(

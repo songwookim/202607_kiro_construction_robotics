@@ -1026,6 +1026,8 @@ def format_quality_summary(document):
          if hot['enabled'] else "Feedback     : NOT_APPLICABLE"),
         f"Status       : {hot['status']}",
         "CUSTOM HOT START (MOTION HOLD)",
+        f"Boost command: {custom_timing.get('requested_boost_percent', 'N/A')} % / {custom_timing.get('target_current_a', 'N/A')} A / {custom_timing.get('target_voltage_v', 'N/A')} V",
+        f"Main restored: {custom_timing.get('main_restored', 'N/A')}",
         f"Enabled      : {custom.get('enabled', False)}",
         f"Hold req     : {value(custom.get('requested_hold_s'), 3)} s",
         f"Hold actual  : {value(custom.get('actual_hold_s'), 3)} s",

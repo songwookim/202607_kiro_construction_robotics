@@ -226,16 +226,24 @@ def test_custom_hot_start_is_independent_of_native_current_boost():
                    for key in digital_weld_recipe(settings))
 
 
-def test_custom_hot_start_fake_hold_waits_without_motion_commands():
+@pytest.mark.parametrize("fake", [True, False])
+def test_custom_hot_start_fake_hold_waits_without_motion_commands(fake):
     pose = make_pose()
     session = {"started_monotonic": time.monotonic(),
                "arc_off_control": {"arc_established_elapsed_s": 0.0},
                "custom_hot_start": {}}
     established = threading.Event()
     established.set()
+    commands = []
+    client = SimpleNamespace(
+        comm_alive=lambda: True,
+        latest_status=lambda: {"arc_established": True, "feedback_current_a": 240},
+        update_setpoints=lambda current, voltage: commands.append((current, voltage)),
+        inhibit_outputs=lambda: commands.append("OFF"),
+    )
     gui = SimpleNamespace(
-        fake_arc_enabled=SimpleNamespace(get=lambda: True),
-        hicomm_client=None,
+        fake_arc_enabled=SimpleNamespace(get=lambda: fake),
+        hicomm_client=None if fake else client,
         weld_arc_established_event=established,
         weld_arc_on_success=True,
         sequence_stop_requested=False,
@@ -253,6 +261,7 @@ def test_custom_hot_start_fake_hold_waits_without_motion_commands():
     assert session["custom_hot_start"]["status"] == "COMPLETED"
     assert session["custom_hot_start"]["actual_hold_s"] >= 0.01
     assert session["custom_hot_start"]["max_tcp_drift_mm"] == 0.0
+    assert commands == ([] if fake else [(240, 250), (200, 250)])
 
 
 def test_managed_custom_hot_start_must_be_between_arc_and_motion():
