@@ -68,6 +68,9 @@ class SeamCorrectionController:
             host.error("Automatic seam correction is already running")
             return
         host.pass_probe_touch_yaml_target = None
+        if host.keyboard_velocity_arm is not None or host.keyboard_velocity_switching:
+            host.error("Disable Keyboard Teaching before automatic seam correction")
+            return
         if not host.execution_allowed or not host.robot_connected["right"]:
             host.error("Connect the right robot and enable physical execution")
             return
@@ -600,6 +603,9 @@ class SeamCorrectionController:
             return
         if host.automatic_probe_kind is not None:
             host.error("Another Fastech DI4 touch probe is already active")
+            return
+        if host.keyboard_velocity_arm is not None or host.keyboard_velocity_switching:
+            host.error("Disable Keyboard Teaching before touch probing")
             return
         if host.planning_group.get() != "right_manipulator":
             host.error("Automatic Fastech DI4 seam probing currently supports the right arm")

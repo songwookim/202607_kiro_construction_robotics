@@ -29,6 +29,11 @@ LAUNCH_ARGUMENTS = (
     ("use_fake_left_hardware", "false", "Use mock left-arm hardware"),
     ("use_fake_right_hardware", "false", "Use mock right-arm hardware"),
     ("use_fake_head_hardware", "false", "Use mock head hardware"),
+    (
+        "keyboard_teaching_backend",
+        "servo",
+        "Keyboard teaching: servo (MoveIt Servo on the JTC) or native_jog",
+    ),
     ("debug_gui", "false", "Wait for a debugger on the weld GUI"),
     ("debug_gui_port", "5678", "debugpy port for the weld GUI"),
     (
@@ -181,6 +186,10 @@ def generate_launch_description():
             "use_fake_head_hardware": ParameterValue(
                 LaunchConfiguration("use_fake_head_hardware"),
                 value_type=bool,
+            ),
+            "keyboard_teaching_backend": ParameterValue(
+                LaunchConfiguration("keyboard_teaching_backend"),
+                value_type=str,
             ),
             "hicomm_source_ip": ParameterValue(
                 LaunchConfiguration("hicomm_source_ip"),

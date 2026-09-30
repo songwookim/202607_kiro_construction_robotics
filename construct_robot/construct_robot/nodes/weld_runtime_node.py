@@ -52,6 +52,7 @@ from construct_robot.core.cartesian_path_common import (
 )
 from construct_robot.nodes.cartesian_path_server import make_weld_visualization
 from construct_robot.core.keyboard_jog import keyboard_velocity_vector
+from construct_robot.nodes.keyboard_servo import KeyboardServoBridge
 from construct_robot.core.seam_geometry import (
     _pose_position_tuple,
     _unit_vector,
@@ -98,6 +99,9 @@ KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S = 0.25
 KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S = 0.80
 KEYBOARD_ZERO_BURST_COUNT = 5
 KEYBOARD_TF_LOOKUP_TIMEOUT_S = 0.05
+# "servo": MoveIt Servo streams into the active JTC (RB stays in Servo-J).
+# "native_jog": exchange JTC for the Cartesian velocity controller (jog_robot_l).
+KEYBOARD_TEACHING_BACKENDS = ("servo", "native_jog")
 
 
 class WeldGuiNode(Node):
@@ -121,6 +125,7 @@ class WeldGuiNode(Node):
             "wide_sensing_result_topic",
             "/wide_sensing/output/result",
         )
+        self.declare_parameter("keyboard_teaching_backend", "servo")
         self.cartesian_motion_client = ActionClient(
             self, CartesianPath, "cartesian_path"
         )
@@ -285,6 +290,21 @@ class WeldGuiNode(Node):
         }
         self.controller_state_future = None
         self.latest_joint_positions = {}
+        backend = str(self.get_parameter("keyboard_teaching_backend").value)
+        if backend not in KEYBOARD_TEACHING_BACKENDS:
+            raise ValueError(
+                f"keyboard_teaching_backend must be one of "
+                f"{KEYBOARD_TEACHING_BACKENDS}, got {backend!r}"
+            )
+        self.keyboard_servo = (
+            KeyboardServoBridge(
+                self,
+                {arm: CONTROLLER_NAMES[arm] for arm in ("left", "right")},
+                on_status=self._keyboard_servo_status,
+            )
+            if backend == "servo"
+            else None
+        )
         self.measured_joint_snapshot_lock = threading.Lock()
         self.measured_joint_snapshots = {}
         self.last_measured_joints_at = {}
@@ -542,8 +562,21 @@ class WeldGuiNode(Node):
         if arm in self.keyboard_velocity_publishers:
             self._publish_keyboard_velocity(force=True)
 
+    def keyboard_teaching_uses_servo(self):
+        return self.keyboard_servo is not None
+
     def keyboard_velocity_controller_ready(self, arm):
+        if self.keyboard_servo is not None:
+            return self.keyboard_servo.available(arm)
         return arm in self.keyboard_velocity_publishers
+
+    def _keyboard_servo_status(self, arm, code, text):
+        message = f"{arm.upper()} keyboard Servo · {text}"
+        if code in (0, 6):
+            self.get_logger().info(message)
+        else:
+            self.get_logger().warning(message)
+        self.ui.post(self.ui.log, message)
 
     def keyboard_velocity_feedback_ready(self, arm, maximum_age_s=0.25):
         received_at = self.last_robot_feedback_at.get(arm)
@@ -593,11 +626,24 @@ class WeldGuiNode(Node):
                 publish_zero_burst = False
         if arm not in self.keyboard_velocity_publishers:
             return
-        if not force and expired_arm is None and not publish_zero_burst:
+        # Servo is not latched: it needs the twist every cycle while a key is
+        # held and halts on its own when the stream stops.
+        servo_streaming = self.keyboard_servo is not None and any(
+            abs(value) > 1e-12 for value in values
+        )
+        if (
+            not force
+            and expired_arm is None
+            and not publish_zero_burst
+            and not servo_streaming
+        ):
             return
-        message = Float64MultiArray()
-        message.data = list(values)
-        self.keyboard_velocity_publishers[arm].publish(message)
+        if self.keyboard_servo is not None:
+            self.keyboard_servo.publish_twist(arm, values)
+        else:
+            message = Float64MultiArray()
+            message.data = list(values)
+            self.keyboard_velocity_publishers[arm].publish(message)
         if expired_arm is not None:
             self.get_logger().warning(
                 f"{expired_arm.upper()} keyboard velocity deadman expired; "
@@ -2085,7 +2131,9 @@ class WeldGuiNode(Node):
         return True, f"{controller} {action}"
 
     def set_keyboard_velocity_controller_enabled(self, arm, enable):
-        """Atomically exchange JTC and the native Cartesian-speed owner."""
+        """Hand keyboard teaching the arm, or return it to trajectories."""
+        if self.keyboard_servo is not None:
+            return self._set_keyboard_servo_enabled(arm, enable)
         if not enable:
             self.clear_keyboard_velocity()
             # A fixed 100 ms delay does not prove braking has finished.
@@ -2129,6 +2177,26 @@ class WeldGuiNode(Node):
         if not self.wait_for_controller_state(deactivate, "inactive"):
             return False, f"{deactivate} did not become inactive"
         return True, f"{deactivate} -> {activate}"
+
+    def _set_keyboard_servo_enabled(self, arm, enable):
+        """Start/stop MoveIt Servo on the arm's JTC; no controller exchange."""
+        if enable:
+            if not self.wait_for_controller_state(
+                CONTROLLER_NAMES[arm], "active", timeout=1.0
+            ):
+                return False, f"{CONTROLLER_NAMES[arm]} is not active"
+            return self.keyboard_servo.enable(arm)
+        self.clear_keyboard_velocity()
+        stopped = self.wait_until_arm_stopped(arm, timeout=3.0)
+        # Always leave Servo mode, even if still coasting: stopping Servo
+        # holds the last command and restores the JTC's normal start state.
+        success, message = self.keyboard_servo.disable(arm)
+        if not stopped:
+            return False, (
+                "measured joints had not stopped before Servo exit; "
+                f"{message}"
+            )
+        return success, message
 
     def wait_for_controller_state(self, controller, expected, timeout=3.0):
         deadline = time.monotonic() + timeout
@@ -2603,7 +2671,6 @@ class WeldGuiNode(Node):
             return
         pose_name = self.initial_planned_pose_name
         planning_group = self.initial_planned_group
-        self.initial_execution_group = planning_group
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
@@ -2715,22 +2782,14 @@ class WeldGuiNode(Node):
             self.ui.initial_position_execution_finished,
             "Robot reached the selected taught pose",
         )
-        group = getattr(self, "initial_execution_group", None)
-        if group:
-            threading.Thread(
-                target=self.release_servo_hold_after_arrival,
-                args=(group.removesuffix("_manipulator"),),
-                daemon=True,
-            ).start()
 
     def release_servo_hold_after_arrival(self, arm):
-        """Let RB settle into Idle now, not at the next Keyboard Teaching ON.
+        """End the post-trajectory Servo-J hold once the arm is stationary.
 
-        After a trajectory the hardware keeps streaming Servo-J hold samples,
-        so RB stays in its stiff servo hold.  The servo->Idle settle (a small
-        gravity drop on the shoulder/wrist joints) then happened when Keyboard
-        Teaching switched controllers and was felt as a kick.  Ending the hold
-        once the arm is measurably stationary moves that settle to arrival.
+        Not called automatically: releasing the hold moves the RB servo->Idle
+        settle to arrival, but every following trajectory then starts from RB
+        Idle and gets the mirror-image Idle->servo start kick.  Kept for
+        attended diagnostics of that RB mode transition.
         """
         if not self.wait_until_arm_stopped(arm, timeout=2.0):
             self.ui.post(

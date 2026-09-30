@@ -1,0 +1,41 @@
+# MoveIt Servo settings shared by the left/right keyboard-teaching servos.
+# moveit.launch.py adds the per-arm group, frames and topics.
+#
+# Keyboard teaching streams Cartesian twists through Servo into the arm's
+# JointTrajectoryController, so RB stays in Servo-J the whole time and never
+# passes through its Idle hold (whose Idle->Servo-J transition kicks the arm).
+use_gazebo: false
+command_in_type: speed_units          # m/s and rad/s, as the GUI sends them
+scale:
+  linear: 0.4                         # unused with speed_units
+  rotational: 0.8
+  joint: 0.5
+# The JTC restarts each streamed trajectory from its last command and reaches
+# the point after time_from_start (= publish_period).  At one controller cycle
+# (0.008 s) every message is sampled only once, at 0 % progress, and the arm
+# stalls until the stream stops.  Four 125 Hz cycles let each segment finish.
+publish_period: 0.032
+low_latency_mode: false
+command_out_type: trajectory_msgs/JointTrajectory
+publish_joint_positions: true
+publish_joint_velocities: true
+publish_joint_accelerations: false
+smoothing_filter_plugin_name: online_signal_smoothing::ButterworthFilterPlugin
+is_primary_planning_scene_monitor: false
+monitored_planning_scene_topic: /monitored_planning_scene
+planning_frame: World
+# The GUI streams twists at 50 Hz while a key is held; Servo halts on its own
+# if that stream stops (GUI deadman lease is the primary stop path).
+incoming_command_timeout: 0.2
+num_outgoing_halt_msgs_to_publish: 4
+lower_singularity_threshold: 17.0
+hard_stop_singularity_threshold: 30.0
+leaving_singularity_threshold_multiplier: 2.0
+joint_limit_margin: 0.1
+cartesian_command_in_topic: ~/delta_twist_cmds
+joint_command_in_topic: ~/delta_joint_cmds
+status_topic: ~/status
+check_collisions: true
+collision_check_rate: 10.0
+self_collision_proximity_threshold: 0.01
+scene_collision_proximity_threshold: 0.02

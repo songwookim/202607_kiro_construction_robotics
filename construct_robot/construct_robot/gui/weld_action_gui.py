@@ -5664,6 +5664,14 @@ class WeldActionGui:
         if self.sequence_running:
             self.error("A sequence is already running")
             return
+        # Keyboard teaching keeps the JTC active (MoveIt Servo), so trajectory
+        # execution must not share the arm with it.
+        if execute_requested and (
+            self.keyboard_velocity_arm is not None
+            or self.keyboard_velocity_switching
+        ):
+            self.error("Disable Keyboard Teaching before executing a sequence")
+            return
         if steps_override is not None:
             indices, steps = self.sequence_model.execution_snapshot(
                 run_all, steps_override
@@ -5963,10 +5971,13 @@ class WeldActionGui:
                 return
         self.keyboard_velocity_switching = True
         self._set_keyboard_jog_enable_state(tk.DISABLED)
+        uses_servo = self.node.keyboard_teaching_uses_servo()
         self.keyboard_jog_status.set(
-            "SWITCHING to native Cartesian velocity..."
+            ("STARTING MoveIt Servo keyboard teaching..." if uses_servo
+             else "SWITCHING to native Cartesian velocity...")
             if enable
-            else "ZERO command · restoring trajectory controller..."
+            else ("ZERO command · stopping MoveIt Servo..." if uses_servo
+                  else "ZERO command · restoring trajectory controller...")
         )
         threading.Thread(
             target=self._keyboard_velocity_mode_worker,
@@ -6007,7 +6018,12 @@ class WeldActionGui:
                     "arm did not reach standstill before controller exchange",
                 )
                 return
-            if not self.node.wait_for_robot_idle(arm, timeout=1.0):
+            # MoveIt Servo keeps RB in its Servo-J hold on purpose, so RB
+            # Idle is only expected for the native jog exchange.
+            if (
+                not self.node.keyboard_teaching_uses_servo()
+                and not self.node.wait_for_robot_idle(arm, timeout=1.0)
+            ):
                 # Measured standstill above is the hard safety condition. Some
                 # RB firmware keeps reporting Moving briefly after the final
                 # servo sample; do not turn that status lag into a permanent
@@ -6071,7 +6087,11 @@ class WeldActionGui:
                 self.keyboard_jog_status.set(
                     f"READY {arm.upper()} · hold arrow to move"
                 )
-            self.log(f"Keyboard native Cartesian velocity enabled · {message}")
+            backend = (
+                "MoveIt Servo" if self.node.keyboard_teaching_uses_servo()
+                else "native Cartesian velocity"
+            )
+            self.log(f"Keyboard {backend} enabled · {message}")
             return
         if success:
             self.keyboard_velocity_arm = None
@@ -6118,9 +6138,17 @@ class WeldActionGui:
                 daemon=True,
             ).start()
 
+    def _keyboard_jog_stop_timeout_s(self):
+        # Servo-J follows the Servo command ~0.2-0.3 s late, so the arm is
+        # still settling at the native jog's 0.22 s check.  A false fallback
+        # move_stop would drop RB to Idle and bring back the start kick.
+        return 0.6 if self.node.keyboard_teaching_uses_servo() else 0.22
+
     def _verify_keyboard_jog_stop_worker(self, arm, generation):
         stopped = self.node.wait_until_arm_stopped(
-            arm, timeout=0.22, stable_duration_s=0.08
+            arm,
+            timeout=self._keyboard_jog_stop_timeout_s(),
+            stable_duration_s=0.08,
         )
         self.post(
             self._keyboard_jog_stop_verified,
@@ -6142,7 +6170,8 @@ class WeldActionGui:
             f"STOP FALLBACK · {arm.upper()} controlled move_stop"
         )
         self.log(
-            f"Keyboard jog zero not stationary within 0.22 s · "
+            f"Keyboard jog zero not stationary within "
+            f"{self._keyboard_jog_stop_timeout_s():.2f} s · "
             f"requesting {arm.upper()} controlled move_stop"
         )
         threading.Thread(

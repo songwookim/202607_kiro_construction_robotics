@@ -2149,6 +2149,7 @@ def test_keyboard_velocity_is_edge_published_and_deadman_sends_zero():
     node = object.__new__(WeldGuiNode)
     publisher = Publisher()
     deadman_events = []
+    node.keyboard_servo = None  # native jog_robot_l backend
     node.keyboard_velocity_publishers = {"right": publisher}
     node.keyboard_velocity_lock = threading.Lock()
     node.keyboard_velocity_command = {
