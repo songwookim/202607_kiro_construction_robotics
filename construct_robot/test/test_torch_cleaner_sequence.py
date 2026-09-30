@@ -6,7 +6,7 @@ import yaml
 from geometry_msgs.msg import Pose
 
 from construct_robot.teaching_paths import teaching_config_dir
-from construct_robot.torch_cleaner_panel import TorchCleanerPanel
+from construct_robot.gui.torch_cleaner_panel import TorchCleanerPanel
 from construct_robot.weld_action_gui import WeldActionGui, WeldGuiNode
 from construct_robot.core.torch_cleaner_teaching import (
     build_cleaner_sequence_steps, save_cleaner_correction,

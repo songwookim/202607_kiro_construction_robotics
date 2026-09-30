@@ -272,3 +272,68 @@ def test_step_conditions_record_motion_waypoints():
             "orientation_xyzw": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         }],
     }]
+
+
+def weld_scenario_steps():
+    arc_on = {"type": "digital_weld", "command": "on", "settings": {}, "parallel_slot": 1,
+              "weld_scenario_id": "weld-1", "weld_scenario_stage": "arc_on"}
+    motion = {"type": "motion", "planning_group": "right_manipulator", "parallel_slot": 1,
+              "points": ("a", "b"), "weld_scenario_id": "weld-1",
+              "weld_scenario_stage": "weld_motion"}
+    return [arc_on, motion]
+
+
+def test_weld_path_is_planned_before_arc_on_and_executed_from_that_plan():
+    host, executor = make_host()
+    order = []
+
+    def cartesian(step, execute):
+        order.append(("cartesian", execute, bool(step.get("reuse_approved_plan"))))
+        return True, "planned" if not execute else "executed"
+
+    def arc(kind, settings, conditions=None):
+        order.append(("arc", kind))
+        host.weld_arc_on_success = True
+        host.weld_arc_established_event.set()
+        host.weld_arc_on_done_event.set()
+        return True, "ARC"
+
+    host.node.run_sequence_cartesian_motion = cartesian
+    host._execute_hicomm_weld = arc
+    run(executor, weld_scenario_steps())
+
+    assert order[0] == ("cartesian", False, False)   # plan only, before ARC ON
+    assert ("arc", "on") in order
+    assert order.index(("cartesian", True, True)) > order.index(("arc", "on"))
+    host._sequence_finished.assert_called_once_with(True, "complete")
+
+
+def test_failed_weld_path_planning_never_sends_arc_on():
+    host, executor = make_host()
+    host.node.run_sequence_cartesian_motion = Mock(return_value=(False, "IK failed"))
+    run(executor, weld_scenario_steps())
+    host._execute_hicomm_weld.assert_not_called()
+    host.node.run_sequence_cartesian_motion.assert_called_once()
+    host._sequence_finished.assert_called_once_with(
+        False, "weld path planning failed before ARC ON: IK failed"
+    )
+
+
+def test_node_reuses_approved_plan_only_for_execution():
+    from construct_robot.nodes.weld_runtime_node import WeldGuiNode
+
+    node = object.__new__(WeldGuiNode)
+    node.node_touch_input_states = {"right": False}
+    node.ui = SimpleNamespace(post=Mock(), log=Mock(), record_weld_tcp_sample=Mock())
+    node.cartesian_motion_client = object()
+    goals = []
+    node._send_action_goal_and_wait = lambda client, goal, name, **kw: (
+        goals.append(goal) or SimpleNamespace(success=True, message="ok")
+    )
+    pose = Pose(); pose.orientation.w = 1.0
+    step = {"planning_group": "right_manipulator", "interpolation_step": 0.001,
+            "velocity_scale": 0.2, "points": (pose, pose), "reuse_approved_plan": True}
+    WeldGuiNode.run_sequence_cartesian_motion(node, step, False)
+    WeldGuiNode.run_sequence_cartesian_motion(node, step, True)
+    assert [g.reuse_approved_plan for g in goals] == [False, True]
+    assert [g.execute_requested for g in goals] == [False, True]

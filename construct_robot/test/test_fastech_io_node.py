@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from construct_robot.fastech_ethernet import FastechIoSnapshot
-from construct_robot.fastech_io_node import (
+from construct_robot.io.fastech_ethernet import FastechIoSnapshot
+from construct_robot.nodes.fastech_io_node import (
     FastechConnectionManager,
     TOUCH_INPUT_CHANNEL,
     TOUCH_OUTPUT_CHANNEL,
@@ -96,7 +96,7 @@ def test_touch_semantic_interface_maps_to_configured_physical_channel():
 
 def test_gui_does_not_own_or_poll_the_fastech_protocol_adapter():
     gui_source = (
-        Path(__file__).parents[1] / "construct_robot" / "weld_action_gui.py"
+        Path(__file__).parents[1] / "construct_robot" / "gui" / "weld_action_gui.py"
     ).read_text(encoding="utf-8")
 
     assert "FastechEthernetClient" not in gui_source

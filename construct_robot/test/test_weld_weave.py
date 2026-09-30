@@ -1,7 +1,7 @@
 import math
 import pytest
 from geometry_msgs.msg import Pose
-from construct_robot.cartesian_path_common import weave_cycles_for_pitch
+from construct_robot.core.cartesian_path_common import weave_cycles_for_pitch
 from construct_robot.weld_action_gui import (
     weld_weave_geometry, weave_path_speed_m_s, validated_seam_speed_factor,
 )
@@ -90,7 +90,7 @@ def test_hold_plan_is_continuous_and_stationary_during_dwell():
     from construct_msgs.action import CartesianPath
     from moveit_msgs.srv import GetCartesianPath
     from trajectory_msgs.msg import JointTrajectoryPoint
-    from construct_robot.cartesian_path_server import CartesianPathActionServer
+    from construct_robot.nodes.cartesian_path_server import CartesianPathActionServer
 
     states = []
 
@@ -169,7 +169,7 @@ def test_zero_dwell_sine_uses_one_continuous_smoothed_path():
 
 
 def test_sine_speed_means_seam_progress_not_wavy_tcp_distance():
-    from construct_robot.cartesian_path_common import weaving_from_path
+    from construct_robot.core.cartesian_path_common import weaving_from_path
     from construct_robot.weld_action_gui import update_weld_scenario_motion_values
     start, goal = seam()
     points = weaving_from_path((start, goal), .003, 4, 12, transverse_vector=(0, 1, 0))
@@ -190,7 +190,7 @@ def test_pass_through_lead_is_not_planned_as_a_tiny_separate_leg():
     from construct_msgs.action import CartesianPath
     from moveit_msgs.srv import GetCartesianPath
     from trajectory_msgs.msg import JointTrajectoryPoint
-    from construct_robot.cartesian_path_server import CartesianPathActionServer
+    from construct_robot.nodes.cartesian_path_server import CartesianPathActionServer
     calls = []
 
     def plan(request, start_state=None, publish=False):
@@ -310,7 +310,7 @@ def test_weave_preview_accepts_the_sensed_direction():
 
 def test_sensed_and_generic_weaves_actually_differ():
     """Guards the claim above with numbers rather than trust."""
-    from construct_robot.cartesian_path_common import (
+    from construct_robot.core.cartesian_path_common import (
         linear_pose_waypoints, weaving_from_path,
     )
 

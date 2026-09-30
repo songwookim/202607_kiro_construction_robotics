@@ -12,7 +12,7 @@ import yaml
 from rclpy.action import CancelResponse
 from trajectory_msgs.msg import JointTrajectoryPoint
 
-from construct_robot.cartesian_path_common import (
+from construct_robot.core.cartesian_path_common import (
     circle_waypoints,
     circular_weaving_from_path,
     linear_pose_waypoints,
@@ -28,7 +28,7 @@ from construct_robot.cartesian_path_common import (
     weaving_from_path,
     weaving_waypoints,
 )
-from construct_robot.cartesian_path_server import (
+from construct_robot.nodes.cartesian_path_server import (
     CartesianPathActionServer,
     interpolate_pose,
     rotate_vector,

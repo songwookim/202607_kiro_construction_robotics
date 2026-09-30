@@ -1,10 +1,8 @@
 import copy
-import hashlib
 import math
 from pathlib import Path
 import queue
 import signal
-import tempfile
 import threading
 import time
 import tkinter as tk
@@ -147,6 +145,7 @@ from construct_robot.application.weld_sequence_builder import (
     resolve_weld_endpoints,
     validate_required_weld_poses,
 )
+from construct_robot.application.multipass_controller import MultipassController
 from construct_robot.application.seam_correction_controller import (
     SeamCorrectionController,
 )
@@ -220,6 +219,11 @@ def _weld_controller_for(host):
     return WeldExecutionController(
         host, fake_arc=lambda: WeldActionGui._execution_fake_arc(host)
     )
+
+
+def _multipass_for(host):
+    """Four-pass registration workflow bound to a GUI (or a test double)."""
+    return MultipassController(host)
 
 
 def _seam_correction_for(host):
@@ -3355,304 +3359,11 @@ class WeldActionGui:
             self.multi_pass_registration = None
             self._set_four_pass_status("Folder changed · load four references")
 
-    def load_four_pass_references(self):
-        folder = Path(self.four_pass_folder.get()).expanduser().resolve()
-        try:
-            if not folder.is_dir():
-                raise ValueError(f"4-pass work folder does not exist: {folder}")
 
-            # Feedback logs are immutable execution evidence.  Editable pass
-            # teaching is stored directly in the browsed folder as
-            # pass_N.yaml.  The former pass_teaching/pass_N_teaching.yaml
-            # layout remains read-only compatible during migration.
-            if folder.name == "pass_teaching":
-                log_folder = folder.parent
-            else:
-                log_folder = folder
-
-            references = {}
-            yaml_count = 0
-            log_count = 0
-            missing = []
-            for number in range(1, 5):
-                teaching_path = folder / f"pass_{number}.yaml"
-                legacy_paths = (
-                    folder / f"pass_{number}_teaching.yaml",
-                    folder / "pass_teaching" / f"pass_{number}_teaching.yaml",
-                )
-                log_path = log_folder / f"{number}.log"
-                if teaching_path.is_file():
-                    references[number] = read_pass_teaching_reference(
-                        teaching_path, number
-                    )
-                    yaml_count += 1
-                elif any(path.is_file() for path in legacy_paths):
-                    legacy_path = next(
-                        path for path in legacy_paths if path.is_file()
-                    )
-                    references[number] = read_pass_teaching_reference(
-                        legacy_path, number
-                    )
-                    yaml_count += 1
-                elif log_path.is_file():
-                    references[number] = read_weld_pass_reference(log_path)
-                    log_count += 1
-                else:
-                    missing.append(
-                        f"Pass {number}: {teaching_path} or {log_path}"
-                    )
-            if missing:
-                raise ValueError(
-                    "No teaching YAML or fallback weld log for "
-                    + " · ".join(missing)
-                )
-            if yaml_count == 4:
-                reference_set_kind = "4 pass-teaching YAML overrides"
-            elif log_count == 4:
-                reference_set_kind = "4 completed weld logs"
-            else:
-                reference_set_kind = (
-                    f"{yaml_count} pass-teaching YAML override(s) + "
-                    f"{log_count} weld-log fallback(s)"
-                )
-        except (OSError, ValueError, yaml.YAMLError) as error:
-            self.four_pass_references = {}
-            self.four_pass_loaded_folder = None
-            self.error(f"Cannot load 4-pass references: {error}")
-            return False
-        self.four_pass_references = references
-        self.four_pass_loaded_folder = folder
-        self.four_pass_corrected = {
-            number: {
-                endpoint: copy.deepcopy(reference[endpoint])
-                for endpoint in ("start_wait", "start", "goal_wait", "goal")
-            }
-            for number, reference in references.items()
-        }
-        restored = self._load_latest_sequential_four_pass_state(
-            folder, references
-        )
-        if restored is None:
-            self.four_pass_output_folder = None
-            histories = [
-                reference.get("correction_history", [])
-                for reference in references.values()
-            ]
-            self.four_pass_history = copy.deepcopy(
-                max(histories, key=len, default=[])
-            )
-        else:
-            (
-                self.four_pass_corrected,
-                self.four_pass_output_folder,
-                self.four_pass_history,
-            ) = restored
-        self.multi_pass_registration = None
-        lengths = [
-            1000.0 * math.dist(
-                _pose_position_tuple(references[number]["start"]),
-                _pose_position_tuple(references[number]["goal"]),
-            ) for number in range(1, 5)
-        ]
-        restore_note = (
-            f" · resumed corrections from {self.four_pass_output_folder.name}"
-            if self.four_pass_output_folder is not None
-            else " · no saved cumulative correction; using loaded reference set"
-        )
-        self._set_four_pass_status(
-            f"Loaded {reference_set_kind} for pass 1–4 · seam lengths "
-            + "/".join(f"{length:.1f}" for length in lengths)
-            + f" mm{restore_note}"
-        )
-        self.log(
-            f"4-PASS REFERENCES LOADED · {folder} · {reference_set_kind} · "
-            "logs immutable / teaching editable in YAML · "
-            f"lengths={lengths} mm"
-        )
-        return True
-
-    def _load_latest_sequential_four_pass_state(self, folder, references):
-        """Restore the newest valid cumulative correction for these source logs."""
-        # Canonical pass YAMLs already contain the current corrected/manual
-        # teaching. Source ancestry hashes are not evidence that an older
-        # manifest should overwrite those newly saved poses.
-        if any(
-            reference.get("reference_kind") == "saved_pass_teaching"
-            for reference in references.values()
-        ):
-            return None
-        candidates = sorted(
-            [
-                path
-                for path in (
-                    folder / "manifest.yaml",
-                    *folder.glob("sequential_corrected_*/manifest.yaml"),
-                )
-                if path.is_file()
-            ],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        for manifest_path in candidates:
-            try:
-                manifest = yaml.load(
-                    manifest_path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader
-                ) or {}
-                schema = manifest.get("schema")
-                if schema not in (
-                    "construct_robot_sequential_four_pass_correction_v2",
-                    "construct_robot_sequential_four_pass_correction_v3",
-                ):
-                    continue
-                entries = {
-                    int(entry["pass"]): entry["file"]
-                    for entry in manifest.get("passes", ())
-                }
-                if set(entries) != {1, 2, 3, 4}:
-                    raise ValueError("manifest does not list exactly Pass 1..4")
-                records = {}
-                for number in range(1, 5):
-                    record = yaml.load(
-                        (manifest_path.parent / entries[number]).read_text(
-                            encoding="utf-8"
-                        ), Loader=yaml.CSafeLoader
-                    ) or {}
-                    accepted_hashes = {references[number]["sha256"]}
-                    for key in ("source_reference_sha256", "source_log_sha256"):
-                        source_hash = references[number].get(key)
-                        if source_hash:
-                            accepted_hashes.add(source_hash)
-                    record_source_hash = record.get("source_log_sha256") or record.get(
-                        "source_reference_sha256"
-                    )
-                    if record_source_hash not in accepted_hashes:
-                        raise ValueError(
-                            f"Pass {number} source hash no longer matches"
-                        )
-                    records[number] = record
-                history = manifest.get("history", [])
-                if not isinstance(history, list):
-                    raise ValueError("manifest history is not a list")
-                if schema.endswith("_v3"):
-                    if all(
-                        f"current_{endpoint}" in records[number]
-                        for number in range(1, 5)
-                        for endpoint in ("start_wait", "start", "goal_wait", "goal")
-                    ):
-                        corrected = {
-                            number: {
-                                endpoint: _pose_from_yaml_dict(
-                                    records[number][f"current_{endpoint}"],
-                                    f"Pass {number} current {endpoint}",
-                                )
-                                for endpoint in (
-                                    "start_wait", "start", "goal_wait", "goal"
-                                )
-                            }
-                            for number in range(1, 5)
-                        }
-                    else:
-                        corrected = {
-                            number: {
-                                endpoint: read_pass_teaching_reference(
-                                    manifest_path.parent / entries[number], number
-                                )[endpoint]
-                                for endpoint in (
-                                    "start_wait", "start", "goal_wait", "goal"
-                                )
-                            }
-                            for number in range(1, 5)
-                        }
-                else:
-                    # v2 stored corrected START/GOAL only. Replay its measured
-                    # anchor events on today's full log references so the
-                    # pass-specific WAIT poses receive identical transforms.
-                    corrected = {
-                        number: {
-                            endpoint: copy.deepcopy(references[number][endpoint])
-                            for endpoint in (
-                                "start_wait", "start", "goal_wait", "goal"
-                            )
-                        }
-                        for number in range(1, 5)
-                    }
-                    for event in history:
-                        anchor = int(event["selected_pass"])
-                        measured_start = _pose_from_yaml_dict(
-                            event["measured_start"],
-                            f"Pass {anchor} v2 measured START",
-                        )
-                        measured_goal = _pose_from_yaml_dict(
-                            event["measured_goal"],
-                            f"Pass {anchor} v2 measured GOAL",
-                        )
-                        corrected, _transform = correct_remaining_passes(
-                            corrected, anchor, measured_start, measured_goal
-                        )
-            except (
-                KeyError, OSError, TypeError, ValueError, yaml.YAMLError
-            ) as error:
-                self.log(
-                    f"Skipped invalid cumulative correction {manifest_path}: {error}"
-                )
-                continue
-            self.log(
-                f"RESTORED CUMULATIVE 4-PASS CORRECTION · {manifest_path.parent} · "
-                f"events={len(history)}"
-            )
-            return corrected, manifest_path.parent, copy.deepcopy(history)
-        return None
-
-    def _set_four_pass_status(self, text):
-        self.multipass_state.status = text
-        self.four_pass_status.set(text)
-
-    def _selected_pass(self):
-        """Copy the operator's pass choice into the application working state."""
-        return self.multipass_state.select(self.selected_pass_number.get())
-
-    def run_four_pass_correction(self):
-        if self.multi_pass_registration is not None:
-            self.error("A multi-pass registration is already in progress")
-            return
-        if self.sequence_running or self.node.active_motion_goal is not None:
-            self.error("Wait for the current robot motion to finish")
-            return
-        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
-            self.error("Disable Keyboard Teaching before moving to START WAIT")
-            return
-        if (
-            not self.four_pass_references
-            or Path(self.four_pass_folder.get()).expanduser().resolve()
-            != self.four_pass_loaded_folder
-        ) and not self.load_four_pass_references():
-            return
-        try:
-            number = self._selected_pass()
-            if number not in (1, 2, 3, 4):
-                raise ValueError("Select Pass 1, 2, 3, or 4")
-            self._validate_four_pass_source_hashes()
-            waits = {
-                endpoint: self._multi_pass_translated_wait(number, endpoint)
-                for endpoint in ("start", "goal")
-            }
-            end_entry = self.four_pass_references[number].get(
-                "additional_pose_entries", {}
-            ).get("weld_finish")
-            if end_entry is None:
-                raise ValueError("Save this pass's Weld end pose before correction")
-            end_group, _, _, end_pose = parse_teaching_snapshot_entry(
-                "weld_finish", end_entry
-            )
-            if end_group != "right_manipulator":
-                raise ValueError("Weld end pose must belong to the right arm")
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Cannot start multi-pass correction: {error}")
-            return
-        if not self.execution_allowed or not self.robot_connected.get("right", False):
-            self.error("Connect the right robot and enable physical execution")
-            return
-        if not messagebox.askyesno(
+    # Tk-only hooks used by application.multipass_controller at the exact
+    # points where the multi-pass workflow previously touched widgets/dialogs.
+    def _confirm_multi_pass_registration(self, number):
+        return messagebox.askyesno(
             "Sequential multi-pass registration",
             f"Register Pass {number} START and GOAL?\n\n"
             "The robot uses this pass's corrected WAIT poses loaded from its log. "
@@ -3663,82 +3374,49 @@ class WeldActionGui:
             f"Pass {number}: save captured TCP1/2, keep WAIT. Transform later passes only. No arc or welding "
             "command will be sent.",
             parent=self.root,
-        ):
-            return
-        self.multi_pass_registration = {
-            "pass": number,
-            "phase": "moving_start_wait",
-            "previous": copy.deepcopy(self.four_pass_corrected),
-            "waits": waits,
-            "end_pose": copy.deepcopy(end_pose),
-            "velocity_scale": max(
-                0.01, min(1.0, float(self.velocity_percent.get()) / 100.0)
-            ),
-            "measured_start": None,
-            "measured_goal": None,
-        }
-        self._set_four_pass_status(
-            f"Pass {number} correction · moving to corrected logged START WAIT"
         )
-        threading.Thread(
-            target=self._multi_pass_start_wait_worker,
-            args=(number, copy.deepcopy(waits["start"])),
-            daemon=True,
-        ).start()
+
+    def _confirm_corrected_pass_endpoint(self, number, endpoint):
+        return messagebox.askyesno(
+            "Verify corrected pass endpoint",
+            f"Move to corrected Pass {number} {endpoint.upper()}?\n\n"
+            "This is a robot motion only. ARC and welding outputs remain OFF.",
+            parent=self.root,
+        )
+
+    def _set_keyboard_jog_controls_enabled(self, enabled):
+        self._set_keyboard_jog_enable_state(tk.NORMAL if enabled else tk.DISABLED)
+
+    def _focus_keyboard_teaching(self):
+        self.root.focus_set()
+
+    def load_four_pass_references(self):
+        return _multipass_for(self).load_references()
+
+    def _load_latest_sequential_four_pass_state(self, folder, references):
+        return _multipass_for(self).load_latest_sequential_state(folder, references)
+
+    def _set_four_pass_status(self, text):
+        self.multipass_state.status = text
+        self.four_pass_status.set(text)
+
+    def _selected_pass(self):
+        """Copy the operator's pass choice into the application working state."""
+        return self.multipass_state.select(self.selected_pass_number.get())
+
+    def run_four_pass_correction(self):
+        return _multipass_for(self).run_correction()
 
     def _validate_four_pass_source_hashes(self):
-        if set(self.four_pass_references) != {1, 2, 3, 4}:
-            raise ValueError("Load all four pass references first")
-        for number, reference in self.four_pass_references.items():
-            if hashlib.sha256(Path(reference["path"]).read_bytes()).hexdigest() != reference["sha256"]:
-                raise ValueError(
-                    f"Pass {number} reference changed after loading; reload references"
-                )
+        return _multipass_for(self).validate_source_hashes()
 
     def _multi_pass_translated_wait(self, number, endpoint):
-        if set(self.four_pass_corrected) != {1, 2, 3, 4}:
-            raise ValueError("Current four-pass prediction is unavailable")
-        wait_endpoint = f"{endpoint}_wait"
-        selected = self.four_pass_corrected[number][endpoint]
-        translated = copy.deepcopy(self.four_pass_corrected[number][wait_endpoint])
-        selected_separation = math.dist(
-            _pose_position_tuple(translated), _pose_position_tuple(selected)
-        )
-        if selected_separation < 0.001:
-            raise ValueError(
-                f"Pass {number} logged/corrected {wait_endpoint.upper()} "
-                f"is indistinguishable from {endpoint.upper()} · separation "
-                f"{selected_separation * 1000.0:.1f} mm"
-            )
-        if selected_separation < 0.020:
-            self.log(
-                f"4-PASS WAIT CLEARANCE WARNING · Pass {number} "
-                f"{wait_endpoint.upper()} is only "
-                f"{selected_separation * 1000.0:.1f} mm from "
-                f"{endpoint.upper()} · using the pass log value as requested · "
-                "verify the collision scene and keep STOP accessible"
-            )
-        return translated
+        return _multipass_for(self).translated_wait(number, endpoint)
 
     def _run_multi_pass_tcp_move(
         self, target, label, velocity_scale, touch_guard=False
     ):
-        try:
-            current = self.node._current_tcp_pose("right_manipulator")
-            points = named_tcp_linear_waypoints(current, target)
-        except (TransformException, ValueError) as error:
-            return False, f"{label} path failed: {error}"
-        return self.node.run_sequence_cartesian_motion({
-            "planning_group": "right_manipulator",
-            "interpolation_step": 0.005,
-            "velocity_scale": float(velocity_scale),
-            "tcp_speed_m_s": 0.0,
-            "points": points,
-            "path_kind": label,
-            "touch_guard": bool(touch_guard),
-            "continue_after_touch": False,
-            "allow_initial_touch_motion": False,
-        }, True)
+        return _multipass_for(self).run_tcp_move(target, label, velocity_scale, touch_guard)
 
     def stop_multi_pass_correction(self):
         """Invalidate registration and use the existing all-motion stop path."""
@@ -3748,846 +3426,65 @@ class WeldActionGui:
         )
 
     def _multi_pass_start_wait_worker(self, number, target):
-        session = self.multi_pass_registration
-        if session is None or session["pass"] != number:
-            return
-        success, message = self._run_multi_pass_tcp_move(
-            target,
-            f"Pass {number} corrected logged START WAIT",
-            session["velocity_scale"],
-        )
-        self.post(self._multi_pass_start_wait_finished, number, success, message)
+        return _multipass_for(self).start_wait_worker(number, target)
 
     def _multi_pass_start_wait_finished(self, number, success, message):
-        session = self.multi_pass_registration
-        if session is None or session["pass"] != number:
-            return
-        if not success:
-            self.multi_pass_registration = None
-            self.error(f"Pass {number} START WAIT move failed: {message}")
-            return
-        session["phase"] = "waiting_start_capture"
-        self._set_four_pass_status(
-            f"Pass {number} correction · waiting for START capture (I) · "
-            "enable Keyboard Teaching and jog to the real START"
-        )
-        self.pipeline_result(
-            f"Pass {number} corrected logged START WAIT reached · "
-            "no welding command sent"
-        )
-        self._enable_multi_pass_keyboard_teaching(number, "i")
+        return _multipass_for(self).start_wait_finished(number, success, message)
 
     def _enable_multi_pass_keyboard_teaching(self, number, expected_key):
-        """Enable the existing keyboard controller for the next I/J capture."""
-        session = self.multi_pass_registration
-        if session is None or session["pass"] != number:
-            return
-        expected_key = str(expected_key).lower()
-        if expected_key not in ("i", "j"):
-            raise ValueError("Multi-pass capture key must be I or J")
-        if self.keyboard_velocity_arm == "right" and not self.keyboard_velocity_switching:
-            self.root.focus_set()
-            self.keyboard_jog_enabled.set(True)
-            self.keyboard_jog_status.set(
-                f"READY RIGHT · jog then press {expected_key.upper()} to capture"
-            )
-            return
-        if self.keyboard_velocity_switching:
-            self._set_four_pass_status(
-                f"Pass {number} correction · waiting for Keyboard Teaching · "
-                f"then press {expected_key.upper()}"
-            )
-            return
-        self.keyboard_jog_enabled.set(True)
-        self._set_four_pass_status(
-            f"Pass {number} correction · enabling Keyboard Teaching for "
-            f"{expected_key.upper()} capture"
-        )
-        self.keyboard_jog_status.set(
-            f"AUTO ENABLE · preparing {expected_key.upper()} capture..."
-        )
-        self.keyboard_jog_enable_changed()
+        return _multipass_for(self).enable_keyboard_teaching(number, expected_key)
 
     def _finish_multi_pass_keyboard_capture(self, key, captured, error):
-        self.keyboard_teaching_capture_in_progress = False
-        session = self.multi_pass_registration
-        if session is None:
-            self.error("Multi-pass capture arrived after the session ended")
-            return
-        number = session["pass"]
-        expected_key = "i" if session["phase"] == "waiting_start_capture" else "j"
-        if session["phase"] not in ("waiting_start_capture", "waiting_goal_capture"):
-            self.error("Wait for automatic multi-pass motion to finish before capturing")
-            return
-        if key != expected_key:
-            self.error(
-                f"Pass {number} expects {expected_key.upper()} capture, not {key.upper()}"
-            )
-            return
-        if error is not None:
-            self.keyboard_jog_status.set(f"{key.upper()} · capture rejected")
-            self._set_four_pass_status(
-                f"Pass {number} correction · {key.upper()} capture FAILED · retry"
-            )
-            self.error(f"Pass {number} {key.upper()} capture rejected: {error}")
-            return
-        _joint_names, _positions, pose, provenance = captured
-        if key == "i":
-            session["measured_start"] = copy.deepcopy(pose)
-            session["start_capture_provenance"] = copy.deepcopy(provenance)
-            session["phase"] = "moving_goal_wait"
-            self.keyboard_velocity_switching = True
-            self._set_keyboard_jog_enable_state(tk.DISABLED)
-            self._set_four_pass_status(
-                f"Pass {number} correction · I accepted / START captured · "
-                "restoring trajectory controller and moving to GOAL WAIT"
-            )
-            self.keyboard_jog_status.set(
-                f"I COMPLETE · Pass {number} START saved · moving to GOAL WAIT"
-            )
-            threading.Thread(
-                target=self._multi_pass_goal_wait_worker,
-                args=(number, copy.deepcopy(session["waits"]["goal"])),
-                daemon=True,
-            ).start()
-            return
-        session["measured_goal"] = copy.deepcopy(pose)
-        session["goal_capture_provenance"] = copy.deepcopy(provenance)
-        self._set_four_pass_status(
-            f"Pass {number} correction · J accepted / GOAL captured · "
-            "calculating cumulative correction"
-        )
-        self.keyboard_jog_status.set(
-            f"J COMPLETE · Pass {number} GOAL saved"
-        )
-        self._complete_multi_pass_registration()
+        return _multipass_for(self).finish_keyboard_capture(key, captured, error)
 
     def _multi_pass_goal_wait_worker(self, number, target):
-        session = self.multi_pass_registration
-        if session is None or session["pass"] != number:
-            return
-        self.node.clear_keyboard_velocity()
-        time.sleep(0.10)
-        switched, switch_message = self.node.set_keyboard_velocity_controller_enabled(
-            "right", False
-        )
-        if not switched:
-            self.post(
-                self._multi_pass_goal_wait_finished,
-                number, False,
-                f"trajectory controller restore failed: {switch_message}",
-            )
-            return
-        if self.multi_pass_registration is not session:
-            return
-        # Leave the workpiece along the pass log's corrected START-WAIT route before
-        # traversing to the far GOAL WAIT.  A direct real-START -> GOAL-WAIT
-        # Cartesian segment can cut through the groove or an existing bead.
-        success, message = self._run_multi_pass_tcp_move(
-            copy.deepcopy(session["waits"]["start"]),
-            f"Pass {number} retract to corrected logged START WAIT",
-            session["velocity_scale"],
-        )
-        if not success:
-            self.post(
-                self._multi_pass_goal_wait_finished,
-                number, False, f"START WAIT retract failed: {message}",
-            )
-            return
-        if self.multi_pass_registration is not session:
-            return
-        success, message = self._run_multi_pass_tcp_move(
-            target,
-            f"Pass {number} corrected logged GOAL WAIT",
-            session["velocity_scale"],
-            touch_guard=True,
-        )
-        self.post(self._multi_pass_goal_wait_finished, number, success, message)
+        return _multipass_for(self).goal_wait_worker(number, target)
 
     def _multi_pass_goal_wait_finished(self, number, success, message):
-        self.keyboard_velocity_switching = False
-        self.keyboard_velocity_arm = None
-        self.keyboard_jog_enabled.set(False)
-        self._set_keyboard_jog_enable_state(tk.NORMAL)
-        self.keyboard_jog_status.set("Keyboard teaching locked")
-        session = self.multi_pass_registration
-        if session is None or session["pass"] != number:
-            return
-        if not success:
-            self.multi_pass_registration = None
-            self.error(f"Pass {number} GOAL WAIT move failed: {message}")
-            return
-        session["phase"] = "waiting_goal_capture"
-        self._set_four_pass_status(
-            f"Pass {number} correction · START captured · "
-            "waiting for GOAL capture (J) · enable Keyboard Teaching"
-        )
-        self.pipeline_result(
-            f"Pass {number} corrected logged GOAL WAIT reached · "
-            "no welding command sent"
-        )
-        self._enable_multi_pass_keyboard_teaching(number, "j")
+        return _multipass_for(self).goal_wait_finished(number, success, message)
 
     def _complete_multi_pass_registration(self):
-        session = self.multi_pass_registration
-        if session is None:
-            return
-        number = session["pass"]
-        try:
-            self._validate_four_pass_source_hashes()
-            corrected, transform = correct_remaining_passes(
-                session["previous"],
-                number,
-                session["measured_start"],
-                session["measured_goal"],
-            )
-            self._save_sequential_four_pass_state(
-                corrected, session, transform
-            )
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Pass {number} correction failed: {error}")
-            return
-        self.four_pass_corrected = corrected
-        if "end_pose" in session:
-            session["phase"] = "moving_end"
-            self.keyboard_velocity_switching = True
-            self._set_keyboard_jog_enable_state(tk.DISABLED)
-            self._set_four_pass_status(
-                f"Pass {number} correction saved · moving to Weld end"
-            )
-            threading.Thread(
-                target=self._multi_pass_end_worker, args=(session,), daemon=True
-            ).start()
-            return
-        self.multi_pass_registration = None
-        later = transform["later_passes_updated"]
-        later_text = "/".join(str(value) for value in later) or "none"
-        self._set_four_pass_status(
-            f"Pass {number} corrected · later predictions updated: {later_text} · "
-            "verify corrected START/GOAL before welding"
-        )
-        self.pipeline_result(
-            f"SEQUENTIAL PASS {number} REGISTRATION COMPLETE · "
-            f"direction change={transform['direction_change_deg']:+.3f}° · "
-            f"updated later passes={later_text} · ARC/WELD not started"
-        )
-        self.keyboard_jog_status.set(
-            f"PASS {number} CORRECTION COMPLETE · verify corrected START/GOAL"
-        )
+        return _multipass_for(self).complete_registration()
 
     def _multi_pass_end_worker(self, session):
-        try:
-            success, message = self.node.set_keyboard_velocity_controller_enabled("right", False)
-            if success and self.multi_pass_registration is session:
-                success, message = self._run_multi_pass_tcp_move(
-                    session["end_pose"], f"Pass {session['pass']} Weld end",
-                    session["velocity_scale"], touch_guard=False,
-                )
-        except Exception as error:
-            success, message = False, str(error)
-        self.post(self._multi_pass_end_finished, session, success, message)
+        return _multipass_for(self).end_worker(session)
 
     def _multi_pass_end_finished(self, session, success, message):
-        self.keyboard_velocity_switching = False
-        self._set_keyboard_jog_enable_state(tk.NORMAL)
-        self.keyboard_jog_enabled.set(False)
-        self.keyboard_velocity_arm = None
-        if self.multi_pass_registration is not session:
-            return
-        self.multi_pass_registration = None
-        text = (
-            f"Pass {session['pass']} correction saved · Weld end reached"
-            if success else f"Correction saved, but Weld end move stopped/failed: {message}"
-        )
-        self._set_four_pass_status(text)
-        self.keyboard_jog_status.set("Keyboard teaching locked")
-        (self.pipeline_result if success else self.error)(text)
+        return _multipass_for(self).end_finished(session, success, message)
 
     def _save_sequential_four_pass_state(self, corrected, session, transform):
-        folder = self.four_pass_loaded_folder
-        if folder is None:
-            raise ValueError("Four-pass source folder is unavailable")
-        output = folder
-        number = session["pass"]
-        previous = session["previous"]
-        pose_dict = self._pose_execution_conditions
-        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        event = {
-            "timestamp": timestamp,
-            "status": "measured_anchor_applied",
-            "selected_pass": number,
-            "source_log": self.four_pass_references[number]["path"],
-            "source_log_sha256": self.four_pass_references[number]["sha256"],
-            "previous_predicted_start_wait": pose_dict(
-                previous[number]["start_wait"]
-            ),
-            "previous_predicted_start": pose_dict(previous[number]["start"]),
-            "previous_predicted_goal_wait": pose_dict(
-                previous[number]["goal_wait"]
-            ),
-            "previous_predicted_goal": pose_dict(previous[number]["goal"]),
-            "measured_start": pose_dict(session["measured_start"]),
-            "measured_goal": pose_dict(session["measured_goal"]),
-            "direction_change_deg": transform["direction_change_deg"],
-            "start_translation_mm": [
-                value * 1000.0 for value in transform["start_translation_m"]
-            ],
-            "goal_translation_mm": [
-                value * 1000.0 for value in transform["goal_translation_m"]
-            ],
-            "rotation_xyzw": list(transform["rotation_xyzw"]),
-            "later_passes_updated": list(transform["later_passes_updated"]),
-            "orientation_policy": (
-                "q_new = q_minimal_direction_rotation * q_current; "
-                "no additional seam-axis roll"
-            ),
-            "wait_orientation_policy": (
-                "pass-specific WAIT from source log; corrected with the same "
-                "minimal seam rotation"
-            ),
-            "start_capture_provenance": session.get("start_capture_provenance"),
-            "goal_capture_provenance": session.get("goal_capture_provenance"),
-        }
-        history = [*self.four_pass_history, event]
-        manifest = {
-            "schema": "construct_robot_sequential_four_pass_correction_v3",
-            "status": "sequential_pass_registration",
-            "planning_group": "right_manipulator",
-            "source_folder": str(folder),
-            "source_logs_immutable": True,
-            "current_anchor_pass": number,
-            "wait_pose_source": "pass-specific teaching snapshot in each N.log",
-            "history": history,
-            "passes": [],
-        }
-
-        def atomic_yaml(path, document):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
-                ) as stream:
-                    temporary_path = Path(stream.name)
-                    yaml.safe_dump(document, stream, sort_keys=False)
-                temporary_path.replace(path)
-            finally:
-                if temporary_path is not None and temporary_path.exists():
-                    temporary_path.unlink()
-
-        for pass_number in range(1, 5):
-            reference = self.four_pass_references[pass_number]
-            record = {
-                "schema": "construct_robot_sequential_pass_v3",
-                "pass": pass_number,
-                "status": (
-                    "measured_anchor"
-                    if pass_number == number
-                    else (
-                        f"propagated_from_pass_{number}"
-                        if pass_number > number
-                        else "previously_registered_unchanged"
-                    )
-                ),
-                "source_log": reference["path"],
-                "source_log_sha256": reference["sha256"],
-                "source_start_wait": pose_dict(reference["start_wait"]),
-                "source_start": pose_dict(reference["start"]),
-                "source_goal_wait": pose_dict(reference["goal_wait"]),
-                "source_goal": pose_dict(reference["goal"]),
-                "current_start_wait": pose_dict(
-                    corrected[pass_number]["start_wait"]
-                ),
-                "current_start": pose_dict(corrected[pass_number]["start"]),
-                "current_goal_wait": pose_dict(
-                    corrected[pass_number]["goal_wait"]
-                ),
-                "current_goal": pose_dict(corrected[pass_number]["goal"]),
-                "last_registration": event if pass_number >= number else None,
-            }
-            file_name = f"pass_{pass_number}.yaml"
-            atomic_yaml(output / file_name, record)
-            manifest["passes"].append({"pass": pass_number, "file": file_name})
-
-            # The selected work folder is the operational source of truth.
-            # Rewrite all four pass files after every correction so Pass 1
-            # registration immediately propagates to Passes 2..4 without an
-            # extra export/load step.  Joint snapshots are retained only as
-            # IK seeds; corrected Cartesian poses must be solved again.
-            joint_states = reference.get("joint_states", {})
-            pose_entries = {}
-            for endpoint, pose_name in (
-                ("start_wait", "weld_start_wait"),
-                ("start", "weld_start"),
-                ("goal_wait", "weld_goal_wait"),
-                ("goal", "weld_end"),
-            ):
-                names, positions = joint_states[endpoint]
-                pose_entries[pose_name] = {
-                    "planning_group": "right_manipulator",
-                    "joint_state": {
-                        "names": list(names),
-                        "positions_rad": [float(value) for value in positions],
-                    },
-                    "tcp_pose_world": pose_dict(
-                        corrected[pass_number][endpoint]
-                    ),
-                }
-            canonical = {
-                "schema": "construct_robot_pass_teaching_v1",
-                "status": record["status"],
-                "timestamp": timestamp,
-                "pass": pass_number,
-                "requires_ik": True,
-                "correction_anchor_pass": number,
-                "correction_history": copy.deepcopy(history),
-                "poses": pose_entries,
-            }
-            if pass_number == number:
-                additional_pose_entries = copy.deepcopy(
-                    reference.get("additional_pose_entries", {})
-                )
-                for pose_name in ("robot_start", "weld_wait", "weld_finish"):
-                    stored = self.taught_robot_poses.get(pose_name)
-                    if stored is None or stored[0] != "right_manipulator":
-                        continue
-                    group, names, positions, tcp = stored
-                    if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
-                        continue
-                    additional_pose_entries[pose_name] = {
-                        "planning_group": group,
-                        "joint_state": {
-                            "names": list(names),
-                            "positions_rad": [float(value) for value in positions],
-                        },
-                        "tcp_pose_world": pose_dict(tcp),
-                    }
-            else:
-                additional_pose_entries = reference.get(
-                    "additional_pose_entries", {}
-                )
-            canonical["poses"].update(copy.deepcopy(additional_pose_entries))
-            canonical_path = folder / f"pass_{pass_number}.yaml"
-            if Path(reference["path"]).resolve() != canonical_path.resolve():
-                canonical.update({
-                    "source_reference": reference["path"],
-                    "source_reference_kind": reference.get(
-                        "reference_kind", "unknown"
-                    ),
-                    "source_reference_sha256": reference["sha256"],
-                })
-            atomic_yaml(canonical_path, canonical)
-        atomic_yaml(output / "manifest.yaml", manifest)
-        self.four_pass_references = {
-            pass_number: read_pass_teaching_reference(
-                folder / f"pass_{pass_number}.yaml", pass_number
-            )
-            for pass_number in range(1, 5)
-        }
-        self.four_pass_output_folder = output
-        self.four_pass_history = history
+        return _multipass_for(self).save_sequential_state(corrected, session, transform)
 
     def go_to_corrected_pass_endpoint(self, endpoint):
-        endpoint = str(endpoint).strip().lower()
-        try:
-            number = self._selected_pass()
-            if endpoint not in ("start", "goal"):
-                raise ValueError("Endpoint must be START or GOAL")
-            target = copy.deepcopy(self.four_pass_corrected[number][endpoint])
-            self._validate_four_pass_source_hashes()
-        except (KeyError, OSError, TypeError, ValueError) as error:
-            self.error(f"Cannot move to corrected endpoint: {error}")
-            return
-        if self.multi_pass_registration is not None:
-            self.error("Finish the active multi-pass registration first")
-            return
-        if self.keyboard_velocity_arm is not None or self.keyboard_velocity_switching:
-            self.error("Disable Keyboard Teaching before corrected-pose motion")
-            return
-        if self.sequence_running or self.node.active_motion_goal is not None:
-            self.error("Another robot motion is active")
-            return
-        if not self.execution_allowed or not self.robot_connected.get("right", False):
-            self.error("Connect the right robot and enable physical execution")
-            return
-        if not messagebox.askyesno(
-            "Verify corrected pass endpoint",
-            f"Move to corrected Pass {number} {endpoint.upper()}?\n\n"
-            "This is a robot motion only. ARC and welding outputs remain OFF.",
-            parent=self.root,
-        ):
-            return
-        speed = max(0.01, min(1.0, float(self.velocity_percent.get()) / 100.0))
-        threading.Thread(
-            target=self._go_to_corrected_pass_endpoint_worker,
-            args=(number, endpoint, target, speed),
-            daemon=True,
-        ).start()
+        return _multipass_for(self).go_to_corrected_endpoint(endpoint)
 
     def _go_to_corrected_pass_endpoint_worker(
         self, number, endpoint, target, velocity_scale
     ):
-        success, message = self._run_multi_pass_tcp_move(
-            target,
-            f"Pass {number} corrected {endpoint.upper()} verification",
-            velocity_scale,
-            touch_guard=True,
-        )
-        self.post(
-            self._go_to_corrected_pass_endpoint_finished,
-            number, endpoint, success, message,
-        )
+        return _multipass_for(self).corrected_endpoint_worker(number, endpoint, target, velocity_scale)
 
     def _go_to_corrected_pass_endpoint_finished(
         self, number, endpoint, success, message
     ):
-        if success:
-            self.pipeline_result(
-                f"Pass {number} corrected {endpoint.upper()} reached · "
-                "visual verification only · no welding command sent"
-            )
-        else:
-            self.error(
-                f"Pass {number} corrected {endpoint.upper()} move failed: {message}"
-            )
+        return _multipass_for(self).corrected_endpoint_finished(number, endpoint, success, message)
 
     def _selected_pass_teaching_path(self, number):
-        folder_field = getattr(self, "four_pass_folder", None)
-        if folder_field is not None:
-            text = folder_field.get().strip()
-            if not text:
-                raise ValueError("Select a pass folder before saving")
-            folder = Path(text).expanduser().resolve()
-        else:
-            folder = self.four_pass_loaded_folder
-        return folder / f"pass_{int(number)}.yaml"
+        return _multipass_for(self).selected_pass_teaching_path(number)
 
     def _load_saved_pass_teaching(self, number):
-        """Return a selected pass's independent manual teaching, if present."""
-        path = self._selected_pass_teaching_path(number)
-        if not path.is_file():
-            return None
-        document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
-        if document.get("schema") != "construct_robot_pass_teaching_v1":
-            raise ValueError(f"Unsupported pass teaching schema: {path}")
-        if int(document.get("pass", 0)) != int(number):
-            raise ValueError(f"Saved teaching pass does not match Pass {number}")
-        pose_entries = document.get("poses")
-        if not isinstance(pose_entries, dict):
-            raise ValueError(f"Pass {number} saved teaching has no poses mapping")
-        current = {}
-        joint_states = {}
-        for pose_name in ("robot_start", "weld_wait", "weld_finish"):
-            self.taught_robot_poses[pose_name] = None
-        for endpoint, pose_name in (
-            ("start_wait", "weld_start_wait"),
-            ("start", "weld_start"),
-            ("goal_wait", "weld_goal_wait"),
-            ("goal", "weld_end"),
-        ):
-            group, names, positions, tcp = parse_teaching_snapshot_entry(
-                pose_name, pose_entries.get(pose_name)
-            )
-            if group != "right_manipulator":
-                raise ValueError(f"{pose_name} is not a right-arm teaching pose")
-            current[endpoint] = copy.deepcopy(tcp)
-            joint_states[endpoint] = (tuple(names), tuple(positions))
-        for pose_name in ("robot_start", "weld_wait", "weld_finish"):
-            entry = pose_entries.get(pose_name)
-            if entry is None:
-                continue
-            group, names, positions, tcp = parse_teaching_snapshot_entry(
-                pose_name, entry
-            )
-            if group != "right_manipulator":
-                raise ValueError(f"{pose_name} is not a right-arm teaching pose")
-            self.taught_robot_poses[pose_name] = (
-                group, tuple(names), tuple(positions), copy.deepcopy(tcp)
-            )
-        self.four_pass_corrected[number] = copy.deepcopy(current)
-        return current, joint_states, path
+        return _multipass_for(self).load_saved_pass_teaching(number)
 
     def save_teaching_to_selected_pass(self):
-        """Save current Teaching Detail poses without modifying N.log sources."""
-        try:
-            number = self._selected_pass()
-            if number not in (1, 2, 3, 4):
-                raise ValueError("Select Pass 1, 2, 3, or 4")
-            pose_records = {}
-            current = {}
-            for endpoint, pose_name in (
-                ("start_wait", "weld_start_wait"),
-                ("start", "weld_start"),
-                ("goal_wait", "weld_goal_wait"),
-                ("goal", "weld_end"),
-            ):
-                stored = self.taught_robot_poses.get(pose_name)
-                if stored is None or stored[0] != "right_manipulator":
-                    raise ValueError(
-                        f"Teaching Detail has no right-arm {TEACHING_POSES[pose_name]}"
-                    )
-                group, names, positions, tcp = stored
-                if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
-                    raise ValueError(
-                        f"Teaching Detail {TEACHING_POSES[pose_name]} is incomplete"
-                    )
-                pose_records[pose_name] = {
-                    "planning_group": group,
-                    "joint_state": {
-                        "names": list(names),
-                        "positions_rad": [float(value) for value in positions],
-                    },
-                    "tcp_pose_world": self._pose_execution_conditions(tcp),
-                }
-                provenance = getattr(
-                    self, "teaching_capture_provenance", {}
-                ).get(pose_name)
-                if provenance:
-                    pose_records[pose_name]["capture_provenance"] = copy.deepcopy(
-                        provenance
-                    )
-                current[endpoint] = copy.deepcopy(tcp)
-            for pose_name in ("robot_start", "weld_wait", "weld_finish"):
-                stored = self.taught_robot_poses.get(pose_name)
-                if stored is None or stored[0] != "right_manipulator":
-                    continue
-                group, names, positions, tcp = stored
-                if len(names) != 6 or len(positions) != 6 or not pose_is_valid(tcp):
-                    continue
-                pose_records[pose_name] = {
-                    "planning_group": group,
-                    "joint_state": {
-                        "names": list(names),
-                        "positions_rad": [float(value) for value in positions],
-                    },
-                    "tcp_pose_world": self._pose_execution_conditions(tcp),
-                }
-                provenance = getattr(
-                    self, "teaching_capture_provenance", {}
-                ).get(pose_name)
-                if provenance:
-                    pose_records[pose_name]["capture_provenance"] = copy.deepcopy(
-                        provenance
-                    )
-            reference = self.four_pass_references.get(number)
-            document = {
-                "schema": "construct_robot_pass_teaching_v1",
-                "status": "manual_teaching_saved",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "pass": number,
-                "requires_ik": False,
-                "poses": pose_records,
-            }
-            if reference is not None:
-                document.update({
-                    "source_reference": reference["path"],
-                    "source_reference_kind": reference.get(
-                        "reference_kind", "unknown"
-                    ),
-                    "source_reference_sha256": reference["sha256"],
-                    # Retain the v1 provenance keys for existing files and
-                    # correction manifests.  They do not make saving depend
-                    # on a log being loaded.
-                    "source_log": reference["path"],
-                    "source_log_sha256": reference["sha256"],
-                })
-            path = self._selected_pass_teaching_path(number)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
-                ) as stream:
-                    temporary_path = Path(stream.name)
-                    yaml.safe_dump(document, stream, sort_keys=False)
-                temporary_path.replace(path)
-            finally:
-                if temporary_path is not None and temporary_path.exists():
-                    temporary_path.unlink()
-            persisted = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
-            if persisted != document:
-                raise OSError(f"Pass teaching YAML read-back failed: {path}")
-            replaces_loaded_reference = (
-                reference is not None
-                and reference.get("reference_kind") == "saved_pass_teaching"
-                and Path(reference["path"]).resolve() == path.resolve()
-            )
-            if replaces_loaded_reference:
-                self.four_pass_references[number] = read_pass_teaching_reference(
-                    path, number
-                )
-        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Cannot save selected-pass teaching: {error}")
-            return
-        self.four_pass_corrected[number] = current
-        self._set_four_pass_status(
-            f"Pass {number} Teaching Detail saved · {path}"
-        )
-        self.pipeline_result(
-            f"PASS {number} TEACHING SAVED · WAIT/START/GOAL WAIT/GOAL · "
-            f"{path} · "
-            + (
-                "loaded teaching reference updated"
-                if replaces_loaded_reference
-                else "saved independently of pass-reference loading"
-            )
-        )
+        return _multipass_for(self).save_teaching_to_selected_pass()
 
     def apply_selected_pass_correction(self):
-        """Load the selected pass from the cumulative seam-correction state."""
-        self._apply_selected_pass_teaching(use_saved_teaching=False)
+        return _multipass_for(self).apply_selected_pass_correction()
 
     def load_saved_teaching_for_selected_pass(self):
-        """Load the selected pass's explicit manual-teaching override."""
-        self._apply_selected_pass_teaching(use_saved_teaching=True)
+        return _multipass_for(self).load_saved_teaching_for_selected_pass()
 
     def _apply_selected_pass_teaching(self, use_saved_teaching):
-        """Apply either cumulative correction or explicit saved teaching."""
-        try:
-            number = self._selected_pass()
-            if number not in (1, 2, 3, 4):
-                raise ValueError("Select Pass 1, 2, 3, or 4")
-            if not use_saved_teaching:
-                self._validate_four_pass_source_hashes()
-                current = self.four_pass_corrected[number]
-                reference = self.four_pass_references[number]
-                joint_states = reference.get(
-                    "joint_states", {}
-                )
-                teaching_source = "latest cumulative seam correction"
-                resolve_corrected_ik = (
-                    bool(reference.get("requires_ik"))
-                    if reference.get("reference_kind") == "saved_pass_teaching"
-                    else True
-                )
-            else:
-                saved = self._load_saved_pass_teaching(number)
-                if saved is None:
-                    raise ValueError(
-                        f"Pass {number} has no separately saved teaching file"
-                    )
-                current, joint_states, saved_path = saved
-                reference = read_pass_teaching_reference(saved_path, number)
-                teaching_source = f"saved pass teaching {saved_path}"
-                resolve_corrected_ik = bool(reference.get("requires_ik"))
-            additional_poses = {}
-            for pose_name in ("robot_start", "weld_wait", "weld_finish"):
-                entry = reference.get("additional_pose_entries", {}).get(pose_name)
-                if entry is None:
-                    additional_poses[pose_name] = None
-                    continue
-                stored = parse_teaching_snapshot_entry(pose_name, entry)
-                if stored[0] != "right_manipulator":
-                    raise ValueError(f"Pass {number} {pose_name} is not a right-arm pose")
-                additional_poses[pose_name] = copy.deepcopy(stored)
-            required_endpoints = {"start_wait", "start", "goal_wait", "goal"}
-            if not required_endpoints.issubset(joint_states):
-                raise ValueError(
-                    f"{number}.log has no complete WAIT/START/GOAL WAIT/GOAL "
-                    "joint snapshots"
-                )
-        except (KeyError, OSError, TypeError, ValueError) as error:
-            self.error(f"Cannot apply selected pass: {error}")
-            return
-        self._invalidate_seam_correction_runtime(
-            f"applying cumulative Pass {number} correction", clear_touches=True
-        )
-        # Replace the whole pass-specific teaching context.  Missing optional
-        # poses must not inherit the previously selected pass's teaching.
-        for pose_name, stored in additional_poses.items():
-            self.taught_robot_poses[pose_name] = stored
-        provenance = getattr(self, "teaching_capture_provenance", {})
-        for pose_name in (
-            "robot_start", "weld_wait", "weld_finish", "weld_start_wait",
-            "weld_start", "weld_goal_wait", "weld_end",
-        ):
-            provenance.pop(pose_name, None)
-        for endpoint, pose_name in (
-            ("start_wait", "weld_start_wait"),
-            ("start", "weld_start"),
-            ("goal_wait", "weld_goal_wait"),
-            ("goal", "weld_end"),
-        ):
-            names, positions = joint_states[endpoint]
-            self.taught_robot_poses[pose_name] = (
-                "right_manipulator",
-                tuple(names),
-                tuple(positions),
-                copy.deepcopy(current[endpoint]),
-            )
-            if endpoint in ("start", "goal"):
-                self.linear_tcp_endpoints[0 if endpoint == "start" else 1] = (
-                    copy.deepcopy(current[endpoint])
-                )
-        self.seam_teaching_reference = {
-            name: copy.deepcopy(self.taught_robot_poses[name])
-            for name in ("weld_start", "weld_end")
-        }
-        try:
-            save_seam_teaching_reference_yaml(
-                self._seam_reference_yaml_path("right_manipulator"),
-                "right_manipulator",
-                self.seam_teaching_reference,
-            )
-        except (OSError, ValueError, yaml.YAMLError) as error:
-            self.error(f"Selected pass seam reference save failed: {error}")
-            return
-        self.teaching_pose_changed()
-        if resolve_corrected_ik:
-            ik_targets = tuple(
-                (
-                    "goal" if endpoint.startswith("goal") else "start",
-                    "right_manipulator",
-                    copy.deepcopy(current[endpoint]),
-                    tuple(joint_states[endpoint][0]),
-                    pose_name,
-                )
-                for endpoint, pose_name in (
-                    ("start_wait", "weld_start_wait"),
-                    ("start", "weld_start"),
-                    ("goal_wait", "weld_goal_wait"),
-                    ("goal", "weld_end"),
-                )
-            )
-            threading.Thread(
-                target=self.node.resolve_tcp_joint_states,
-                args=(ik_targets,),
-                daemon=True,
-            ).start()
-            load_completion = "resolving corrected joint states"
-        else:
-            try:
-                for endpoint, pose_name in (
-                    ("start_wait", "weld_start_wait"),
-                    ("start", "weld_start"),
-                    ("goal_wait", "weld_goal_wait"),
-                    ("goal", "weld_end"),
-                ):
-                    names, positions = joint_states[endpoint]
-                    save_initial_state_yaml(
-                        self._initial_state_yaml_path(
-                            "right_manipulator", pose_name
-                        ),
-                        "right_manipulator",
-                        names,
-                        positions,
-                        current[endpoint],
-                    )
-            except (OSError, ValueError, yaml.YAMLError) as error:
-                self.error(f"Saved pass teaching restore failed: {error}")
-                return
-            load_completion = "saved joint/TCP pairs restored exactly"
-        self._set_four_pass_status(
-            f"Pass {number} corrected WAIT/START/GOAL WAIT/GOAL loaded into "
-            f"Teaching Detail · {teaching_source} · {load_completion}"
-        )
-        self.pipeline_result(
-            f"PASS {number} CUMULATIVE CORRECTION APPLIED · "
-            f"four teaching poses loaded · {load_completion} · "
-            "no welding started"
-        )
+        return _multipass_for(self).apply_selected_pass_teaching(use_saved_teaching)
 
 
     # Tk-only hooks used by application.seam_correction_controller at the

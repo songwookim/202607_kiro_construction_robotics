@@ -400,6 +400,37 @@ class SequenceExecutor:
                     host.hicomm_client.latest_status() if host.hicomm_client is not None else None,
                 )
 
+    def preplan_weld_motion(self, steps, arc_on_step):
+        """Approve the scenario's weld path before its ARC ON is sent.
+
+        The weld motion then executes the approved trajectory directly
+        (``reuse_approved_plan``) as soon as ARC is established.  Returns an
+        error message when planning fails, so ARC ON is never commanded.
+        """
+        host = self.host
+        scenario_id = arc_on_step.get("weld_scenario_id")
+        if not scenario_id:
+            return None
+        weld_motion = next((
+            step for step in steps
+            if step.get("type") == "motion"
+            and step.get("weld_scenario_id") == scenario_id
+            and step.get("weld_scenario_stage") == "weld_motion"
+        ), None)
+        if weld_motion is None:
+            return None
+        started = time.monotonic()
+        planned, detail = host.node.run_sequence_cartesian_motion(weld_motion, False)
+        if not planned:
+            return f"weld path planning failed before ARC ON: {detail}"
+        weld_motion["reuse_approved_plan"] = True
+        host.post(
+            host.log,
+            f"WELD PATH PRE-PLANNED before ARC ON · "
+            f"{time.monotonic() - started:.2f} s · {detail}",
+        )
+        return None
+
     def run_groups(self, steps, indices, execute_requested):
         host = self.host
         # The worker may also be exercised without the GUI constructor by
@@ -456,6 +487,16 @@ class SequenceExecutor:
                     and step.get("command") == "on"
                 ), None)
                 if arc_on_step is not None:
+                    # Plan the weld path before ARC ON is commanded; planning
+                    # after ARC establishment left the torch parked on a live
+                    # arc for the whole planning time (1-4 s with weaving).
+                    preplan_error = self.preplan_weld_motion(steps, arc_on_step)
+                    if preplan_error is not None:
+                        success, message = False, preplan_error
+                        break
+                    if host.sequence_stop_requested:
+                        success, message = False, "stopped by operator"
+                        break
                     # Establish one common monotonic time base before motion and
                     # HICOMM workers race each other to their first callback.
                     host._begin_weld_feedback_record(

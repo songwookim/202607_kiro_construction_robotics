@@ -11,11 +11,11 @@ ROS 2 Humble dual-arm robotic welding system using:
 - Tkinter welding GUI
 
 Main application:
-- `construct_robot/construct_robot/weld_action_gui.py`
+- `construct_robot/construct_robot/gui/weld_action_gui.py`
 
 Motion/math helpers:
-- `construct_robot/construct_robot/cartesian_path_common.py`
-- `construct_robot/construct_robot/cartesian_path_server.py`
+- `construct_robot/construct_robot/core/cartesian_path_common.py`
+- `construct_robot/construct_robot/nodes/cartesian_path_server.py`
 
 Configuration:
 - `construct_moveit_config/`
@@ -148,8 +148,8 @@ listeners.
 
 ## GUI
 
-`weld_action_gui.py` currently owns GUI orchestration and much of the welding
-workflow.
+`gui/weld_action_gui.py` owns Tk GUI orchestration; welding, sequence, seam and
+multi-pass workflows live in `application/`.
 
 Avoid duplicating geometry or multi-pass state merely to update the GUI.
 

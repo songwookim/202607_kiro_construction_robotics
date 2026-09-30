@@ -18,14 +18,14 @@ import numpy as np
 
 from geometry_msgs.msg import Pose
 
-from construct_robot.cartesian_path_common import (
+from construct_robot.core.cartesian_path_common import (
     circular_weaving_from_path,
     linear_pose_waypoints,
     sine_weaving_with_dwell,
     weave_cycles_for_pitch,
     weaving_from_path,
 )
-from construct_robot.cartesian_path_common import (
+from construct_robot.core.cartesian_path_common import (
     retime_trajectory_constant_velocity,
     trajectory_duration_seconds,
 )

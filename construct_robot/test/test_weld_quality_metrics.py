@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from construct_robot.weld_quality_metrics import (
+from construct_robot.core.weld_quality_metrics import (
     analyze_weld_quality, event_timeline, format_quality_summary,
 )
 
@@ -288,7 +288,7 @@ def test_weave_peaks_and_dwell_use_actual_offset_not_requested_amplitude():
 
 
 def test_dwell_plateau_ignores_noisy_world_tcp_speed_and_requires_four_samples():
-    from construct_robot.weld_quality_metrics import _contiguous_dwell
+    from construct_robot.core.weld_quality_metrics import _contiguous_dwell
 
     rows = []
     for index, (offset, along) in enumerate((

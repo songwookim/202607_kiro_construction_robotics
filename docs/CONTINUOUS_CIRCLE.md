@@ -11,9 +11,9 @@
 
 ```text
 ros2_ws/src/construct_robot_ros2/
-├── construct_robot/construct_robot/cartesian_path_common.py
+├── construct_robot/construct_robot/core/cartesian_path_common.py
 ├── construct_robot/construct_robot/weld_action_gui.py
-└── construct_robot/construct_robot/cartesian_path_server.py
+└── construct_robot/construct_robot/nodes/cartesian_path_server.py
 ```
 
 목표는 다음과 같다.
@@ -52,7 +52,7 @@ self.circle_count = tk.IntVar(value=48)
 파일:
 
 ```text
-construct_robot/construct_robot/cartesian_path_common.py
+construct_robot/construct_robot/core/cartesian_path_common.py
 ```
 
 다음 함수의 끝을 찾는다.
@@ -191,7 +191,7 @@ for pose in points:
 파일:
 
 ```text
-construct_robot/construct_robot/cartesian_path_server.py
+construct_robot/construct_robot/nodes/cartesian_path_server.py
 ```
 
 `plan_with_moveit()`에서 다음 줄을 찾는다.
@@ -298,7 +298,7 @@ points = multi_lap_circle_waypoints(
 이 경우 import 목록에도 함수를 추가한다.
 
 ```python
-from construct_robot.cartesian_path_common import (
+from construct_robot.core.cartesian_path_common import (
     circle_waypoints,
     multi_lap_circle_waypoints,
     pose_is_valid,

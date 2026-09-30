@@ -2,21 +2,17 @@
 
 
 def test_legacy_imports_share_implementations():
+    # Top-level shims kept only for the frozen gui_qt package must keep
+    # returning the canonical implementations.
     import construct_robot.weld_action_gui as legacy_gui
     from construct_robot.gui import weld_action_gui as gui
-    from construct_robot.cartesian_path_server import CartesianPathActionServer
-    from construct_robot.nodes.cartesian_path_server import CartesianPathActionServer as NodeClass
     from construct_robot.sequence_model import SequenceModel
     from construct_robot.core.sequence_model import SequenceModel as CoreModel
-    from construct_robot.seam_geometry import compute_safe_weld_approach
-    from construct_robot.core.seam_geometry import compute_safe_weld_approach as CoreApproach
     import construct_robot.hicomm_welder as legacy_welder
     from construct_robot.io import hicomm_welder as welder
 
     assert legacy_gui is gui
-    assert CartesianPathActionServer is NodeClass
     assert SequenceModel is CoreModel
-    assert compute_safe_weld_approach is CoreApproach
     assert legacy_welder is welder
 
 

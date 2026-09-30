@@ -309,8 +309,8 @@ RB 제어기 내부 상태를 보여준다.
 
 | 기능 | 파일 |
 |---|---|
-| 직선·원·위빙·자세 보간·속도 scale | `construct_robot/cartesian_path_common.py` |
-| MoveIt 계획, 승인 trajectory 보관, 실행 | `construct_robot/cartesian_path_server.py` |
+| 직선·원·위빙·자세 보간·속도 scale | `construct_robot/core/cartesian_path_common.py` |
+| MoveIt 계획, 승인 trajectory 보관, 실행 | `construct_robot/nodes/cartesian_path_server.py` |
 | GUI, TF pose 취득, 연결 O/X, RViz Goal 갱신 | `construct_robot/weld_action_gui.py` |
 | controller 주기와 오차 설정 | `construct_moveit_config/config/ros2_controllers.yaml` |
 | planning adapter | `construct_moveit_config/config/ompl_planning.yaml` |

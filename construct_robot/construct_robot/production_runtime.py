@@ -8,8 +8,8 @@ import threading
 from types import SimpleNamespace
 from pathlib import Path
 
-from .task_teaching_model import TEACHING_POSES
-from .weld_config import validate_digital_weld_settings
+from .core.task_teaching_model import TEACHING_POSES
+from .core.weld_config import validate_digital_weld_settings
 
 
 _RECIPE_VARIABLES = {

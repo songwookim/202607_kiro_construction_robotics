@@ -1,18 +1,56 @@
-Read CLAUDE.md.
+# Project Instructions
 
-First refactoring step only:
+## Architecture
 
-Extract `WeldGuiNode` from
-`construct_robot/construct_robot/gui/weld_action_gui.py`
-to
-`construct_robot/construct_robot/nodes/weld_runtime_node.py`.
+Production GUI: Tkinter.
 
-Preserve behavior exactly.
-Do not redesign GUI↔ROS communication, threading, safety logic,
-ROS interfaces, or execution semantics.
+Package roles:
 
-Inspect only the target implementation, its direct dependencies,
-and relevant tests. Avoid an exhaustive repository scan.
+- `gui/`: Tkinter UI and view glue
+- `application/`: workflow/orchestration
+- `core/`: pure calculation, domain state, validation
+- `nodes/`: ROS 2 runtime
+- `io/`: hardware/file adapters
 
-Update imports, run relevant tests/build checks, and report the result.
-Do not start the next refactoring step.
+Preferred dependency direction:
+
+GUI → Application → Core
+                  ↘ Nodes / IO
+
+## Refactoring policy
+
+Prefer:
+move → extract → preserve
+
+Do not rewrite working behavior without a clear reason.
+
+Preserve:
+- ROS topic/service/action names
+- launch behavior
+- ARC synchronization
+- STOP behavior
+- touch-guard behavior
+- keyboard deadman behavior
+- multipass semantics
+- threading/event synchronization unless explicitly requested
+
+## Qt policy
+
+`construct_robot/construct_robot/gui_qt/` is frozen.
+
+Do not:
+- modify Qt/PySide6 code
+- synchronize Qt with Tk
+- run Qt-specific tests
+- remove Qt-only compatibility shims
+
+unless explicitly requested.
+
+## Validation
+
+For production changes:
+- run relevant non-Qt tests
+- verify production console entry points
+- run `colcon build --packages-select construct_robot`
+
+Unit tests do not replace real-hardware validation.

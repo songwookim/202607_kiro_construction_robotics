@@ -1,4 +1,4 @@
-from construct_robot.fastech_ethernet import (
+from construct_robot.io.fastech_ethernet import (
     EZI_IO_I8O8,
     FastechEthernetClient,
 )

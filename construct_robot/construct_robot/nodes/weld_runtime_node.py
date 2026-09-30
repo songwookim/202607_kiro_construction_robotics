@@ -213,6 +213,13 @@ class WeldGuiNode(Node):
             )
             for arm in ("left", "right")
         }
+        self.servo_hold_release_clients = {
+            arm: self.create_client(
+                Trigger,
+                f"/{arm}_rbpodo_hardware/release_servo_hold",
+            )
+            for arm in ("left", "right")
+        }
         self.robot_power_clients = {
             arm: self.create_client(
                 SetRobotPower,
@@ -2596,6 +2603,7 @@ class WeldGuiNode(Node):
             return
         pose_name = self.initial_planned_pose_name
         planning_group = self.initial_planned_group
+        self.initial_execution_group = planning_group
         self.initial_planned_trajectory = None
         self.initial_planned_pose_name = None
         self.initial_planned_group = None
@@ -2707,6 +2715,59 @@ class WeldGuiNode(Node):
             self.ui.initial_position_execution_finished,
             "Robot reached the selected taught pose",
         )
+        group = getattr(self, "initial_execution_group", None)
+        if group:
+            threading.Thread(
+                target=self.release_servo_hold_after_arrival,
+                args=(group.removesuffix("_manipulator"),),
+                daemon=True,
+            ).start()
+
+    def release_servo_hold_after_arrival(self, arm):
+        """Let RB settle into Idle now, not at the next Keyboard Teaching ON.
+
+        After a trajectory the hardware keeps streaming Servo-J hold samples,
+        so RB stays in its stiff servo hold.  The servo->Idle settle (a small
+        gravity drop on the shoulder/wrist joints) then happened when Keyboard
+        Teaching switched controllers and was felt as a kick.  Ending the hold
+        once the arm is measurably stationary moves that settle to arrival.
+        """
+        if not self.wait_until_arm_stopped(arm, timeout=2.0):
+            self.ui.post(
+                self.ui.log,
+                f"{arm.upper()} Servo-J hold kept · arm not stationary after arrival",
+            )
+            return False, "arm not stationary"
+        client = self.servo_hold_release_clients.get(arm)
+        if client is None or not client.wait_for_service(timeout_sec=0.5):
+            self.ui.post(
+                self.ui.log,
+                f"{arm.upper()} Servo-J hold release unavailable · "
+                "hardware without release_servo_hold",
+            )
+            return False, "release_servo_hold unavailable"
+        finished = threading.Event()
+        outcome = {}
+
+        def response_ready(future):
+            try:
+                response = future.result()
+                outcome["success"] = bool(response.success)
+                outcome["message"] = str(response.message)
+            except Exception as error:
+                outcome["success"] = False
+                outcome["message"] = str(error)
+            finished.set()
+
+        client.call_async(Trigger.Request()).add_done_callback(response_ready)
+        if not finished.wait(timeout=2.0):
+            outcome = {"success": False, "message": "release response timed out"}
+        self.ui.post(
+            self.ui.log,
+            f"{arm.upper()} Servo-J hold after taught pose · "
+            f"{'released' if outcome['success'] else 'kept'} · {outcome['message']}",
+        )
+        return outcome["success"], outcome["message"]
 
     def generate_weave(
         self,
@@ -2861,7 +2922,11 @@ class WeldGuiNode(Node):
         goal.velocity_scale = step["velocity_scale"]
         goal.tcp_speed_m_s = float(step.get("tcp_speed_m_s", 0.0))
         goal.execute_requested = bool(execute_requested)
-        goal.reuse_approved_plan = False
+        # A weld path pre-planned before ARC ON executes that exact approved
+        # trajectory instead of re-planning while the arc is burning.
+        goal.reuse_approved_plan = bool(
+            execute_requested and step.get("reuse_approved_plan", False)
+        )
         goal.visualize_path = True
         goal.linear_motion_profile = bool(step.get("linear_motion_profile", False))
         goal.waypoints = copy.deepcopy(step["points"])
