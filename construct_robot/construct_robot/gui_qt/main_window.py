@@ -5,8 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView, QTabWidget,
-    QVBoxLayout, QWidget,
+    QMainWindow, QMessageBox, QPushButton, QSplitter, QStackedWidget, QTableView,
+    QVBoxLayout, QWidget, QFrame,
 )
 
 from construct_robot.sequence_model import SequenceModel
@@ -26,6 +26,7 @@ from .property_panel import StepPropertyPanel
 from .runtime_bridge import SequenceRuntimeBridge
 from .sequence_model_qt import SequenceTableModel
 from .status_panel import StatusPanel
+from .shell_widgets import APP_STYLESHEET, TopStatusBar
 
 
 class SequenceMainWindow(QMainWindow):
@@ -36,6 +37,7 @@ class SequenceMainWindow(QMainWindow):
         self.setWindowTitle("Welding Workflow · Qt Production" if runtime is not None
                             else "Welding Workflow · Qt Preview")
         self.resize(1250, 780)
+        self.setStyleSheet(APP_STYLESHEET)
         self.sequence_state = sequence_state if sequence_state is not None else SequenceModel()
         load_pose = load_pose or load_initial_state_yaml
         self.teaching_state = teaching_state if teaching_state is not None else TeachingState(TEACHING_POSES)
@@ -54,10 +56,25 @@ class SequenceMainWindow(QMainWindow):
 
         root = QWidget()
         layout = QVBoxLayout(root)
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs, 1)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        self.top_status = TopStatusBar(production=runtime is not None)
+        layout.addWidget(self.top_status)
+        workspace = QHBoxLayout()
+        workspace.setSpacing(8)
+        layout.addLayout(workspace, 1)
+        navigation = QFrame()
+        navigation.setObjectName("Navigation")
+        navigation.setFixedWidth(166)
+        nav_layout = QVBoxLayout(navigation)
+        nav_layout.setContentsMargins(5, 10, 5, 10)
+        nav_layout.setSpacing(2)
+        self.pages = QStackedWidget()
+        self.nav_buttons = {}
+        workspace.addWidget(navigation)
+        workspace.addWidget(self.pages, 1)
         sequence_page = QWidget()
-        self.tabs.addTab(sequence_page, "Sequence Builder")
+        self._add_page(nav_layout, "WORKFLOW", "Sequence", sequence_page, first=True)
         self._build_sequence_page(sequence_page)
         self.teaching_panel = TeachingPanel(self.teaching_state)
         if runtime is not None and callable(getattr(runtime, "selected_planning_group", None)):
@@ -70,17 +87,24 @@ class SequenceMainWindow(QMainWindow):
         self.task_panel = TaskLibraryPanel(self.sequence_state, self.task_order_state,
                                            load_pose=load_pose)
         self.io_panel = TouchIoStatusPanel()
-        for title, panel in (("Teaching", self.teaching_panel), ("Multi-pass", self.multipass_panel),
-                             ("Welding", self.welding_panel), ("Torch Cleaner", self.cleaner_panel),
-                             ("Task Library", self.task_panel), ("Touch / IO", self.io_panel)):
-            self.tabs.addTab(panel, title)
+        for group, title, panel in ((None, "Teaching", self.teaching_panel),
+                                    (None, "Multi-pass", self.multipass_panel),
+                                    (None, "Welding", self.welding_panel),
+                                    ("TASKS", "Torch Cleaner", self.cleaner_panel),
+                                    (None, "Task Library", self.task_panel),
+                                    ("SYSTEM", "Touch / IO", self.io_panel)):
+            self._add_page(nav_layout, group, title, panel)
+        nav_layout.addStretch()
 
-        self.status_panel = StatusPanel()
+        self.status_panel = StatusPanel(self.sequence_state)
+        self.status_panel.set_execution_controls(self._build_execution_controls())
         layout.addWidget(self.status_panel)
         self.setCentralWidget(root)
         self.table_model.validation_error.connect(self.status_panel.set_error)
         self.runtime_bridge.status_received.connect(self.status_panel.set_snapshot)
+        self.runtime_bridge.status_received.connect(self.top_status.set_snapshot)
         self.runtime_bridge.io_status_received.connect(self.io_panel.set_snapshot)
+        self.runtime_bridge.io_status_received.connect(self.top_status.set_io_snapshot)
         self.runtime_bridge.error_received.connect(self.status_panel.set_error)
         self.table_model.selection_changed.connect(self._select_from_state)
         for panel in (self.teaching_panel, self.multipass_panel, self.welding_panel,
@@ -95,6 +119,29 @@ class SequenceMainWindow(QMainWindow):
         self.status_timer.timeout.connect(self.multipass_panel.refresh)
         self.status_timer.start()
         self.runtime_bridge.refresh()
+
+    def _add_page(self, nav_layout, group, title, page, first=False):
+        if group:
+            heading = QLabel(group)
+            heading.setObjectName("Muted")
+            nav_layout.addWidget(heading)
+        index = self.pages.addWidget(page)
+        button = QPushButton(title)
+        button.setObjectName("NavButton")
+        button.setProperty("pageIndex", index)
+        button.clicked.connect(lambda _checked=False, i=index: self.select_page(i))
+        nav_layout.addWidget(button)
+        self.nav_buttons[title] = button
+        if first:
+            self.select_page(index)
+
+    def select_page(self, index):
+        self.pages.setCurrentIndex(index)
+        for button in self.nav_buttons.values():
+            selected = button.property("pageIndex") == index
+            button.setProperty("selected", "true" if selected else "false")
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def _connect_operator_actions(self):
         bridge = self.runtime_bridge
@@ -160,17 +207,26 @@ class SequenceMainWindow(QMainWindow):
 
     def _build_sequence_page(self, page):
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        heading = QLabel("Sequence Builder")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
         split = QSplitter(Qt.Horizontal)
         layout.addWidget(split, 1)
 
         palette = QWidget()
         palette_layout = QVBoxLayout(palette)
-        palette_layout.addWidget(QLabel("Step palette"))
+        palette_title = QLabel("STEP PALETTE")
+        palette_title.setObjectName("SectionTitle")
+        palette_layout.addWidget(palette_title)
         self.palette = QListWidget()
         self.palette.addItem("Wait / sleep")
-        for title in ("Robot motion · production runtime required",
-                      "Weld scenario · Tkinter builder required"):
+        for title, explanation in (
+            ("Robot motion", "Motion rows require the existing production teaching workflow"),
+            ("Weld scenario", "Use Build Weld Scenario with the existing production runtime"),
+        ):
             item = QListWidgetItem(title)
+            item.setToolTip(explanation)
             item.setFlags(Qt.NoItemFlags)
             self.palette.addItem(item)
         palette_layout.addWidget(self.palette)
@@ -188,11 +244,18 @@ class SequenceMainWindow(QMainWindow):
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
-        center_layout.addWidget(QLabel("Ordered Sequence Builder"))
+        sequence_title = QLabel("ORDERED SEQUENCE")
+        sequence_title.setObjectName("SectionTitle")
+        center_layout.addWidget(sequence_title)
         self.table = QTableView()
         self.table.setModel(self.table_model)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().hide()
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(1, 105)
+        self.table.setColumnWidth(3, 95)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.selectionModel().selectionChanged.connect(self._select_from_view)
         center_layout.addWidget(self.table)
@@ -209,24 +272,26 @@ class SequenceMainWindow(QMainWindow):
             button.clicked.connect(method)
             row.addWidget(button)
         center_layout.addLayout(row)
+        split.addWidget(center)
+
+        self.property_panel = StepPropertyPanel(self.table_model)
+        split.addWidget(self.property_panel)
+        split.setSizes((190, 670, 320))
+
+    def _build_execution_controls(self):
         execution = QHBoxLayout()
         self.plan_button = QPushButton("Plan")
         self.execute_button = QPushButton("Execute")
         self.stop_button = QPushButton("STOP")
+        self.execute_button.setObjectName("PrimaryButton")
+        self.stop_button.setObjectName("StopButton")
         for button, action in ((self.plan_button, "plan"),
                                (self.execute_button, "execute"),
                                (self.stop_button, "stop")):
             button.setEnabled(self.runtime_bridge.available)
             button.clicked.connect(lambda _checked=False, name=action: self.runtime_bridge.request(name))
             execution.addWidget(button)
-        center_layout.addLayout(execution)
-        if not self.runtime_bridge.available:
-            center_layout.addWidget(QLabel("Offline editor only · production execution remains in the Tkinter GUI"))
-        split.addWidget(center)
-
-        self.property_panel = StepPropertyPanel(self.table_model)
-        split.addWidget(self.property_panel)
-        split.setSizes((220, 700, 330))
+        return execution
 
     def _select_from_view(self, *_args):
         selected = self.table.selectionModel().selectedRows()

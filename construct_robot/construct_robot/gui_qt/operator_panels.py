@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
     QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox,
     QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QFrame,
 )
 
 from construct_robot.sequence_model import SequenceModel
@@ -23,6 +24,7 @@ from construct_robot.teaching_yaml import load_initial_state_yaml
 from construct_robot.torch_cleaner_teaching import (
     CleanerTeachingState, build_cleaner_sequence_steps, load_cleaner_order,
 )
+from .shell_widgets import CollapsibleSection
 
 
 class TeachingPanel(QWidget):
@@ -35,7 +37,10 @@ class TeachingPanel(QWidget):
         self.state = state
         self.use_runtime_loader = False
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Named teaching snapshots · selection is offline; capture/motion requires production runtime"))
+        heading = QLabel("Teaching")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Select to inspect · Load and Capture are explicit actions · no motion on selection"))
         self.table = QTableWidget(len(TEACHING_POSES), 4)
         self.table.setHorizontalHeaderLabels(("Pose", "Joints", "TCP", "Source"))
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -43,6 +48,9 @@ class TeachingPanel(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         layout.addWidget(self.table)
         self.table.itemSelectionChanged.connect(self._select)
+        self.detail = QLabel("Select a named pose to inspect its source and TCP snapshot")
+        self.detail.setWordWrap(True)
+        layout.addWidget(self.detail)
         group_row = QHBoxLayout()
         group_row.addWidget(QLabel("Capture arm"))
         self.planning_group = QComboBox()
@@ -67,6 +75,26 @@ class TeachingPanel(QWidget):
                 self.state.select(tuple(TEACHING_POSES)[row])
             except ValueError as error:
                 self.error.emit(str(error))
+            self._refresh_detail()
+
+    def _refresh_detail(self):
+        name = self.state.selected_name
+        if name not in TEACHING_POSES:
+            self.detail.setText("Select a named pose to inspect its source and TCP snapshot")
+            return
+        snapshot = self.state.poses.get(name)
+        if not isinstance(snapshot, (tuple, list)):
+            self.detail.setText(f"{TEACHING_POSES[name]} · Not captured")
+            return
+        group = snapshot[0] if snapshot else "—"
+        joints = len(snapshot[1]) if len(snapshot) > 1 and snapshot[1] else 0
+        tcp = snapshot[3] if len(snapshot) > 3 else None
+        source = self.state.provenance.get(name)
+        if isinstance(source, dict):
+            source = source.get("source", source)
+        self.detail.setText(
+            f"{TEACHING_POSES[name]} · {group} · {joints} joint(s) · "
+            f"TCP {'available' if tcp is not None else 'empty'} · Source: {source or '—'}")
 
     def load_selected_file(self, path):
         name = self.state.selected_name
@@ -100,12 +128,13 @@ class TeachingPanel(QWidget):
                 provenance = self.state.provenance.get(name)
                 source = (str(provenance.get("source", provenance)) if isinstance(provenance, dict)
                           else str(provenance) if provenance is not None else "—")
-                for col, value in enumerate((label, "Available" if joints else "—",
+                for col, value in enumerate((("● " if joints or tcp else "○ ") + label, "Available" if joints else "—",
                                              "Available" if tcp else "—", source)):
                     self.table.setItem(row, col, QTableWidgetItem(value))
             selected = list(TEACHING_POSES).index(self.state.selected_name) if self.state.selected_name in TEACHING_POSES else -1
             if selected >= 0:
                 self.table.selectRow(selected)
+        self._refresh_detail()
 
 
 class MultiPassPanel(QWidget):
@@ -126,6 +155,10 @@ class MultiPassPanel(QWidget):
         self.stop_available = False
         self.references_available = False
         layout = QVBoxLayout(self)
+        heading = QLabel("Multi-pass correction")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("1G pass registration · select a pass, then use the existing guarded runtime workflow"))
         folder_row = QHBoxLayout()
         self.folder_edit = QLineEdit()
         folder_row.addWidget(self.folder_edit)
@@ -136,11 +169,18 @@ class MultiPassPanel(QWidget):
         folder_row.addWidget(self.references_button)
         layout.addLayout(folder_row)
         selector = QHBoxLayout()
-        selector.addWidget(QLabel("Selected pass"))
-        self.pass_combo = QComboBox()
+        selector.addWidget(QLabel("SELECT PASS"))
+        self.pass_combo = QComboBox(self)
         self.pass_combo.addItems([f"Pass {number}" for number in range(1, 5)])
         self.pass_combo.currentIndexChanged.connect(self._select)
-        selector.addWidget(self.pass_combo)
+        self.pass_combo.hide()  # Kept as the existing selection adapter for callers.
+        self.pass_buttons = {}
+        for number in range(1, 5):
+            button = QPushButton(str(number))
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, n=number: self.pass_combo.setCurrentIndex(n - 1))
+            selector.addWidget(button)
+            self.pass_buttons[number] = button
         selector.addStretch()
         layout.addLayout(selector)
         self.folder_label = QLabel()
@@ -148,17 +188,28 @@ class MultiPassPanel(QWidget):
         self.table = QTableWidget(4, 4)
         self.table.setHorizontalHeaderLabels(("Pass", "Source", "Corrected START", "Corrected GOAL"))
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().hide()
+        self.table.setColumnWidth(0, 90)
+        self.table.setColumnWidth(1, 130)
+        self.table.setColumnWidth(2, 220)
         layout.addWidget(self.table)
+        layout.addWidget(QLabel("REGISTRATION  ·  current selected pass"))
         self.registration_label = QLabel()
         self.status_label = QLabel()
         self.history_label = QLabel()
         for label in (self.registration_label, self.status_label, self.history_label):
             label.setWordWrap(True)
             layout.addWidget(label)
-        self.correct_button = QPushButton("Physical correction · production runtime required")
+        actions = QHBoxLayout()
+        self.correct_button = QPushButton("Begin physical correction · Tk confirmation")
         self.correct_button.setEnabled(False)
         self.correct_button.clicked.connect(lambda: self.begin_requested.emit(self.state.selected_pass))
-        layout.addWidget(self.correct_button)
+        actions.addWidget(self.correct_button)
+        self.load_button = QPushButton("Load selected corrected pass · runtime required")
+        self.load_button.setEnabled(False)
+        self.load_button.clicked.connect(lambda: self.load_requested.emit(self.state.selected_pass))
+        actions.addWidget(self.load_button)
+        layout.addLayout(actions)
         capture_row = QHBoxLayout()
         self.start_capture_button = QPushButton("Capture START (I path)")
         self.goal_capture_button = QPushButton("Capture GOAL (J path)")
@@ -168,10 +219,6 @@ class MultiPassPanel(QWidget):
             button.clicked.connect(signal.emit)
             capture_row.addWidget(button)
         layout.addLayout(capture_row)
-        self.load_button = QPushButton("Load selected corrected pass · runtime required")
-        self.load_button.setEnabled(False)
-        self.load_button.clicked.connect(lambda: self.load_requested.emit(self.state.selected_pass))
-        layout.addWidget(self.load_button)
         self.stop_button = QPushButton("STOP multi-pass correction")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_requested.emit)
@@ -194,6 +241,9 @@ class MultiPassPanel(QWidget):
             self.folder_edit.setText(str(self.state.loaded_folder))
         with QSignalBlocker(self.pass_combo):
             self.pass_combo.setCurrentIndex(self.state.selected_pass - 1)
+        for number, button in self.pass_buttons.items():
+            with QSignalBlocker(button):
+                button.setChecked(number == self.state.selected_pass)
         self.folder_label.setText(f"Reference folder: {self.state.loaded_folder or '—'} · Corrected folder: {self.state.output_folder or '—'}")
         for row in range(4):
             number = row + 1
@@ -252,55 +302,81 @@ class WeldingPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         body = QWidget()
-        form = QFormLayout(body)
-        self._number(form, "Current [A]", "current_a", 30, 400, 1)
-        self._number(form, "Voltage [V]", "voltage_tenths", 3, 80, 0.1, scale=10)
-        self._choice(form, "Wire material", "material", tuple(MATERIAL_CODES))
-        self._choice(form, "Wire diameter [mm]", "diameter_mm", tuple(map(str, DIAMETER_CODES)))
-        self._choice(form, "Mode", "mode", tuple(MODE_CODES))
-        self._choice(form, "Shielding gas", "gas", tuple(GAS_CODES))
-        self._boolean(form, "Synergic", "synergic")
-        self._number(form, "Synergic correction", "correction", -100, 100, 1)
-        self._number(form, "Travel TCP [mm/s]", "weld_tcp_speed_mm_s", 0.1, 100, 0.1, motion=True)
-        self._boolean(form, "Weave enabled", "weld_weave_enabled", motion=True)
-        self._choice(form, "Weave pattern", "weld_weave_pattern", ("sine", "crescent", "circle"), motion=True)
-        self._choice(form, "Weave axis", "weld_weave_axis", ("tool_x", "tool_y"), motion=True)
-        self._number(form, "Amplitude ±A [mm]", "weld_weave_amplitude_mm", 0.1, 50, 0.1, motion=True)
-        self._number(form, "Pitch [mm/cycle]", "weld_weave_pitch_mm", 0.1, 100, 0.1, motion=True)
-        self._number(form, "Left dwell [s]", "weld_weave_left_dwell_s", 0, 10, 0.01, motion=True)
-        self._number(form, "Right dwell [s]", "weld_weave_right_dwell_s", 0, 10, 0.01, motion=True)
-        self._boolean(form, "Native Hot Start enabled", "hot_start_enabled")
-        self._number(form, "Native Hot Start boost [%]", "hot_start_percent", 0, 100, 1)
-        self._number(form, "Native hold adjustment", "hot_start_hold_adjustment", -15, 15, 1)
-        self._boolean(form, "Custom Hot Start enabled", "custom_hot_start_enabled")
-        self._number(form, "Custom Hot Start boost [%]", "custom_hot_start_percent", 0, 100, 1)
-        self._number(form, "Custom Hot Start hold [s]", "custom_hot_start_hold_s", 0.01, 5, 0.01)
-        self._boolean(form, "Software crater enabled", "software_crater_enabled")
-        self._number(form, "Software crater ratio [%]", "software_crater_ratio_percent", 20, 40, 1)
-        self._number(form, "Software crater voltage [V]", "software_crater_voltage_v", 10, 40, 0.1)
-        self._number(form, "Software crater hold [s]", "software_crater_hold_s", 0.01, 5, 0.01)
-        self._boolean(form, "Native crater expected (observation)", "expect_native_crater")
-        self._number(form, "Panel crater current ref [A]", "crater_panel_current_ref_a", 0, 600, 1)
-        self._number(form, "Panel crater voltage ref [V]", "crater_panel_voltage_ref_v", 3, 80, 0.1)
-        self._number(form, "Panel crater time ref [s]", "crater_panel_time_ref_s", 0, 30, 0.1)
-        self._number(form, "Wire consumable allowance [mm]", "wire_consumable_alpha_mm", -1000, 1000, 1)
-        form.addRow(QLabel("Editing never sends Hi-COMM setpoints or ARC commands"))
+        sections = QVBoxLayout(body)
+        sections.setSpacing(8)
+
+        def section(title, expanded=False):
+            panel = CollapsibleSection(title, expanded)
+            form = QFormLayout()
+            form.setSpacing(6)
+            panel.content_layout.addLayout(form)
+            sections.addWidget(panel)
+            return form
+
+        recipe = section("Weld recipe", True)
+        self._number(recipe, "Current [A]", "current_a", 30, 400, 1)
+        self._number(recipe, "Voltage [V]", "voltage_tenths", 3, 80, 0.1, scale=10)
+        self._choice(recipe, "Wire material", "material", tuple(MATERIAL_CODES))
+        self._choice(recipe, "Wire diameter [mm]", "diameter_mm", tuple(map(str, DIAMETER_CODES)))
+        self._choice(recipe, "Mode", "mode", tuple(MODE_CODES))
+        self._choice(recipe, "Shielding gas", "gas", tuple(GAS_CODES))
+        self._boolean(recipe, "Synergic", "synergic")
+        self._number(recipe, "Synergic correction", "correction", -100, 100, 1)
+
+        motion = section("Motion", True)
+        self._number(motion, "Travel TCP [mm/s]", "weld_tcp_speed_mm_s", 0.1, 100, 0.1, motion=True)
+        weave = section("Weave")
+        self._boolean(weave, "Weave enabled", "weld_weave_enabled", motion=True)
+        self._choice(weave, "Weave pattern", "weld_weave_pattern", ("sine", "crescent", "circle"), motion=True)
+        self._choice(weave, "Weave axis", "weld_weave_axis", ("tool_x", "tool_y"), motion=True)
+        self._number(weave, "Amplitude ±A [mm]", "weld_weave_amplitude_mm", 0.1, 50, 0.1, motion=True)
+        self._number(weave, "Pitch [mm/cycle]", "weld_weave_pitch_mm", 0.1, 100, 0.1, motion=True)
+        self._number(weave, "Left dwell [s]", "weld_weave_left_dwell_s", 0, 10, 0.01, motion=True)
+        self._number(weave, "Right dwell [s]", "weld_weave_right_dwell_s", 0, 10, 0.01, motion=True)
+
+        start = section("Start · Hot Start")
+        self._boolean(start, "Native Hot Start enabled", "hot_start_enabled")
+        self._number(start, "Native Hot Start boost [%]", "hot_start_percent", 0, 100, 1)
+        self._number(start, "Native hold adjustment", "hot_start_hold_adjustment", -15, 15, 1)
+        self._boolean(start, "Custom Hot Start enabled", "custom_hot_start_enabled")
+        self._number(start, "Custom Hot Start boost [%]", "custom_hot_start_percent", 0, 100, 1)
+        self._number(start, "Custom Hot Start hold [s]", "custom_hot_start_hold_s", 0.01, 5, 0.01)
+
+        end = section("End · Crater")
+        self._boolean(end, "Software crater enabled", "software_crater_enabled")
+        self._number(end, "Software crater ratio [%]", "software_crater_ratio_percent", 20, 40, 1)
+        self._number(end, "Software crater voltage [V]", "software_crater_voltage_v", 10, 40, 0.1)
+        self._number(end, "Software crater hold [s]", "software_crater_hold_s", 0.01, 5, 0.01)
+        self._boolean(end, "Native crater expected (observation)", "expect_native_crater")
+        self._number(end, "Panel crater current ref [A]", "crater_panel_current_ref_a", 0, 600, 1)
+        self._number(end, "Panel crater voltage ref [V]", "crater_panel_voltage_ref_v", 3, 80, 0.1)
+        self._number(end, "Panel crater time ref [s]", "crater_panel_time_ref_s", 0, 30, 0.1)
+        logging = section("Logging")
+        self._number(logging, "Wire consumable allowance [mm]", "wire_consumable_alpha_mm", -1000, 1000, 1)
+        sections.addStretch()
         scroll.setWidget(body)
         layout = QVBoxLayout(self)
+        heading = QLabel("Welding configuration")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Edit Builder defaults only · no Hi-COMM command is sent"))
         layout.addWidget(scroll)
         self.apply_button = QPushButton("Apply to future production Builder defaults")
         self.apply_button.setEnabled(False)
         self.apply_button.clicked.connect(lambda: self.apply_requested.emit(self.state))
-        layout.addWidget(self.apply_button)
+        actions = QHBoxLayout()
+        actions.addWidget(self.apply_button)
         self.reload_button = QPushButton("Reload current production Builder defaults")
         self.reload_button.setEnabled(False)
         self.reload_button.clicked.connect(self.reload_requested.emit)
-        layout.addWidget(self.reload_button)
+        actions.addWidget(self.reload_button)
+        layout.addLayout(actions)
         layout.addWidget(QLabel("Existing Sequence Builder rows keep their snapshotted settings; rebuild to apply changes"))
         self.refresh()
 
     def _number(self, form, label, key, minimum, maximum, step, motion=False, scale=1):
         editor = QDoubleSpinBox()
+        editor.setMaximumWidth(220)
         editor.setRange(minimum, maximum)
         editor.setSingleStep(step)
         editor.setDecimals(2)
@@ -316,6 +392,7 @@ class WeldingPanel(QWidget):
 
     def _choice(self, form, label, key, choices, motion=False):
         editor = QComboBox()
+        editor.setMaximumWidth(220)
         editor.addItems(choices)
         self.editors[key] = editor
         editor.currentTextChanged.connect(lambda value, k=key, m=motion: self._commit(k, value, m))
@@ -356,19 +433,33 @@ class TorchCleanerPanel(QWidget):
         super().__init__(parent)
         self.state, self.sequence_state, self.load_pose = state, sequence_state, load_pose
         layout = QVBoxLayout(self)
+        heading = QLabel("Torch Cleaner")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Taught positions → ordered moves / DO pulses → shared Sequence Builder"))
         self.folder_edit = QLineEdit(str(state.folder))
         self.folder_edit.editingFinished.connect(self._folder_changed)
         layout.addWidget(self.folder_edit)
         self.positions = QListWidget()
-        layout.addWidget(QLabel("Available cleaner teaching positions"))
-        layout.addWidget(self.positions)
         self.order = QListWidget()
-        layout.addWidget(QLabel("Cleaner order (one shared Builder is generated from this order)"))
-        layout.addWidget(self.order)
+        columns = QHBoxLayout()
+        positions_column = QVBoxLayout()
+        positions_column.addWidget(QLabel("TAUGHT POSITIONS"))
+        positions_column.addWidget(self.positions)
+        order_column = QVBoxLayout()
+        order_column.addWidget(QLabel("ORDERED MOVES + OUTPUTS"))
+        order_column.addWidget(self.order)
+        columns.addLayout(positions_column, 1)
+        columns.addLayout(order_column, 2)
+        layout.addLayout(columns, 1)
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Travel speed %"))
         self.speed = QDoubleSpinBox()
         self.speed.setRange(1, 100)
         self.speed.setValue(20)
-        layout.addWidget(self.speed)
+        speed_row.addWidget(self.speed)
+        speed_row.addStretch()
+        layout.addLayout(speed_row)
         self.status = QLabel()
         layout.addWidget(self.status)
         self.preview_label = QLabel("Preview: validate the order before building")
@@ -376,10 +467,12 @@ class TorchCleanerPanel(QWidget):
         layout.addWidget(self.preview_label)
         preview_button = QPushButton("Validate / Preview")
         preview_button.clicked.connect(self._preview_clicked)
-        layout.addWidget(preview_button)
         self.build_button = QPushButton("Build → Sequence Builder")
         self.build_button.clicked.connect(self._build_clicked)
-        layout.addWidget(self.build_button)
+        build_row = QHBoxLayout()
+        build_row.addWidget(preview_button)
+        build_row.addWidget(self.build_button)
+        layout.addLayout(build_row)
         actions = QHBoxLayout()
         self.plan_button = QPushButton("Plan cleaner rows")
         self.execute_button = QPushButton("Execute cleaner rows")
@@ -461,6 +554,10 @@ class TaskLibraryPanel(QWidget):
         self.order_state = order_state if order_state is not None else TaskOrderState()
         self.load_pose = load_pose
         layout = QVBoxLayout(self)
+        heading = QLabel("Task Library")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Saved tasks · teaching poses · visit order · Builder generation"))
         form = QFormLayout()
         self.folder_edit = QLineEdit(str(folder or teaching_config_dir() / "robot_tasks"))
         self.folder_edit.editingFinished.connect(self.refresh)
@@ -483,10 +580,15 @@ class TaskLibraryPanel(QWidget):
         lists = QHBoxLayout()
         self.poses = QListWidget()
         self.order = QListWidget()
-        lists.addWidget(self.poses)
-        lists.addWidget(self.order)
-        layout.addWidget(QLabel("Stored poses                                              Visit order"))
-        layout.addLayout(lists)
+        pose_column = QVBoxLayout()
+        pose_column.addWidget(QLabel("STORED TEACHING POSES"))
+        pose_column.addWidget(self.poses)
+        order_column = QVBoxLayout()
+        order_column.addWidget(QLabel("VISIT ORDER"))
+        order_column.addWidget(self.order)
+        lists.addLayout(pose_column)
+        lists.addLayout(order_column)
+        layout.addLayout(lists, 1)
         buttons = QHBoxLayout()
         for label, callback in (("Add →", self._add_clicked), ("Remove", self.remove_selected),
                                 ("↑", lambda: self.move_selected(-1)), ("↓", lambda: self.move_selected(1))):
@@ -661,14 +763,28 @@ class TouchIoStatusPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QGridLayout(self)
+        layout = QVBoxLayout(self)
+        heading = QLabel("Touch / IO")
+        heading.setObjectName("PageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Read-only equipment state · unknown values are not inferred"))
+        primary = QFrame()
+        primary.setObjectName("PanelCard")
+        grid = QGridLayout(primary)
         self.labels = {}
-        for row, (key, title) in enumerate(self.FIELDS):
-            layout.addWidget(QLabel(title), row, 0)
+        for row, (key, title) in enumerate(self.FIELDS[:-1]):
+            grid.addWidget(QLabel(title), row, 0)
             label = QLabel("Unknown / runtime not attached")
-            layout.addWidget(label, row, 1)
+            grid.addWidget(label, row, 1)
             self.labels[key] = label
-        layout.addWidget(QLabel("Read-only · no touch enable, digital output, or ARC controls"), len(self.FIELDS), 0, 1, 2)
+        layout.addWidget(primary)
+        secondary = CollapsibleSection("Control-box IO · details")
+        detail = QLabel("Unknown / runtime not attached")
+        secondary.content_layout.addWidget(detail)
+        self.labels["control_box_io"] = detail
+        layout.addWidget(secondary)
+        layout.addWidget(QLabel("No touch enable, digital output, or ARC controls on this page"))
+        layout.addStretch()
 
     @Slot(object)
     def set_snapshot(self, snapshot):

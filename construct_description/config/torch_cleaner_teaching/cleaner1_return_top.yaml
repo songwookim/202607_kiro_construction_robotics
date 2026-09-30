@@ -1,3 +1,5 @@
+format_version: 1
+planning_group: right_manipulator
 joint_state:
   names:
   - right_manipulator_joint1
@@ -7,11 +9,28 @@ joint_state:
   - right_manipulator_joint5
   - right_manipulator_joint6
   positions_rad:
-  - 5.486312647909423
-  - 0.9265130108692672
-  - 1.4417975972814205
-  - 5.504173404076148
-  - 0.5086893012620857
-  - -0.20843153705623818
-planning_group: right_manipulator
-schema: torch_cleaner_joints_v1
+  - 5.488970482677321
+  - 0.9151296616848598
+  - 1.434439150031477
+  - 5.527031315712298
+  - 0.5238088657187925
+  - -0.23274741287590897
+tcp_pose_world:
+  position_m:
+    x: 0.638485877866082
+    y: -1.5988573641768522
+    z: 1.0189914734491796
+  orientation_xyzw:
+    x: -0.5050037816861305
+    y: 0.8237609863064445
+    z: -0.22181139513608644
+    w: -0.13110576993376305
+capture_provenance:
+  capture_source: measured_joint_fk
+  tcp_source: moveit_fk
+  joint_state_timestamp: 1790563620.718977
+  joint_state_age_ms: 10.562915000264184
+  tf_age_ms: 8.939504623413086
+  tf_fresh: true
+  tf_fk_position_error_mm: 6.661338147750939e-13
+  tf_fk_orientation_error_deg: 0.0

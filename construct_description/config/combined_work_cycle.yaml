@@ -1,0 +1,37 @@
+schema: construct_robot_combined_work_cycle_v1
+description: Pass 4 fake-arc weld, torch cleaning, and left-arm refractory spray motion
+initial:
+  left:
+    joint_names: [left_manipulator_joint1, left_manipulator_joint2, left_manipulator_joint3, left_manipulator_joint4, left_manipulator_joint5, left_manipulator_joint6]
+    positions_rad: [2.4356046275763275, -0.16364993404958095, -2.5487053506464665, 4.083863255733923, -1.2869719309905194, -3.7303677694939283]
+  right:
+    joint_names: [right_manipulator_joint1, right_manipulator_joint2, right_manipulator_joint3, right_manipulator_joint4, right_manipulator_joint5, right_manipulator_joint6]
+    positions_rad: [5.1492129129205, 1.1185453678545292, 1.9428967895682394, 3.592055166700118, 1.1207324888997567, 1.446821118045637]
+  head:
+    joint_names: [robot_head_rev_joint1, robot_head_rev_joint2]
+    positions_rad: [-0.00023932853103073468, 0.791243498758959]
+designated:
+  left:
+    joint_names: [left_manipulator_joint1, left_manipulator_joint2, left_manipulator_joint3, left_manipulator_joint4, left_manipulator_joint5, left_manipulator_joint6]
+    positions_rad: [1.5680966803978833, -1.0288758684242068, -1.6831489679148324, 3.1658668342936473, -1.1218183928342365, -3.3971333465111475]
+  right:
+    joint_names: [right_manipulator_joint1, right_manipulator_joint2, right_manipulator_joint3, right_manipulator_joint4, right_manipulator_joint5, right_manipulator_joint6]
+    positions_rad: [4.112291168789974, 0.9151865867531602, 2.2689967371487523, 2.5369384396860606, 1.3102892379147082, 1.5010875526298546]
+head_sweep_joint1_deg: [-15.0, 15.0, 0.0]
+pass_number: 4
+fake_arc_required: true
+weave:
+  enabled: true
+  transverse_axis: tool_y
+spray_motion:
+  positive_x_mm: 650.0
+  positive_x_velocity_scale: 0.30
+  negative_x_mm: -650.0
+  negative_x_velocity_scale: 0.40
+  circle_axis: x
+  circle_radius_mm: 100.0
+  circle_unique_points: 4
+  circle_closed: true
+  circle_face_center: false
+  circle_velocity_scale: 0.30
+  output: none
