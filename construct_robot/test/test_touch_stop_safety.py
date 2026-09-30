@@ -4,8 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from construct_robot.weld_action_gui import WeldActionGui, WeldGuiNode
-from construct_robot import weld_action_gui
+from construct_robot.gui.weld_action_gui import WeldActionGui, WeldGuiNode
+from construct_robot.gui import weld_action_gui
 from construct_robot.nodes import weld_runtime_node
 
 

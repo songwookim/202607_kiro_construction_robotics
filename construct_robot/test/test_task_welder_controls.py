@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from construct_robot import weld_action_gui as module
+from construct_robot.gui import weld_action_gui as module
 
 
 def test_manual_arc_requires_confirmation_without_unlock_checkbox(monkeypatch):

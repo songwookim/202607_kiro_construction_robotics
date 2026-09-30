@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from construct_robot.weld_action_gui import (
+from construct_robot.gui.weld_action_gui import (
     WeldActionGui, weld_weave_settings_text,
 )
 

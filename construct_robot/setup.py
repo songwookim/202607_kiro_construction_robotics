@@ -24,18 +24,16 @@ setup(
         'test': [
             'pytest',
         ],
-        'qt': ['PySide6-Essentials>=6.5,<7'],
     },
     entry_points={
         'console_scripts': [
             'cartesian_path_server = construct_robot.nodes.cartesian_path_server:main',
             'weld_action_gui = construct_robot.gui.weld_action_gui:main',
-            'weld_action_gui_qt = construct_robot.gui_qt.launch:main',
-            'weld_action_gui_qt_production = construct_robot.gui_qt.production_launch:main',
-            'weld_feedback_plot = construct_robot.weld_feedback_plot:main',
+            'weld_feedback_plot = construct_robot.io.weld_feedback_plot:main',
             'controller_spawner = construct_robot.nodes.controller_spawner:main',
             'fastech_io_node = construct_robot.nodes.fastech_io_node:main',
             'keyboard_teaching_node = construct_robot.nodes.keyboard_teaching_node:main',
+            'keyboard_jog_node = construct_robot.nodes.keyboard_jog_node:main',
         ],
     },
 )

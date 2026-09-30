@@ -627,7 +627,7 @@ class WeldFeedbackRecorder:
             subprocess.Popen((
                 python,
                 "-m",
-                "construct_robot.weld_feedback_plot",
+                "construct_robot.io.weld_feedback_plot",
                 str(history_path),
                 str(latest_path),
                 "--no-show",

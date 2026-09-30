@@ -99,7 +99,7 @@ KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S = 0.25
 KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S = 0.80
 KEYBOARD_ZERO_BURST_COUNT = 5
 KEYBOARD_TF_LOOKUP_TIMEOUT_S = 0.05
-# "servo": MoveIt Servo streams into the active JTC (RB stays in Servo-J).
+# "servo": keyboard_jog_node streams into the active JTC (RB stays in Servo-J).
 # "native_jog": exchange JTC for the Cartesian velocity controller (jog_robot_l).
 KEYBOARD_TEACHING_BACKENDS = ("servo", "native_jog")
 
@@ -569,6 +569,14 @@ class WeldGuiNode(Node):
         if self.keyboard_servo is not None:
             return self.keyboard_servo.available(arm)
         return arm in self.keyboard_velocity_publishers
+
+    def wait_until_keyboard_command_stopped(self, arm, timeout, stable_s=0.1):
+        """Servo mode: the JTC reference, not RB's lagging motion, must stop."""
+        return self.keyboard_servo.command_stopped(arm, timeout, stable_s)
+
+    def restart_keyboard_servo(self, arm):
+        """Servo-mode stop fallback; never RB move_stop while Servo-J streams."""
+        return self.keyboard_servo.restart(arm)
 
     def _keyboard_servo_status(self, arm, code, text):
         message = f"{arm.upper()} keyboard Servo · {text}"
@@ -2179,7 +2187,7 @@ class WeldGuiNode(Node):
         return True, f"{deactivate} -> {activate}"
 
     def _set_keyboard_servo_enabled(self, arm, enable):
-        """Start/stop MoveIt Servo on the arm's JTC; no controller exchange."""
+        """Start/stop the jog stream on the arm's JTC; no controller exchange."""
         if enable:
             if not self.wait_for_controller_state(
                 CONTROLLER_NAMES[arm], "active", timeout=1.0

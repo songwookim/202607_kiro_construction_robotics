@@ -1,21 +1,17 @@
-"""MoveIt Servo backend for keyboard teaching.
+"""GUI-side client for keyboard teaching over RB Servo-J streaming.
 
 The native backend exchanges the arm's JTC for a Cartesian velocity
 controller (RB ``jog_robot_l``).  Each exchange moves RB between its Servo-J
 and Idle hold modes, and RB's first Servo-J sample after Idle kicks the arm
 (~1e-3 rad on J2, "start kick") although the commanded position is
-continuous.  This backend keeps the JTC active instead: MoveIt Servo turns
-keyboard twists into JTC topic trajectories, so RB never leaves Servo-J.
+continuous.  This backend keeps the JTC active instead:
+:mod:`construct_robot.nodes.keyboard_jog_node` turns keyboard twists into JTC
+topic trajectories, so RB never leaves Servo-J.
 
-Two details were required on the real RB arm:
-
-* Humble Servo re-seeds from its joint topic every cycle.  RB Servo-J lags its
-  command, so seeding from measured joints stalls the jog.  Servo is fed its
-  own last command instead, seeded from the JTC reference when it starts.
-* The JTC must start each streamed trajectory from its last command
-  (``open_loop_control``).  Re-seeding from measured joints drifts against the
-  command and snaps when the stream stops.  It is enabled only while keyboard
-  teaching owns the arm and restored on exit.
+The JTC must start each streamed trajectory from its last command
+(``open_loop_control``); re-seeding from measured joints drifts against the
+command and snaps when the stream stops.  It is enabled only while keyboard
+teaching owns the arm and restored on exit.
 """
 
 import threading
@@ -25,29 +21,23 @@ from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import TwistStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
-from sensor_msgs.msg import JointState
 from std_msgs.msg import Int8
 from std_srvs.srv import Trigger
-from trajectory_msgs.msg import JointTrajectory
 
 
 KEYBOARD_SERVO_ARMS = ("left", "right")
-KEYBOARD_SERVO_FEED_PERIOD_S = 0.02
-KEYBOARD_SERVO_REFERENCE_TIMEOUT_S = 1.0
 KEYBOARD_SERVO_SERVICE_TIMEOUT_S = 3.0
+KEYBOARD_SERVO_COMMAND_STILL_RAD = 1e-7
 SERVO_STATUS_TEXT = {
     0: "OK",
     1: "slowing near singularity",
     2: "HALTED at singularity",
-    3: "slowing near collision",
-    4: "HALTED for collision",
     5: "HALTED at joint limit",
-    6: "leaving singularity",
 }
 
 
-def keyboard_servo_name(arm):
-    return f"{arm}_keyboard_servo"
+def keyboard_jog_prefix(arm):
+    return f"/{arm}_keyboard_jog"
 
 
 def keyboard_servo_base_frame(arm):
@@ -55,43 +45,30 @@ def keyboard_servo_base_frame(arm):
 
 
 class KeyboardServoBridge:
-    """Per-arm Servo control, twist output and self-fed joint topic."""
+    """Per-arm jog start/stop, twist output and command-standstill check."""
 
     def __init__(self, node, controller_names, on_status=None):
         self.node = node
         self.controller_names = dict(controller_names)
         self.on_status = on_status
         self.lock = threading.Lock()
-        self.feeds = {
-            arm: {
-                "active": False,
-                "own": False,
-                "names": None,
-                "positions": None,
-            }
-            for arm in KEYBOARD_SERVO_ARMS
-        }
         self.status = {arm: 0 for arm in KEYBOARD_SERVO_ARMS}
+        # Last JTC reference and when it last changed: keyboard stop checks
+        # use the command, since RB Servo-J settles ~0.5 s behind it.
+        self.references = {arm: None for arm in KEYBOARD_SERVO_ARMS}
+        self.reference_changed_at = {arm: 0.0 for arm in KEYBOARD_SERVO_ARMS}
         self.twist_publishers = {}
-        self.feed_publishers = {}
         self.start_clients = {}
         self.stop_clients = {}
         self.parameter_clients = {}
         for arm in KEYBOARD_SERVO_ARMS:
-            servo = keyboard_servo_name(arm)
+            prefix = keyboard_jog_prefix(arm)
             controller = self.controller_names[arm]
             self.twist_publishers[arm] = node.create_publisher(
-                TwistStamped, f"/{servo}/delta_twist_cmds", 10
+                TwistStamped, f"{prefix}/delta_twist_cmds", 10
             )
-            self.feed_publishers[arm] = node.create_publisher(
-                JointState, f"/{servo}/joint_states", 10
-            )
-            self.start_clients[arm] = node.create_client(
-                Trigger, f"/{servo}/start_servo"
-            )
-            self.stop_clients[arm] = node.create_client(
-                Trigger, f"/{servo}/stop_servo"
-            )
+            self.start_clients[arm] = node.create_client(Trigger, f"{prefix}/start")
+            self.stop_clients[arm] = node.create_client(Trigger, f"{prefix}/stop")
             self.parameter_clients[arm] = node.create_client(
                 SetParameters, f"/{controller}/set_parameters"
             )
@@ -102,20 +79,12 @@ class KeyboardServoBridge:
                 10,
             )
             node.create_subscription(
-                JointTrajectory,
-                f"/{controller}/joint_trajectory",
-                lambda message, arm=arm: self._servo_output(arm, message),
-                50,
-            )
-            node.create_subscription(
                 Int8,
-                f"/{servo}/status",
-                lambda message, arm=arm: self._servo_status(arm, message),
+                f"{prefix}/status",
+                lambda message, arm=arm: self._jog_status(arm, message),
                 10,
             )
-        node.create_timer(KEYBOARD_SERVO_FEED_PERIOD_S, self._publish_feeds)
 
-    # ------------------------------------------------------------------ feed
     def _controller_state(self, arm, message):
         positions = list(message.reference.positions) or list(
             message.desired.positions
@@ -123,46 +92,14 @@ class KeyboardServoBridge:
         if not positions:
             return
         with self.lock:
-            feed = self.feeds[arm]
-            if not feed["active"] or feed["own"]:
-                return
-            feed["names"] = list(message.joint_names)
-            feed["positions"] = positions
-        self._publish_feed(arm)
+            previous = self.references[arm]
+            if previous is None or max(
+                abs(a - b) for a, b in zip(previous, positions)
+            ) > KEYBOARD_SERVO_COMMAND_STILL_RAD:
+                self.references[arm] = positions
+                self.reference_changed_at[arm] = time.monotonic()
 
-    def _servo_output(self, arm, message):
-        if not message.points:
-            return
-        with self.lock:
-            feed = self.feeds[arm]
-            if not feed["active"]:
-                return
-            feed["names"] = list(message.joint_names)
-            feed["positions"] = list(message.points[-1].positions)
-            feed["own"] = True
-        self._publish_feed(arm)
-
-    def _publish_feeds(self):
-        for arm in KEYBOARD_SERVO_ARMS:
-            self._publish_feed(arm)
-
-    def _publish_feed(self, arm):
-        with self.lock:
-            feed = self.feeds[arm]
-            if not feed["active"] or feed["positions"] is None:
-                return
-            names, positions = feed["names"], feed["positions"]
-        # Other joints (second arm, head) keep their measured values so
-        # Servo's collision checking sees the real scene.
-        merged = dict(self.node.latest_joint_positions)
-        merged.update(zip(names, positions))
-        message = JointState()
-        message.header.stamp = self.node.get_clock().now().to_msg()
-        message.name = list(merged)
-        message.position = [float(value) for value in merged.values()]
-        self.feed_publishers[arm].publish(message)
-
-    def _servo_status(self, arm, message):
+    def _jog_status(self, arm, message):
         code = int(message.data)
         with self.lock:
             if code == self.status[arm]:
@@ -184,51 +121,54 @@ class KeyboardServoBridge:
         )
 
     def enable(self, arm):
-        """Seed the feed from the JTC reference and start Servo."""
+        """Switch the JTC to open-loop starts, then start the jog stream."""
         if not self.available(arm):
             return False, (
-                f"/{keyboard_servo_name(arm)} or "
+                f"{keyboard_jog_prefix(arm)} or "
                 f"/{self.controller_names[arm]} parameters unavailable"
             )
         ok, message = self.set_open_loop(arm, True)
         if not ok:
             return False, message
-        with self.lock:
-            self.feeds[arm].update(
-                active=True, own=False, names=None, positions=None
-            )
-        deadline = time.monotonic() + KEYBOARD_SERVO_REFERENCE_TIMEOUT_S
-        while time.monotonic() < deadline:
-            with self.lock:
-                seeded = self.feeds[arm]["positions"] is not None
-            if seeded:
-                break
-            time.sleep(0.02)
-        else:
-            self._abort(arm)
-            return False, f"no {self.controller_names[arm]} reference received"
-        # Let Servo's state monitor receive a few seeded samples first.
-        time.sleep(0.1)
-        ok, message = self._trigger(self.start_clients[arm], "start_servo")
+        ok, message = self._trigger(self.start_clients[arm], "jog start")
         if not ok:
-            self._abort(arm)
+            self.set_open_loop(arm, False)
             return False, message
         return True, (
-            f"{keyboard_servo_name(arm)} started · "
+            f"{arm} keyboard jog started · "
             f"{self.controller_names[arm]} stays active"
         )
 
     def disable(self, arm):
-        """Stop Servo, then restore the JTC's closed-loop start state."""
-        stop_ok, stop_message = self._trigger(self.stop_clients[arm], "stop_servo")
-        with self.lock:
-            self.feeds[arm].update(active=False, own=False)
+        """Stop the jog stream, then restore the JTC's closed-loop start state."""
+        stop_ok, stop_message = self._trigger(self.stop_clients[arm], "jog stop")
         loop_ok, loop_message = self.set_open_loop(arm, False)
-        ok = stop_ok and loop_ok
-        return ok, f"{stop_message}; {loop_message}"
+        return stop_ok and loop_ok, f"{stop_message}; {loop_message}"
+
+    def restart(self, arm):
+        """Stop and restart the jog: it holds the last command, RB stays in Servo-J."""
+        stop_ok, stop_message = self._trigger(self.stop_clients[arm], "jog stop")
+        if not stop_ok:
+            return False, stop_message
+        ok, message = self._trigger(self.start_clients[arm], "jog start")
+        return ok, f"{stop_message}; {message}"
+
+    def command_stopped(self, arm, timeout, stable_s):
+        """True once the JTC reference has not changed for stable_s."""
+        deadline = time.monotonic() + timeout
+        while True:
+            with self.lock:
+                changed_at = self.reference_changed_at[arm]
+                seen = self.references[arm] is not None
+            now = time.monotonic()
+            if seen and now - changed_at >= stable_s:
+                return True
+            if now >= deadline:
+                return False
+            time.sleep(0.01)
 
     def publish_twist(self, arm, values):
-        """Publish a robot-base-frame twist (m/s, rad/s) to the arm's Servo."""
+        """Publish a robot-base-frame twist (m/s, rad/s) to the arm's jog stream."""
         message = TwistStamped()
         message.header.stamp = self.node.get_clock().now().to_msg()
         message.header.frame_id = keyboard_servo_base_frame(arm)
@@ -262,11 +202,6 @@ class KeyboardServoBridge:
             reason = results[0].reason if results else "no result"
             return False, f"{controller} open_loop_control rejected: {reason}"
         return True, f"{controller} open_loop_control={bool(enabled)}"
-
-    def _abort(self, arm):
-        with self.lock:
-            self.feeds[arm].update(active=False, own=False)
-        self.set_open_loop(arm, False)
 
     def _trigger(self, client, name):
         response, error = self._call(client, Trigger.Request())

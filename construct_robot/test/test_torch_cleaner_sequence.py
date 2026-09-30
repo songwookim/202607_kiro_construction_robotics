@@ -5,9 +5,9 @@ import pytest
 import yaml
 from geometry_msgs.msg import Pose
 
-from construct_robot.teaching_paths import teaching_config_dir
+from construct_robot.io.teaching_paths import teaching_config_dir
 from construct_robot.gui.torch_cleaner_panel import TorchCleanerPanel
-from construct_robot.weld_action_gui import WeldActionGui, WeldGuiNode
+from construct_robot.gui.weld_action_gui import WeldActionGui, WeldGuiNode
 from construct_robot.core.torch_cleaner_teaching import (
     build_cleaner_sequence_steps, save_cleaner_correction,
 )
@@ -168,7 +168,7 @@ def test_delete_all_has_no_confirmation(monkeypatch):
     gui.sequence_status = SimpleNamespace(configure=Mock())
     gui.refresh_sequence_table = Mock()
     gui.log = Mock()
-    monkeypatch.setattr("construct_robot.weld_action_gui.messagebox.askyesno",
+    monkeypatch.setattr("construct_robot.gui.weld_action_gui.messagebox.askyesno",
                         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("prompt")))
     gui.delete_all_sequence_steps()
     assert gui.sequence_steps == []

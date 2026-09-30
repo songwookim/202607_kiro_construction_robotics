@@ -1,4 +1,4 @@
-"""MoveIt Servo keyboard backend: JTC stays active, RB never leaves Servo-J."""
+"""Servo-J keyboard jog backend: JTC stays active, RB never leaves Servo-J."""
 
 import threading
 import time
@@ -37,20 +37,17 @@ def fake_client(response, name="srv"):
 def bridge_with(start_ok=True, parameter_ok=True):
     bridge = object.__new__(KeyboardServoBridge)
     bridge.node = SimpleNamespace(
-        latest_joint_positions={"left_manipulator_joint1": 0.5},
-        get_clock=lambda: SimpleNamespace(
-            now=lambda: SimpleNamespace(to_msg=Time)
-        ),
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=Time)),
     )
     bridge.controller_names = {"right": "right_manipulator_controller"}
     bridge.on_status = None
     bridge.lock = threading.Lock()
-    bridge.feeds = {"right": {"active": False, "own": False, "names": None, "positions": None}}
     bridge.status = {"right": 0}
-    bridge.feed_publishers = {"right": Mock()}
+    bridge.references = {"right": None}
+    bridge.reference_changed_at = {"right": 0.0}
     bridge.twist_publishers = {"right": Mock()}
     bridge.start_clients = {"right": fake_client(
-        SimpleNamespace(success=start_ok, message="" if start_ok else "no robot state"))}
+        SimpleNamespace(success=start_ok, message="" if start_ok else "no fresh reference"))}
     bridge.stop_clients = {"right": fake_client(SimpleNamespace(success=True, message=""))}
     bridge.parameter_clients = {"right": fake_client(SimpleNamespace(
         results=[SimpleNamespace(successful=parameter_ok, reason="read-only")]))}
@@ -72,67 +69,48 @@ def reference_state(positions):
     )
 
 
-def enable_with_reference(bridge, positions):
-    def deliver():
-        time.sleep(0.05)
-        bridge._controller_state("right", reference_state(positions))
-
-    threading.Thread(target=deliver).start()
-    return bridge.enable("right")
-
-
-def test_enable_seeds_feed_from_jtc_reference_then_starts_servo():
+def test_enable_sets_open_loop_before_starting_the_jog():
     bridge = bridge_with()
-    success, _message = enable_with_reference(bridge, [0.1] * 6)
-    assert success
-    assert open_loop_values(bridge) == [True]
-    bridge.start_clients["right"].call_async.assert_called_once()
-    feed = bridge.feed_publishers["right"].publish.call_args.args[0]
-    positions = dict(zip(feed.name, feed.position))
-    assert positions["right_manipulator_joint1"] == 0.1
-    assert positions["left_manipulator_joint1"] == 0.5  # other arm stays measured
+    order = []
+    original = bridge.set_open_loop
+    bridge.set_open_loop = lambda arm, on: (order.append(("loop", on)), original(arm, on))[1]
+    bridge.start_clients["right"].call_async.side_effect = lambda request: (
+        order.append("start"), FakeFuture(SimpleNamespace(success=True, message="")))[1]
+    assert bridge.enable("right")[0]
+    assert order == [("loop", True), "start"]
 
 
-def test_servo_integrates_from_its_own_command_not_the_reference():
-    bridge = bridge_with()
-    enable_with_reference(bridge, [0.1] * 6)
-    output = SimpleNamespace(
-        joint_names=[f"right_manipulator_joint{i}" for i in range(1, 7)],
-        points=[SimpleNamespace(positions=[0.2] * 6)],
-    )
-    bridge._servo_output("right", output)
-    bridge._controller_state("right", reference_state([0.15] * 6))  # lagging JTC
-    bridge._publish_feed("right")
-    feed = bridge.feed_publishers["right"].publish.call_args.args[0]
-    assert dict(zip(feed.name, feed.position))["right_manipulator_joint1"] == 0.2
-
-
-def test_rejected_open_loop_never_starts_servo():
+def test_rejected_open_loop_never_starts_the_jog():
     bridge = bridge_with(parameter_ok=False)
     success, message = bridge.enable("right")
     assert not success and "rejected" in message
     bridge.start_clients["right"].call_async.assert_not_called()
 
 
-def test_failed_servo_start_restores_closed_loop_jtc():
+def test_failed_jog_start_restores_closed_loop_jtc():
     bridge = bridge_with(start_ok=False)
-    success, message = enable_with_reference(bridge, [0.1] * 6)
-    assert not success and "no robot state" in message
+    success, message = bridge.enable("right")
+    assert not success and "no fresh reference" in message
     assert open_loop_values(bridge) == [True, False]
-    assert not bridge.feeds["right"]["active"]
 
 
-def test_disable_stops_servo_before_restoring_closed_loop():
+def test_disable_stops_the_jog_before_restoring_closed_loop():
     bridge = bridge_with()
-    enable_with_reference(bridge, [0.1] * 6)
     order = []
     bridge.stop_clients["right"].call_async.side_effect = lambda request: (
         order.append("stop"), FakeFuture(SimpleNamespace(success=True, message="")))[1]
     original = bridge.set_open_loop
-    bridge.set_open_loop = lambda arm, enabled: (order.append(("loop", enabled)), original(arm, enabled))[1]
+    bridge.set_open_loop = lambda arm, on: (order.append(("loop", on)), original(arm, on))[1]
     assert bridge.disable("right")[0]
     assert order == ["stop", ("loop", False)]
-    assert not bridge.feeds["right"]["active"]
+
+
+def test_restart_stops_then_starts_without_touching_open_loop():
+    bridge = bridge_with()
+    assert bridge.restart("right")[0]
+    bridge.stop_clients["right"].call_async.assert_called_once()
+    bridge.start_clients["right"].call_async.assert_called_once()
+    assert open_loop_values(bridge) == []
 
 
 def test_twist_is_published_in_robot_base_frame():
@@ -233,3 +211,102 @@ def test_servo_disable_always_leaves_servo_even_if_still_moving():
     node.clear_keyboard_velocity.assert_called_once()
     node.keyboard_servo.disable.assert_called_once_with("right")
     node.controller_switch_client.call_async.assert_not_called()
+
+
+def test_command_stopped_follows_jtc_reference_changes():
+    bridge = bridge_with()
+    bridge._controller_state("right", reference_state([0.1] * 6))
+    assert not bridge.command_stopped("right", timeout=0.02, stable_s=0.1)
+    time.sleep(0.12)
+    bridge._controller_state("right", reference_state([0.1] * 6))  # unchanged
+    assert bridge.command_stopped("right", timeout=0.0, stable_s=0.1)
+
+
+class Var:
+    def __init__(self, value):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
+def selection_gui(held=True, servo=True):
+    from construct_robot.gui.weld_action_gui import WeldActionGui
+
+    gui = object.__new__(WeldActionGui)
+    gui.root = SimpleNamespace(focus_get=lambda: object(), after_cancel=Mock())
+    gui.keyboard_jog_enabled = Var(True)
+    gui.keyboard_jog_selection = Var("Z")
+    gui.keyboard_jog_linear_speed = Var(90.0)
+    gui.keyboard_jog_angular_speed = Var(30.0)
+    gui.keyboard_jog_frame = Var("World")
+    gui.planning_group = Var("right_manipulator")
+    gui.keyboard_jog_status = SimpleNamespace(set=Mock())
+    gui.keyboard_velocity_active_key = "Up"
+    gui.keyboard_velocity_arm = "right"
+    gui.keyboard_velocity_switching = False
+    gui.keyboard_teaching_capture_in_progress = False
+    gui.keyboard_release_after_id = None
+    gui.keyboard_ros_physical_key = "Up" if held else None
+    gui.keyboard_ros_input_last_at = time.monotonic()
+    gui.keyboard_ros_dispatching = False
+    gui.keyboard_stop_generation = 0
+    gui.sequence_running = False
+    gui.log = Mock()
+    gui.error = Mock()
+    gui.post = Mock()
+    gui.node = Mock(active_motion_goal=None)
+    gui.node.keyboard_teaching_uses_servo.return_value = servo
+    gui.node.resolve_keyboard_velocity.return_value = (0.09, 0.0, 0.0, 0.0, 0.0, 0.0)
+    return gui
+
+
+def test_axis_key_switches_held_jog_without_stopping_in_servo_mode():
+    gui = selection_gui()
+    assert gui.keyboard_jog_selection_key(SimpleNamespace(keysym="1")) == "break"
+    assert gui.keyboard_jog_selection.get() == "X"
+    assert gui.node.resolve_keyboard_velocity.call_args.args[1] == "X"
+    gui.node.set_keyboard_velocity.assert_called_once_with(
+        "right", (0.09, 0.0, 0.0, 0.0, 0.0, 0.0))
+    gui.node.clear_keyboard_velocity.assert_not_called()
+    assert gui.keyboard_velocity_active_key == "Up"
+
+
+def test_axis_key_after_release_only_changes_selection():
+    gui = selection_gui(held=False)
+    gui.keyboard_jog_selection_key(SimpleNamespace(keysym="2"))
+    assert gui.keyboard_jog_selection.get() == "Y"
+    gui.node.set_keyboard_velocity.assert_not_called()
+    gui.node.clear_keyboard_velocity.assert_called_once()
+
+
+def test_native_backend_axis_key_still_stops_the_jog():
+    gui = selection_gui(servo=False)
+    gui.keyboard_jog_selection_key(SimpleNamespace(keysym="1"))
+    gui.node.set_keyboard_velocity.assert_not_called()
+    gui.node.clear_keyboard_velocity.assert_called_once()
+
+
+def test_servo_stop_check_uses_command_and_never_move_stop():
+    gui = selection_gui()
+    gui.post = lambda fn, *args: fn(*args)
+    gui.keyboard_velocity_active_key = None
+    gui.keyboard_stop_generation = 7
+    gui.node.wait_until_keyboard_command_stopped.return_value = False
+    gui.node.restart_keyboard_servo.return_value = (True, "restarted")
+    started = []
+    import construct_robot.gui.weld_action_gui as module
+    original = module.threading.Thread
+    module.threading.Thread = lambda target, args, daemon: SimpleNamespace(
+        start=lambda: (started.append(target), target(*args)))
+    try:
+        gui._verify_keyboard_jog_stop_worker("right", 7)
+    finally:
+        module.threading.Thread = original
+    gui.node.wait_until_keyboard_command_stopped.assert_called_once()
+    gui.node.wait_until_arm_stopped.assert_not_called()
+    gui.node.restart_keyboard_servo.assert_called_once_with("right")
+    gui.node.request_direct_motion_stop.assert_not_called()

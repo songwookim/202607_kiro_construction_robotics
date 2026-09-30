@@ -1,6 +1,5 @@
 import os
 
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -248,45 +247,14 @@ def launch_setup(_context):
         ],
     )
 
-    # Keyboard teaching: one MoveIt Servo per arm streams into that arm's JTC.
-    # Its joint topic is fed by the weld GUI with Servo's own last command
-    # (seeded from the JTC reference); see construct_robot/nodes/keyboard_servo.py.
-    with open(
-        os.path.join(
-            get_package_share_directory("construct_moveit_config"),
-            "config",
-            "keyboard_servo.yaml",
-        ),
-        encoding="utf-8",
-    ) as stream:
-        keyboard_servo_parameters = yaml.safe_load(stream)
-    keyboard_servo_nodes = [
-        Node(
-            package="moveit_servo",
-            executable="servo_node_main",
-            name=f"{arm}_keyboard_servo",
-            output="log",
-            parameters=[
-                moveit_config.robot_description,
-                moveit_config.robot_description_semantic,
-                moveit_config.robot_description_kinematics,
-                moveit_config.joint_limits,
-                {
-                    "moveit_servo": {
-                        **keyboard_servo_parameters,
-                        "move_group_name": f"{arm}_manipulator",
-                        "ee_frame_name": f"{arm}_manipulator_ee_point",
-                        "robot_link_command_frame": f"{arm}_manipulator_base_link",
-                        "joint_topic": f"/{arm}_keyboard_servo/joint_states",
-                        "command_out_topic": (
-                            f"/{arm}_manipulator_controller/joint_trajectory"
-                        ),
-                    }
-                },
-            ],
-        )
-        for arm in ("left", "right")
-    ]
+    # Keyboard teaching streams Cartesian jogs into each arm's JTC (RB stays
+    # in Servo-J); see construct_robot/nodes/keyboard_jog_node.py.
+    keyboard_jog_node = Node(
+        package="construct_robot",
+        executable="keyboard_jog_node",
+        output="log",
+        parameters=[moveit_config.robot_description],
+    )
 
     nodes_to_start = [
         rviz_node,
@@ -310,7 +278,7 @@ def launch_setup(_context):
             RegisterEventHandler(
                 OnProcessExit(
                     target_action=velocity_controllers_spawner,
-                    on_exit=[run_move_group_node, *keyboard_servo_nodes],
+                    on_exit=[run_move_group_node, keyboard_jog_node],
                 )
             )
         )

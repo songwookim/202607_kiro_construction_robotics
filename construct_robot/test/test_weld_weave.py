@@ -2,7 +2,7 @@ import math
 import pytest
 from geometry_msgs.msg import Pose
 from construct_robot.core.cartesian_path_common import weave_cycles_for_pitch
-from construct_robot.weld_action_gui import (
+from construct_robot.gui.weld_action_gui import (
     weld_weave_geometry, weave_path_speed_m_s, validated_seam_speed_factor,
 )
 
@@ -127,7 +127,7 @@ def test_hold_plan_is_continuous_and_stationary_during_dwell():
 
 
 def test_builder_edit_regenerates_sine_and_aligns_holds():
-    from construct_robot.weld_action_gui import update_weld_scenario_motion_values
+    from construct_robot.gui.weld_action_gui import update_weld_scenario_motion_values
     start, goal = seam()
     points, _, _, _ = weld_weave_geometry(start, goal, "sine", 3, 5, "tool_y", .2, .3)
     motion = dict(type="motion", weld_scenario_stage="weld_motion", weld_scenario_id="cap",
@@ -152,7 +152,7 @@ def test_builder_edit_regenerates_sine_and_aligns_holds():
 
 
 def test_zero_dwell_sine_uses_one_continuous_smoothed_path():
-    from construct_robot.weld_action_gui import update_weld_scenario_motion_values
+    from construct_robot.gui.weld_action_gui import update_weld_scenario_motion_values
     start, goal = seam()
     points, holds, _, _ = weld_weave_geometry(start, goal, "sine", 3, 5, "tool_y")
     assert not any(holds)
@@ -170,7 +170,7 @@ def test_zero_dwell_sine_uses_one_continuous_smoothed_path():
 
 def test_sine_speed_means_seam_progress_not_wavy_tcp_distance():
     from construct_robot.core.cartesian_path_common import weaving_from_path
-    from construct_robot.weld_action_gui import update_weld_scenario_motion_values
+    from construct_robot.gui.weld_action_gui import update_weld_scenario_motion_values
     start, goal = seam()
     points = weaving_from_path((start, goal), .003, 4, 12, transverse_vector=(0, 1, 0))
     motion = dict(type="motion", weld_scenario_stage="weld_motion", weld_scenario_id="sine",
@@ -223,7 +223,7 @@ def test_pass_through_lead_is_not_planned_as_a_tiny_separate_leg():
 # --------------------------------------------------------------------------
 def _sensed_fillet_geometry():
     """A touch-corrected fillet joint: wall plane + floor plane, 4 deg tilt."""
-    from construct_robot.weld_action_gui import (
+    from construct_robot.gui.weld_action_gui import (
         compute_corrected_seam_geometry, compute_surface_plane,
     )
 
@@ -242,7 +242,7 @@ def _sensed_fillet_geometry():
 
 
 def _gui_with(geometry, touches):
-    from construct_robot.weld_action_gui import WeldActionGui
+    from construct_robot.gui.weld_action_gui import WeldActionGui
 
     gui = object.__new__(WeldActionGui)
     gui.corrected_seam_geometry = geometry
@@ -302,7 +302,7 @@ def test_weave_preview_accepts_the_sensed_direction():
     """
     import inspect
 
-    from construct_robot.weld_action_gui import WeldGuiNode
+    from construct_robot.gui.weld_action_gui import WeldGuiNode
 
     signature = inspect.signature(WeldGuiNode.generate_weave)
     assert "transverse_vector" in signature.parameters

@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from construct_robot.multipass import MultiPassState
-from construct_robot.task_teaching_model import TaskOrderState, TeachingState
-from construct_robot.torch_cleaner_teaching import CleanerTeachingState
-from construct_robot.weld_action_gui import TEACHING_POSES, WeldActionGui
+from construct_robot.core.multipass import MultiPassState
+from construct_robot.core.task_teaching_model import TaskOrderState, TeachingState
+from construct_robot.core.torch_cleaner_teaching import CleanerTeachingState
+from construct_robot.gui.weld_action_gui import TEACHING_POSES, WeldActionGui
 
 
 def test_named_teaching_data_is_owned_outside_tk():

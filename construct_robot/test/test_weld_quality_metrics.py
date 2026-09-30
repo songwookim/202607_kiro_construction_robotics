@@ -184,8 +184,8 @@ def test_quality_integrates_arc_energy_using_seam_length_not_weave_path(tmp_path
     assert "WELD SUMMARY" in "\n".join(format_quality_summary({
         **document, "quality_metrics": quality,
     }))
-    from construct_robot.weld_action_gui import format_weld_feedback_log
-    from construct_robot.weld_feedback_plot import parse_weld_trajectory_log
+    from construct_robot.gui.weld_action_gui import format_weld_feedback_log
+    from construct_robot.io.weld_feedback_plot import parse_weld_trajectory_log
     document.update({
         "result": "completed", "started": "2026-09-17 00:00:00",
         "ended": "2026-09-17 00:00:02", "elapsed_seconds": 2.0,
@@ -313,7 +313,7 @@ def test_dwell_plateau_ignores_noisy_world_tcp_speed_and_requires_four_samples()
 
 def test_teaching_snapshot_uses_gui_provenance_without_ui_attribute():
     from geometry_msgs.msg import Pose
-    from construct_robot.weld_action_gui import WeldActionGui
+    from construct_robot.gui.weld_action_gui import WeldActionGui
     gui = WeldActionGui.__new__(WeldActionGui)
     pose = Pose()
     pose.orientation.w = 1.0

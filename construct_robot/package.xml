@@ -25,6 +25,8 @@
   <depend>shape_msgs</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>trajectory_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <depend>wide_sensing_msgs</depend>
@@ -33,6 +35,8 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-tk</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-pykdl</exec_depend>
+  <exec_depend>urdfdom_py</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>xacro</exec_depend>
 

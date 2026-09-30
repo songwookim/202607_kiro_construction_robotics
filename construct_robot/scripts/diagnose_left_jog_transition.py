@@ -14,7 +14,7 @@ import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rbpodo_msgs.msg import SystemState
 from control_msgs.msg import JointTrajectoryControllerState
-from construct_robot.weld_action_gui import WeldGuiNode, WeldActionGui, tip_link_for_group
+from construct_robot.gui.weld_action_gui import WeldGuiNode, WeldActionGui, tip_link_for_group
 
 
 class UI:

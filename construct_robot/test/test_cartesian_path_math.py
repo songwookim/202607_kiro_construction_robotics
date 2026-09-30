@@ -34,8 +34,8 @@ from construct_robot.nodes.cartesian_path_server import (
     rotate_vector,
 )
 from construct_msgs.action import CartesianPath
-import construct_robot.hicomm_welder as hicomm_welder_module
-from construct_robot.hicomm_welder import (
+import construct_robot.io.hicomm_welder as hicomm_welder_module
+from construct_robot.io.hicomm_welder import (
     BIT_ARC,
     BIT_FORWARD,
     BIT_REVERSE,
@@ -50,7 +50,7 @@ from construct_robot.hicomm_welder import (
     build_request,
     decode_response,
 )
-from construct_robot.weld_action_gui import (
+from construct_robot.gui.weld_action_gui import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
     FASTECH_TOUCH_BACKEND,
     KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S,
@@ -102,7 +102,7 @@ from construct_robot.weld_action_gui import (
     wide_sensing_path_poses,
     yaw_corrected_seam_poses,
 )
-from construct_robot.weld_feedback_plot import (
+from construct_robot.io.weld_feedback_plot import (
     parse_weld_feedback_log,
     parse_weld_trajectory_log,
 )

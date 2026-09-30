@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import yaml
 
-from construct_robot.teaching_paths import teaching_config_dir
+from construct_robot.io.teaching_paths import teaching_config_dir
 from construct_robot.core.torch_cleaner_teaching import (
     CleanerTeachingState,
     build_cleaner_sequence_steps,

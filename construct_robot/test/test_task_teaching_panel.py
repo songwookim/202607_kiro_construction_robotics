@@ -4,7 +4,7 @@ import pytest
 import yaml
 from geometry_msgs.msg import Pose
 
-from construct_robot.task_teaching_model import (
+from construct_robot.core.task_teaching_model import (
     atomic_yaml, build_task_path_steps, decode, encode, safe_task_name,
     validate_task_group,
 )
@@ -74,7 +74,7 @@ def test_continuous_path_preserves_order_and_arm(tmp_path):
 
 def test_cleaner_failure_turns_off_only_owned_output():
     from unittest.mock import Mock
-    from construct_robot.weld_action_gui import WeldActionGui
+    from construct_robot.gui.weld_action_gui import WeldActionGui
     gui = object.__new__(WeldActionGui)
     gui.sequence_stop_requested = False
     gui.fake_arc_enabled = SimpleNamespace(get=lambda: False)

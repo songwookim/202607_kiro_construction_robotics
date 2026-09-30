@@ -1091,7 +1091,7 @@ def analyze_saved_weld_log(path):
     """Calculate the new metrics from an old log without modifying that log."""
     import datetime
     import re
-    from construct_robot.weld_feedback_plot import (
+    from construct_robot.io.weld_feedback_plot import (
         parse_weld_feedback_log, parse_weld_trajectory_log,
     )
 

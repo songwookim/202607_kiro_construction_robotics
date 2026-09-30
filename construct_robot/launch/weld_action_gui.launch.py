@@ -32,7 +32,7 @@ LAUNCH_ARGUMENTS = (
     (
         "keyboard_teaching_backend",
         "servo",
-        "Keyboard teaching: servo (MoveIt Servo on the JTC) or native_jog",
+        "Keyboard teaching: servo (Servo-J jog streaming on the JTC) or native_jog",
     ),
     ("debug_gui", "false", "Wait for a debugger on the weld GUI"),
     ("debug_gui_port", "5678", "debugpy port for the weld GUI"),

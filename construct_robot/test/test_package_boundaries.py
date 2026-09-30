@@ -1,31 +1,29 @@
-"""Legacy imports and public ROS entry points survive the package split."""
+"""Package layout: code lives in application/core/gui/io/nodes only."""
 
 
-def test_legacy_imports_share_implementations():
-    # Top-level shims kept only for the frozen gui_qt package must keep
-    # returning the canonical implementations.
-    import construct_robot.weld_action_gui as legacy_gui
-    from construct_robot.gui import weld_action_gui as gui
-    from construct_robot.sequence_model import SequenceModel
-    from construct_robot.core.sequence_model import SequenceModel as CoreModel
-    import construct_robot.hicomm_welder as legacy_welder
-    from construct_robot.io import hicomm_welder as welder
+def test_top_level_package_holds_only_subpackages():
+    from pathlib import Path
 
-    assert legacy_gui is gui
-    assert SequenceModel is CoreModel
-    assert legacy_welder is welder
+    import construct_robot
+
+    root = Path(construct_robot.__file__).parent
+    modules = sorted(path.name for path in root.glob("*.py"))
+    packages = sorted(
+        path.name for path in root.iterdir()
+        if path.is_dir() and (path / "__init__.py").exists()
+    )
+    assert modules == ["__init__.py"]
+    assert packages == ["application", "core", "gui", "io", "nodes"]
 
 
 def test_weld_runtime_node_is_reexported_and_independent_of_gui():
     import ast
     from pathlib import Path
 
-    import construct_robot.weld_action_gui as legacy_gui
     from construct_robot.gui import weld_action_gui as gui
     from construct_robot.nodes import weld_runtime_node
 
     assert gui.WeldGuiNode is weld_runtime_node.WeldGuiNode
-    assert legacy_gui.WeldGuiNode is weld_runtime_node.WeldGuiNode
 
     tree = ast.parse(Path(weld_runtime_node.__file__).read_text(encoding="utf-8"))
     imported = {
@@ -58,8 +56,8 @@ def test_core_and_io_do_not_depend_on_gui_or_nodes():
             ), f"{path.name} imports {name}"
 
 
-def test_moved_gui_helpers_remain_importable_from_legacy_paths():
-    import construct_robot.weld_action_gui as legacy_gui
+def test_moved_gui_helpers_remain_importable_from_the_gui_module():
+    import construct_robot.gui.weld_action_gui as gui_module
     from construct_robot.core import (
         cartesian_path_common, keyboard_jog, seam_geometry, sequence_model,
         task_teaching_model,
@@ -83,4 +81,4 @@ def test_moved_gui_helpers_remain_importable_from_legacy_paths():
     }
     for module, names in moved.items():
         for name in names:
-            assert getattr(legacy_gui, name) is getattr(module, name), name
+            assert getattr(gui_module, name) is getattr(module, name), name

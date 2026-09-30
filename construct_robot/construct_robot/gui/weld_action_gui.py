@@ -5421,7 +5421,7 @@ class WeldActionGui:
             self.error("Cannot build work cycle while a sequence is running")
             return False
         try:
-            from construct_robot.teaching_paths import teaching_config_dir
+            from construct_robot.io.teaching_paths import teaching_config_dir
             config = load_work_cycle(teaching_config_dir() / "combined_work_cycle.yaml")
             repeats = int(self.work_cycle_repeats.get())
             if set(self.four_pass_references) != {1, 2, 3, 4}:
@@ -5664,7 +5664,7 @@ class WeldActionGui:
         if self.sequence_running:
             self.error("A sequence is already running")
             return
-        # Keyboard teaching keeps the JTC active (MoveIt Servo), so trajectory
+        # Keyboard teaching keeps the JTC active (Servo-J jog stream), so trajectory
         # execution must not share the arm with it.
         if execute_requested and (
             self.keyboard_velocity_arm is not None
@@ -5973,10 +5973,10 @@ class WeldActionGui:
         self._set_keyboard_jog_enable_state(tk.DISABLED)
         uses_servo = self.node.keyboard_teaching_uses_servo()
         self.keyboard_jog_status.set(
-            ("STARTING MoveIt Servo keyboard teaching..." if uses_servo
+            ("STARTING Servo-J keyboard jog..." if uses_servo
              else "SWITCHING to native Cartesian velocity...")
             if enable
-            else ("ZERO command · stopping MoveIt Servo..." if uses_servo
+            else ("ZERO command · stopping Servo-J keyboard jog..." if uses_servo
                   else "ZERO command · restoring trajectory controller...")
         )
         threading.Thread(
@@ -6018,7 +6018,7 @@ class WeldActionGui:
                     "arm did not reach standstill before controller exchange",
                 )
                 return
-            # MoveIt Servo keeps RB in its Servo-J hold on purpose, so RB
+            # The jog stream keeps RB in its Servo-J hold on purpose, so RB
             # Idle is only expected for the native jog exchange.
             if (
                 not self.node.keyboard_teaching_uses_servo()
@@ -6088,7 +6088,7 @@ class WeldActionGui:
                     f"READY {arm.upper()} · hold arrow to move"
                 )
             backend = (
-                "MoveIt Servo" if self.node.keyboard_teaching_uses_servo()
+                "Servo-J jog stream" if self.node.keyboard_teaching_uses_servo()
                 else "native Cartesian velocity"
             )
             self.log(f"Keyboard {backend} enabled · {message}")
@@ -6139,17 +6139,22 @@ class WeldActionGui:
             ).start()
 
     def _keyboard_jog_stop_timeout_s(self):
-        # Servo-J follows the Servo command ~0.2-0.3 s late, so the arm is
-        # still settling at the native jog's 0.22 s check.  A false fallback
-        # move_stop would drop RB to Idle and bring back the start kick.
         return 0.6 if self.node.keyboard_teaching_uses_servo() else 0.22
 
     def _verify_keyboard_jog_stop_worker(self, arm, generation):
-        stopped = self.node.wait_until_arm_stopped(
-            arm,
-            timeout=self._keyboard_jog_stop_timeout_s(),
-            stable_duration_s=0.08,
-        )
+        if self.node.keyboard_teaching_uses_servo():
+            # RB Servo-J settles ~0.5 s behind the command, so verify the
+            # command (JTC reference).  RB move_stop mid-stream would kick the
+            # arm and drop RB to Idle (start kick on the next press).
+            stopped = self.node.wait_until_keyboard_command_stopped(
+                arm, timeout=self._keyboard_jog_stop_timeout_s()
+            )
+        else:
+            stopped = self.node.wait_until_arm_stopped(
+                arm,
+                timeout=self._keyboard_jog_stop_timeout_s(),
+                stable_duration_s=0.08,
+            )
         self.post(
             self._keyboard_jog_stop_verified,
             arm, generation, stopped,
@@ -6163,16 +6168,19 @@ class WeldActionGui:
             or not self.keyboard_jog_enabled.get()
         ):
             return
+        uses_servo = self.node.keyboard_teaching_uses_servo()
         if stopped:
-            self.log(f"Keyboard jog STOP CONFIRMED · {arm.upper()} measured standstill")
+            self.log(
+                f"Keyboard jog STOP CONFIRMED · {arm.upper()} "
+                f"{'command' if uses_servo else 'measured'} standstill"
+            )
             return
-        self.keyboard_jog_status.set(
-            f"STOP FALLBACK · {arm.upper()} controlled move_stop"
-        )
+        fallback = "jog restart (hold)" if uses_servo else "controlled move_stop"
+        self.keyboard_jog_status.set(f"STOP FALLBACK · {arm.upper()} {fallback}")
         self.log(
             f"Keyboard jog zero not stationary within "
             f"{self._keyboard_jog_stop_timeout_s():.2f} s · "
-            f"requesting {arm.upper()} controlled move_stop"
+            f"requesting {arm.upper()} {fallback}"
         )
         threading.Thread(
             target=self._keyboard_jog_direct_stop_worker,
@@ -6181,7 +6189,10 @@ class WeldActionGui:
         ).start()
 
     def _keyboard_jog_direct_stop_worker(self, arm, generation):
-        success, message = self.node.request_direct_motion_stop(arm)
+        if self.node.keyboard_teaching_uses_servo():
+            success, message = self.node.restart_keyboard_servo(arm)
+        else:
+            success, message = self.node.request_direct_motion_stop(arm)
         self.post(
             self._keyboard_jog_direct_stop_result,
             arm, generation, success, message,
@@ -6605,7 +6616,27 @@ class WeldActionGui:
         }.get(str(event.keysym).lower())
         if selection is None:
             return None
-        if self.keyboard_velocity_active_key is not None:
+        active_key = self.keyboard_velocity_active_key
+        held = active_key is not None and (
+            not self._keyboard_ros_input_online()
+            or self.keyboard_ros_physical_key == active_key
+        )
+        if held and self.node.keyboard_teaching_uses_servo():
+            # Servo streams continuously: switch the held arrow to the new
+            # axis without an intermediate stop (no pause, no restart delay).
+            self.keyboard_jog_selection.set(selection)
+            self._cancel_keyboard_release_timer()
+            self.keyboard_velocity_active_key = None
+            self.keyboard_ros_dispatching = True
+            try:
+                event = type("PhysicalKeyEvent", (), {"keysym": active_key})()
+                self.keyboard_jog_key_press(event)
+            finally:
+                self.keyboard_ros_dispatching = False
+            if self.keyboard_velocity_active_key is None:
+                self._stop_keyboard_jog_command()
+            return "break"
+        if active_key is not None:
             self._stop_keyboard_jog_command()
         self.keyboard_jog_selection.set(selection)
         self.keyboard_jog_status.set(f"Selected {selection}")
@@ -7509,18 +7540,18 @@ class WeldActionGui:
         self._refresh_initial_position_controls()
 
     def _initial_state_yaml_path(self, planning_group=None, pose_name=None):
-        from construct_robot.teaching_paths import teaching_config_dir
+        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         selected_pose = pose_name or self._selected_teaching_pose_name()
         return teaching_config_dir() / f"{group}_{selected_pose}_state.yaml"
 
     def _seam_reference_yaml_path(self, planning_group=None):
-        from construct_robot.teaching_paths import teaching_config_dir
+        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         return teaching_config_dir() / f"{group}_seam_teaching_reference.yaml"
 
     def _seam_touch_yaml_path(self, planning_group=None):
-        from construct_robot.teaching_paths import teaching_config_dir
+        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         return teaching_config_dir() / f"{group}_seam_touch_points.yaml"
 

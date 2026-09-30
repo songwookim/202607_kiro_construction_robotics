@@ -9,7 +9,7 @@ from geometry_msgs.msg import Pose
 import pytest
 import yaml
 
-from construct_robot.weld_action_gui import (
+from construct_robot.gui.weld_action_gui import (
     WeldActionGui,
     correct_remaining_passes,
     read_pass_teaching_reference,

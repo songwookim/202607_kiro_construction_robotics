@@ -51,17 +51,16 @@ construct_robot/
     │   ├── weld_quality_metrics.py
     │   └── work_cycle.py
     │
-    ├── io/
-    │   ├── fastech_ethernet.py
-    │   ├── hicomm_welder.py
-    │   ├── teaching_yaml.py
-    │   └── weld_logging.py
-    │
-    └── gui_qt/
-        └── ...
+    └── io/
+        ├── fastech_ethernet.py
+        ├── hicomm_welder.py
+        ├── teaching_paths.py
+        ├── teaching_yaml.py
+        ├── weld_feedback_plot.py
+        └── weld_logging.py
 ```
 
-Some top-level compatibility modules remain for old imports. Treat them as migration shims unless proven unnecessary.
+There are no top-level modules besides `__init__.py`; the old compatibility shims and the PySide6 `gui_qt/` package were removed.
 
 ---
 
@@ -363,7 +362,7 @@ io/
 
 Tkinter is the current production GUI.
 
-Do not redesign the project around PySide6. Do not delete `gui_qt/` as part of an unrelated refactor unless explicitly requested.
+The PySide6 GUI (`gui_qt/`) was removed. Do not reintroduce a second GUI toolkit.
 
 The intended Tk operator structure is:
 
@@ -507,11 +506,9 @@ Do not perform this merely for architectural purity. Only do it when it material
 
 # Compatibility shims
 
-Top-level old modules may remain temporarily to preserve imports.
-
-Do not delete compatibility shims until all repository imports use the new paths, tests no longer require them, entry points do not require them, saved/legacy tooling does not require them, and removal is confirmed safe.
-
-Compatibility cleanup should be a separate final phase.
+The top-level compatibility shims were removed after every repository import,
+test, script and entry point moved to the owning subpackage. Do not add new
+top-level modules; `test_package_boundaries.py` enforces the layout.
 
 ---
 
@@ -588,8 +585,8 @@ Do not combine unrelated cleanup with a safety-sensitive extraction.
 ## Phase 4 — Final cleanup
 
 - remove verified dead code
-- remove no-longer-needed compatibility shims
-- evaluate whether `gui_qt/` should remain
+- ~~remove no-longer-needed compatibility shims~~ (done)
+- ~~evaluate whether `gui_qt/` should remain~~ (removed)
 - reduce remaining direct threading boilerplate
 - evaluate ROS callback groups only with hardware validation
 

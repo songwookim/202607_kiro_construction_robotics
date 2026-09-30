@@ -252,7 +252,7 @@ def test_start_touch_probe_enables_do0_then_launches_signed_probe(inline_threads
     ({"touch_probe_distance_mm": Var(500.0)}, "Touch probe max travel must be in 1..200 mm"),
     ({"touch_input_states": {"right": True}}, "Fastech DI4 is already ON; release the touch signal before probing"),
     ({"automatic_probe_kind": "start_wall"}, "Another Fastech DI4 touch probe is already active"),
-    # Keyboard teaching keeps the JTC active (MoveIt Servo); probing must wait.
+    # Keyboard teaching keeps the JTC active (Servo-J jog stream); probing must wait.
     ({"keyboard_velocity_arm": "right"}, "Disable Keyboard Teaching before touch probing"),
     ({"keyboard_velocity_switching": True}, "Disable Keyboard Teaching before touch probing"),
 ])

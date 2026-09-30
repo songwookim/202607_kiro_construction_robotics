@@ -1,6 +1,6 @@
 import pytest
 
-from construct_robot.sequence_model import (
+from construct_robot.core.sequence_model import (
     SequenceModel,
     next_sequential_slot,
     validate_managed_weld_sequence,

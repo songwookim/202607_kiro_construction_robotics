@@ -34,22 +34,16 @@ Preserve:
 - multipass semantics
 - threading/event synchronization unless explicitly requested
 
-## Qt policy
+## Package layout
 
-`construct_robot/construct_robot/gui_qt/` is frozen.
-
-Do not:
-- modify Qt/PySide6 code
-- synchronize Qt with Tk
-- run Qt-specific tests
-- remove Qt-only compatibility shims
-
-unless explicitly requested.
+The PySide6 GUI (`gui_qt/`) and the top-level compatibility shims were removed.
+`construct_robot/construct_robot/` holds only `__init__.py` and the subpackages
+above; import from the owning subpackage (`test_package_boundaries.py` enforces this).
 
 ## Validation
 
 For production changes:
-- run relevant non-Qt tests
+- run relevant tests
 - verify production console entry points
 - run `colcon build --packages-select construct_robot`
 

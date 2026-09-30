@@ -1,7 +1,7 @@
 import threading
 from types import SimpleNamespace
 
-from construct_robot.weld_action_gui import WeldActionGui
+from construct_robot.gui.weld_action_gui import WeldActionGui
 
 
 def fake_gui():

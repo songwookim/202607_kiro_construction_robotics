@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from construct_robot.weld_action_gui import WeldActionGui
+from construct_robot.gui.weld_action_gui import WeldActionGui
 
 
 def test_sequence_failure_keeps_touch_output_unchanged():
