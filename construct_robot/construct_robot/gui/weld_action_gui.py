@@ -140,6 +140,25 @@ from construct_robot.core.weld_config import (
     DIGITAL_WELD_RECIPE_KEYS, digital_weld_recipe,
     validate_digital_weld_settings, weld_current_profile,
 )
+from construct_robot.application.weld_sequence_builder import (
+    WeldScenarioInput,
+    WeldStepMotionInput,
+    allocate_weld_scenario_slots,
+    build_weld_scenario_steps,
+    new_weld_scenario_id,
+    plan_weld_approach,
+    plan_weld_path,
+    resolve_weld_endpoints,
+    validate_required_weld_poses,
+)
+from construct_robot.application.sequence_executor import (
+    SequenceExecutor,
+    attach_execution_conditions,
+    contains_weld_command,
+    is_work_cycle,
+    pose_execution_conditions,
+    record_step_conditions,
+)
 # Helpers formerly defined in this module now live in core/, io/ and nodes/.
 # Unused-looking imports above and below are deliberate re-exports so existing
 # ``weld_action_gui.<name>`` imports keep working.
@@ -185,6 +204,11 @@ KEYBOARD_TEACHING_POSE_SHORTCUTS = {
 
 WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed World-XYZ tilt"
 LEGACY_WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed Tool-XYZ tilt"
+
+
+def _sequence_executor_for(host):
+    """Executor bound to a GUI (or a lightweight test double of one)."""
+    return SequenceExecutor(host, touch_io_backend=FASTECH_TOUCH_BACKEND)
 
 
 class WeldActionGui:
@@ -6788,25 +6812,6 @@ class WeldActionGui:
             f"failed: {message}"
         )
 
-    def _sensed_motion_step(self, points, label, slot, touch_guard=False):
-        return {
-            "type": "motion",
-            "planning_group": "right_manipulator",
-            "points": copy.deepcopy(points),
-            "velocity_scale": max(
-                0.01, min(1.0, self.velocity_percent.get() / 100.0)
-            ),
-            "tcp_speed_m_s": self._selected_tcp_speed_m_s(),
-            "interpolation_step": max(
-                0.0005,
-                min(0.02, float(self.interpolation_step_mm.get()) * 0.001),
-            ),
-            "path_kind": label,
-            "parallel_slot": slot,
-            "duration": 0.0,
-            "touch_guard": bool(touch_guard),
-        }
-
     def endpoint_is_sensed(self, endpoint):
         """True when both surfaces of one seam endpoint have been touched."""
         return all(
@@ -6842,6 +6847,10 @@ class WeldActionGui:
         """Append a weld workflow. START/GOAL each use touch-sensed geometry
         when wall+floor touches are available, otherwise the plain taught
         weld_start/weld_end pose -- touch probing is optional, not required.
+
+        Step generation lives in ``application.weld_sequence_builder``; this
+        method snapshots Tk state, keeps the operator-visible side effects in
+        their original order, and updates the SequenceModel.
         """
         poses = self.taught_robot_poses if teaching_poses is None else teaching_poses
         start_is_sensed = not force_unsensed and self.endpoint_is_sensed("start")
@@ -6858,25 +6867,13 @@ class WeldActionGui:
         ) is None:
             return
 
-        goal_data = poses.get("weld_end")
+        try:
+            validate_required_weld_poses(poses)
+        except ValueError as error:
+            self.error(str(error))
+            return
         goal_wait_data = poses.get("weld_goal_wait")
         finish_data = poses.get("weld_finish")
-        if goal_data is None or goal_wait_data is None or finish_data is None:
-            self.error(
-                f"Capture/load {TEACHING_POSES['weld_end']} and "
-                f"{TEACHING_POSES['weld_goal_wait']} and "
-                f"{TEACHING_POSES['weld_finish']} first"
-            )
-            return
-        if (
-            goal_data[0] != "right_manipulator"
-            or goal_wait_data[0] != "right_manipulator"
-            or finish_data[0] != "right_manipulator"
-        ):
-            self.error(
-                "Weld goal, goal-wait, and end poses must belong to the right arm"
-            )
-            return
         try:
             # Freeze one recipe snapshot at Build time. ARC ON and the paired
             # ARC OFF both carry this same snapshot so selecting/editing either
@@ -6884,37 +6881,12 @@ class WeldActionGui:
             # retransmit I/V, but retaining the snapshot also preserves post-gas
             # timing and makes the generated scenario self-describing.
             settings = copy.deepcopy(self._digital_weld_settings())
-            start_wait_data = poses["weld_start_wait"]
-            if start_wait_data is None:
-                raise ValueError(
-                    f"Capture/load {TEACHING_POSES['weld_start_wait']} first"
-                )
-            start_wait_group = start_wait_data[0]
-            if start_wait_group != "right_manipulator":
-                raise ValueError("Weld start-wait pose must belong to the right arm")
-            if start_is_sensed:
-                start = self.computed_seam_endpoints["start"]
-                start_path_name = "sensed_start"
-                start_source = "sensed START"
-            else:
-                start_data = poses.get("weld_start")
-                if start_data is None:
-                    raise ValueError(
-                        f"Capture/load {TEACHING_POSES['weld_start']} first"
-                    )
-                if start_data[0] != "right_manipulator":
-                    raise ValueError("Weld start pose must belong to the right arm")
-                start = copy.deepcopy(start_data[3])
-                start_path_name = "taught_start"
-                start_source = TEACHING_POSES["weld_start"]
-            if goal_is_sensed:
-                goal = self.computed_seam_endpoints["goal"]
-                goal_source = "sensed GOAL"
-                goal_path_name = "sensed_goal"
-            else:
-                goal = copy.deepcopy(goal_data[3])
-                goal_source = TEACHING_POSES["weld_end"]
-                goal_path_name = "taught_goal"
+            endpoints = resolve_weld_endpoints(
+                poses,
+                start_is_sensed=start_is_sensed,
+                goal_is_sensed=goal_is_sensed,
+                sensed_endpoints=self.computed_seam_endpoints,
+            )
             count = int(self.corner_touch_count.get())
             lead_in_mm = float(self.weld_lead_in_mm.get())
             lead_out_mm = float(self.weld_lead_out_mm.get())
@@ -6931,86 +6903,47 @@ class WeldActionGui:
             weave_right_dwell_s = float(self.weave_right_dwell_s.get())
             weave_axis = (self.weave_axis.get().strip().lower()
                           if weave_override is None else weave_override["transverse_axis"])
-            if (
-                not math.isfinite(weld_tcp_speed_mm_s)
-                or not 0.1 <= weld_tcp_speed_mm_s <= 100.0
-            ):
-                raise ValueError("weld TCP speed must be in 0.1..100 mm/s")
-            if not 0.0 <= lead_in_mm <= 100.0:
-                raise ValueError("weld lead-in must be in 0..100 mm")
-            if not 0.0 <= lead_out_mm <= 100.0:
-                raise ValueError("weld lead-out must be in 0..100 mm")
-            if not 1.0 <= safe_approach_mm <= 200.0:
-                raise ValueError("safe approach distance must be in 1..200 mm")
-            if not 0.0 <= pre_start_lead_mm <= 100.0:
-                raise ValueError("pre-start lead distance must be in 0..100 mm")
-            if not 0.0 <= arc_off_delay_ms <= 2000.0:
-                raise ValueError("ARC OFF lead time must be in 0..2000 ms")
-            if weave_pattern not in ("sine", "crescent", "circle"):
-                raise ValueError("weld weave pattern must be sine, crescent or circle")
-            if not 0.1 <= weave_amplitude_mm <= 50.0:
-                raise ValueError("weld weave amplitude/radius must be 0.1..50 mm")
-            if not math.isfinite(weave_pitch_mm) or not 0.1 <= weave_pitch_mm <= 100.0:
-                raise ValueError("weld weave pitch must be in 0.1..100 mm/cycle")
-            if not all(math.isfinite(v) and 0.0 <= v <= 10.0 for v in
-                       (weave_left_dwell_s, weave_right_dwell_s)):
-                raise ValueError("weave left/right dwell must be in 0..10 s")
-            # Welding orientation is already finalized by seam correction.
-            # In fixed-tilt mode it comes from WAIT + one World-XYZ RPY offset; in the
-            # legacy modes it comes from the endpoint teaching.  Never apply a
-            # second offset here, because probing and welding must use exactly
-            # the same tool attitude.
-            # lead는 weld motion의 시작과 끝에서 ARC를 켜고 끄는 지점을 결정하는데 사용됩니다.
-            lead_start, lead_end = seam_lead_poses(
-                start,
-                goal,
-                lead_in_mm * 0.001,
-                lead_out_mm * 0.001,
-            )
-            has_lead_in = lead_in_mm > 1e-6
-            has_lead_out = lead_out_mm > 1e-6
-            safe_approach = None
-            approach_lead = None
             approach_mode = "taught_wait" if force_unsensed else self.weld_approach_mode.get()
-            if approach_mode not in ("taught_wait", "corner_geometry"):
-                raise ValueError("Unsupported weld approach mode")
-            if start_is_sensed and approach_mode == "corner_geometry":
-                if self.corrected_seam_geometry is None:
-                    raise ValueError(
-                        "touch-corrected START has no computed seam local frame"
-                    )
-                safe_approach, approach_lead = compute_safe_weld_approach(
-                    start,
-                    self.corrected_seam_geometry.d_real,
-                    self.corrected_seam_geometry.e_a,
-                    safe_approach_mm * 0.001,
-                    pre_start_lead_mm * 0.001,
-                )
+            scenario = WeldScenarioInput(
+                endpoints=endpoints,
+                goal_wait=goal_wait_data,
+                finish=finish_data,
+                settings=settings,
+                corner_touch_count=count,
+                lead_in_mm=lead_in_mm,
+                lead_out_mm=lead_out_mm,
+                safe_approach_mm=safe_approach_mm,
+                pre_start_lead_mm=pre_start_lead_mm,
+                arc_off_delay_ms=arc_off_delay_ms,
+                weld_tcp_speed_mm_s=weld_tcp_speed_mm_s,
+                weave_enabled=weave_enabled,
+                weave_pattern=weave_pattern,
+                weave_amplitude_mm=weave_amplitude_mm,
+                weave_pitch_mm=weave_pitch_mm,
+                weave_left_dwell_s=weave_left_dwell_s,
+                weave_right_dwell_s=weave_right_dwell_s,
+                weave_axis=weave_axis,
+                approach_mode=approach_mode,
+                touch_io_backend=FASTECH_TOUCH_BACKEND,
+                touch_output_port=FASTECH_TOUCH_OUTPUT_PORT,
+                seam_geometry=self.corrected_seam_geometry,
+                weave_transverse_vector=(
+                    None if force_unsensed or not weave_enabled
+                    else self.sensed_weave_transverse_vector()
+                ),
+                start_wait_tcp_override=self.computed_seam_wait_points.get("start"),
+            )
+            approach = plan_weld_approach(scenario)
+            safe_approach = approach.safe_approach
+            if safe_approach is not None:
+                start = endpoints.start
+                approach_lead = approach.approach_lead
                 self.corrected_seam_geometry.safe_start = copy.deepcopy(
                     safe_approach
                 )
                 self.corrected_seam_geometry.lead_start = copy.deepcopy(
                     approach_lead
                 )
-                approach_vector = _unit_vector(tuple(
-                    getattr(approach_lead.position, axis)
-                    - getattr(safe_approach.position, axis)
-                    for axis in ("x", "y", "z")
-                ))
-                approach_alignment = _vector_dot(
-                    approach_vector,
-                    tuple(-value for value in self.corrected_seam_geometry.e_a),
-                )
-                lead_alignment = 1.0
-                if pre_start_lead_mm > 1e-6:
-                    lead_vector = _unit_vector(tuple(
-                        getattr(start.position, axis)
-                        - getattr(approach_lead.position, axis)
-                        for axis in ("x", "y", "z")
-                    ))
-                    lead_alignment = _vector_dot(
-                        lead_vector, self.corrected_seam_geometry.d_real
-                    )
                 fmt = lambda pose: "(" + ", ".join(
                     f"{getattr(pose.position, axis):+.6f}"
                     for axis in ("x", "y", "z")
@@ -7027,399 +6960,58 @@ class WeldActionGui:
                     f"pre-start lead={pre_start_lead_mm:.1f} mm · "
                     f"P_safe={fmt(safe_approach)} · "
                     f"P_lead={fmt(approach_lead)} · "
-                    f"align(approach,-e_a)={approach_alignment:.9f} · "
-                    f"align(lead,d_real)={lead_alignment:.9f}"
+                    f"align(approach,-e_a)={approach.approach_alignment:.9f} · "
+                    f"align(lead,d_real)={approach.lead_alignment:.9f}"
                 )
-            seam_centerline = linear_pose_waypoints(start, goal, count)
-            weave_holds = []
-            weave_cycles = 0
-            weave_actual_pitch_mm = 0.0
-            weave_crescent_bulge_mm = 0.0
-            geometry_weave_direction = None
-            if weave_enabled:
-                # Same helper the weave preview calls, so an approved preview
-                # and the executed weld cannot disagree about the weave plane.
-                geometry_weave_direction = (
-                    None if force_unsensed else self.sensed_weave_transverse_vector()
+            path = plan_weld_path(scenario, approach)
+            geometry_weave_direction = path.weave_direction
+            if geometry_weave_direction is not None:
+                self.log(
+                    "Touch-corrected weave uses geometry-derived e_w="
+                    f"({geometry_weave_direction[0]:+.6f}, "
+                    f"{geometry_weave_direction[1]:+.6f}, "
+                    f"{geometry_weave_direction[2]:+.6f})"
                 )
-                (usable_weld_points, weave_holds, weave_cycles,
-                 weave_actual_pitch_mm) = weld_weave_geometry(
-                    start, goal, weave_pattern, weave_amplitude_mm,
-                    weave_pitch_mm, weave_axis, weave_left_dwell_s,
-                    weave_right_dwell_s, geometry_weave_direction,
-                )
-                if weave_pattern == "crescent":
-                    weave_crescent_bulge_mm = min(
-                        0.5 * weave_amplitude_mm,
-                        weave_actual_pitch_mm / (4.0 * math.pi),
-                    )
-                if geometry_weave_direction is not None:
-                    self.log(
-                        "Touch-corrected weave uses geometry-derived e_w="
-                        f"({geometry_weave_direction[0]:+.6f}, "
-                        f"{geometry_weave_direction[1]:+.6f}, "
-                        f"{geometry_weave_direction[2]:+.6f})"
-                    )
-            else:
-                usable_weld_points = seam_centerline
-            seam_distance_m = math.sqrt(sum(
-                (getattr(goal.position, axis) - getattr(start.position, axis)) ** 2
-                for axis in ("x", "y", "z")
-            ))
-            usable_path_distance_m = sum(
-                math.sqrt(sum(
-                    (getattr(second.position, axis) - getattr(first.position, axis)) ** 2
-                    for axis in ("x", "y", "z")
-                ))
-                for first, second in zip(
-                    usable_weld_points[:-1], usable_weld_points[1:]
-                )
-            )
-            path_to_seam_speed_factor = (
-                validated_seam_speed_factor(
-                    seam_distance_m / usable_path_distance_m
-                ) if weave_enabled else 1.0
-            )
-            preview = []
-            if has_lead_in:
-                preview.append(copy.deepcopy(lead_start))
-            preview.extend(copy.deepcopy(usable_weld_points))
-            if has_lead_out:
-                preview.append(copy.deepcopy(lead_end))
             if append:
-                self.node.publish_points(preview, self.show_path.get())
+                self.node.publish_points(path.preview, self.show_path.get())
             base_slot = (next_sequential_slot(
                 self.sequence_steps,
                 int(self.sequence_parallel_slot.get()),
             ) if append else 1)
-            safe_slot_count = 1 if safe_approach is not None else 0
-            contact_slot = base_slot + 1 + safe_slot_count
-            touch_output_off_slot = contact_slot + 1
-            lead_in_slot = touch_output_off_slot + 1
-            arc_on_slot = touch_output_off_slot + 1 + (1 if has_lead_in else 0)
-            custom_hot_start_enabled = bool(settings["custom_hot_start_enabled"])
-            weld_slot = arc_on_slot + (2 if custom_hot_start_enabled else 0)
-            software_crater_enabled = bool(settings["software_crater_enabled"])
-            arc_off_slot = weld_slot + 2 if software_crater_enabled else weld_slot
-            goal_wait_slot = arc_off_slot + 1
-            finish_slot = goal_wait_slot + 1
-            final_slot = finish_slot + 1
-            if final_slot > 999:
-                raise ValueError(
-                    "Not enough free sequence slots for weld scenario"
-                )
-            scenario_id = f"weld-{time.monotonic_ns()}"
-
-            def managed(step, stage):
-                step["weld_scenario_id"] = scenario_id
-                step["weld_scenario_stage"] = stage
-                return step
-
-            def named_step(name, stored, slot, stage):
-                group, names, joints, tcp = stored
-                return managed({
-                    "type": "named_pose",
-                    "pose_name": name,
-                    "pose_label": TEACHING_POSES[name],
-                    "planning_group": group,
-                    "joint_names": tuple(names),
-                    "positions": tuple(joints),
-                    "tcp_pose": copy.deepcopy(tcp),
-                    "velocity_scale": max(
-                        0.01,
-                        min(1.0, self.velocity_percent.get() / 100.0),
-                    ),
-                    "tcp_speed_m_s": self._selected_tcp_speed_m_s(),
-                    "parallel_slot": slot,
-                    "duration": 0.0,
-                    "touch_guard": False,
-                    "continue_after_touch": False,
-                }, stage)
-
-            near_approach_points = (
-                (approach_lead, start)
-                if approach_lead is not None and pre_start_lead_mm > 1e-6
-                else (start,)
+            slots = allocate_weld_scenario_slots(
+                base_slot,
+                has_safe_approach=safe_approach is not None,
+                has_lead_in=approach.has_lead_in,
+                settings=settings,
             )
-            approach_start = self._sensed_motion_step(
-                near_approach_points,
-                f"safe_to_pre_start_to_{start_path_name}_fastech_di0"
-                if safe_approach is not None
-                else f"start_wait_to_{start_path_name}_fastech_di0",
-                contact_slot,
-                touch_guard=False,
+            final_slot = slots.final
+            scenario_id = new_weld_scenario_id()
+            motion = WeldStepMotionInput(
+                velocity_percent=self.velocity_percent.get(),
+                tcp_speed_m_s=self._selected_tcp_speed_m_s(),
+                interpolation_step_mm=float(self.interpolation_step_mm.get()),
+                seam_orientation_mode=self.seam_orientation_mode.get(),
+                fixed_world_x_tilt_deg=float(self.weld_fixed_tilt_x_deg.get()),
+                fixed_world_y_tilt_deg=float(self.weld_fixed_tilt_y_deg.get()),
+                fixed_world_z_tilt_deg=float(self.weld_fixed_tilt_z_deg.get()),
             )
-            approach_start["continue_after_touch"] = True
-            # A stale/high Fastech DI0 at START WAIT must never skip directly to ARC.
-            # Require a fresh rising edge, confirm standstill, then continue.
-            approach_start["accept_initial_touch"] = False
-            approach_start.update({
-                "role": "approach",
-            })
-            approach_start.update({
-                "safe_approach_mm": safe_approach_mm,
-                "pre_start_lead_mm": pre_start_lead_mm,
-                "safe_approach": copy.deepcopy(safe_approach),
-                "approach_lead": copy.deepcopy(approach_lead),
-                "collision_checking": True,
-            })
-            steps = [named_step(
-                "weld_start_wait", start_wait_data, base_slot, "start_wait"
-            )]
-            if safe_approach is not None:
-                safe_motion = self._sensed_motion_step(
-                    (safe_approach,),
-                    f"{start_path_name}_safe_approach_collision_checked",
-                    base_slot + 1,
-                    touch_guard=False,
-                )
-                safe_motion.update({
-                    "role": "safe_approach",
-                    "safe_approach_mm": safe_approach_mm,
-                    "pre_start_lead_mm": pre_start_lead_mm,
-                    "safe_approach": copy.deepcopy(safe_approach),
-                    "approach_lead": copy.deepcopy(approach_lead),
-                    "collision_checking": True,
-                })
-                steps.append(managed(safe_motion, "start_safe"))
-            steps.extend([
-                managed(approach_start, "start_contact"),
-                managed({
-                    "type": "digital_output",
-                    "io_backend": FASTECH_TOUCH_BACKEND,
-                    "port": FASTECH_TOUCH_OUTPUT_PORT,
-                    "value": False,
-                    "parallel_slot": touch_output_off_slot,
-                    "duration": 0.0,
-                }, "touch_output_off"),
-            ])
-
-            if has_lead_in:
-                if safe_approach is not None:
-                    safe_over_start, _unused_start = compute_safe_weld_approach(
-                        start,
-                        self.corrected_seam_geometry.d_real,
-                        self.corrected_seam_geometry.e_a,
-                        safe_approach_mm * 0.001,
-                        0.0,
-                    )
-                    safe_over_weld_lead, computed_weld_lead = (
-                        compute_safe_weld_approach(
-                            start,
-                            self.corrected_seam_geometry.d_real,
-                            self.corrected_seam_geometry.e_a,
-                            safe_approach_mm * 0.001,
-                            lead_in_mm * 0.001,
-                        )
-                    )
-                    lead_position_points = (
-                        safe_over_start,
-                        safe_over_weld_lead,
-                        computed_weld_lead,
-                    )
-                    lead_position_label = (
-                        f"{start_path_name}_lift_translate_descend_to_"
-                        "weld_lead_in_arc_off"
-                    )
-                    retraction_reference = safe_over_start
-                else:
-                    # Legacy/non-sensed path retains the taught WAIT clearance.
-                    start_wait_tcp = copy.deepcopy(
-                        self.computed_seam_wait_points.get("start")
-                        or start_wait_data[3]
-                    )
-                    start_wait_tcp.orientation = copy.deepcopy(start.orientation)
-                    lead_position_points = (start_wait_tcp, lead_start)
-                    lead_position_label = (
-                        f"{start_path_name}_retract_via_wait_to_"
-                        "weld_lead_in_arc_off"
-                    )
-                    retraction_reference = start_wait_tcp
-                lead_position = self._sensed_motion_step(
-                    lead_position_points,
-                    lead_position_label,
-                    lead_in_slot,
-                )
-                lead_position["lead_in_mm"] = lead_in_mm
-                lead_position["lead_out_mm"] = lead_out_mm
-                lead_position["lead_start"] = copy.deepcopy(lead_start)
-                lead_position.update({
-                    "role": "lead_in",
-                    "related_weld_scenario_id": scenario_id,
-                    "start_wait_tcp": copy.deepcopy(retraction_reference),
-                    "collision_checking": True,
-                    "safe_retract_geometry": safe_approach is not None,
-                    "safe_approach_mm": safe_approach_mm,
-                    "safe_approach_direction": (
-                        tuple(self.corrected_seam_geometry.e_a)
-                        if safe_approach is not None
-                        else None
-                    ),
-                })
-                steps.append(lead_position)
-
-            if weave_enabled:
-                weld_points = []
-                if has_lead_in:
-                    weld_points.append(copy.deepcopy(lead_start))
-                weld_points.extend(copy.deepcopy(usable_weld_points))
-                if has_lead_out:
-                    weld_points.append(copy.deepcopy(lead_end))
-                weld_points = tuple(weld_points)
-            else:
-                # A non-weaving weld stays one endpoint-to-endpoint segment;
-                # START/GOAL are logical ARC landmarks, not timing waypoints.
-                motion_start = copy.deepcopy(
-                    lead_start if has_lead_in else start
-                )
-                motion_end = copy.deepcopy(
-                    lead_end if has_lead_out else goal
-                )
-                weld_points = (motion_start, motion_end)
-
-            weld_motion = self._sensed_motion_step(
-                weld_points,
-                (
-                    f"continuous_{weave_pattern}_weave_over_{goal_path_name}_fastech_di0_ignored"
-                    if weave_enabled
-                    else f"continuous_lead_to_lead_over_{goal_path_name}_fastech_di0_ignored"
-                    if has_lead_in or has_lead_out
-                    else f"continuous_{start_path_name}_to_{goal_path_name}_weld_fastech_di0_ignored"
-                ),
-                weld_slot,
+            steps = build_weld_scenario_steps(
+                scenario, approach, path, slots, motion, scenario_id
             )
-            weld_motion.update({
-                "lead_in_mm": lead_in_mm,
-                "lead_out_mm": lead_out_mm,
-                "record_tcp_trajectory": True,
-                "lead_start": copy.deepcopy(lead_start),
-                "usable_seam_start": copy.deepcopy(start),
-                "usable_seam_goal": copy.deepcopy(goal),
-                "lead_end": copy.deepcopy(lead_end),
-                # Convert the operator's seam-axis travel target to TCP path
-                # speed for weaving below. The action server still enforces
-                # MoveIt's trajectory limits and lead-in/out ramps.
-                "tcp_speed_m_s": weld_tcp_speed_mm_s * 0.001,
-                "linear_motion_profile": True,
-                "weld_tcp_speed_mm_s": weld_tcp_speed_mm_s,
-                "weld_weave_enabled": weave_enabled,
-                "weld_weave_pattern": weave_pattern,
-                "weld_weave_amplitude_mm": weave_amplitude_mm,
-                "weld_weave_pitch_mm": weave_pitch_mm,
-                "weld_weave_cycles": weave_cycles,
-                "weld_weave_actual_pitch_mm": weave_actual_pitch_mm,
-                "weld_weave_crescent_bulge_mm": weave_crescent_bulge_mm,
-                "weld_weave_samples_per_cycle": WELD_WEAVE_SAMPLES_PER_CYCLE,
-                "weld_weave_left_dwell_s": weave_left_dwell_s,
-                "weld_weave_right_dwell_s": weave_right_dwell_s,
-                "weld_weave_axis": weave_axis,
-                "usable_weld_points": copy.deepcopy(usable_weld_points),
-                "weld_weave_transverse_vector": geometry_weave_direction if weave_enabled else None,
-                "role": "weld_motion",
-                "seam_orientation_mode": self.seam_orientation_mode.get(),
-                "fixed_world_x_tilt_deg": float(
-                    self.weld_fixed_tilt_x_deg.get()
-                ),
-                "fixed_world_y_tilt_deg": float(
-                    self.weld_fixed_tilt_y_deg.get()
-                ),
-                "fixed_world_z_tilt_deg": float(
-                    self.weld_fixed_tilt_z_deg.get()
-                ),
-                "safe_approach_mm": safe_approach_mm,
-                "pre_start_lead_mm": pre_start_lead_mm,
-            })
-
-            if weave_enabled:
-                weld_motion["path_to_seam_speed_factor"] = path_to_seam_speed_factor
-                weld_motion["tcp_speed_m_s"] = weave_path_speed_m_s(
-                    seam_distance_m, usable_path_distance_m,
-                    weld_tcp_speed_mm_s, weave_holds,
-                )
-            if any(weave_holds):
-                weld_motion["waypoint_hold_s"] = (
-                    ([0.0] if has_lead_in else []) + weave_holds
-                    + ([0.0] if has_lead_out else [])
-                )
-                weld_motion["linear_motion_profile"] = False
-
-            weld_steps = [
-                managed({
-                    "type": "digital_weld", "command": "on",
-                    "settings": copy.deepcopy(settings),
-                    "parallel_slot": arc_on_slot, "duration": 0.0,
-                }, "arc_on"),
-            ]
-            if custom_hot_start_enabled:
-                weld_steps.append(managed({
-                    "type": "custom_hot_start",
-                    "settings": copy.deepcopy(settings),
-                    "planning_group": weld_motion["planning_group"],
-                    "expected_start_tcp": copy.deepcopy(weld_points[0]),
-                    "start_pose_role": ("lead_start" if has_lead_in else "sensed_start"),
-                    "parallel_slot": arc_on_slot + 1,
-                    "duration": 0.0,
-                }, "custom_hot_start"))
-            weld_steps.append(managed(weld_motion, "weld_motion"))
-            if software_crater_enabled:
-                weld_steps.append(managed({
-                    "type": "software_crater",
-                    "settings": copy.deepcopy(settings),
-                    "endpoint": copy.deepcopy(weld_points[-1]),
-                    "planning_group": weld_motion.get("planning_group", "right_manipulator"),
-                    "parallel_slot": weld_slot + 1,
-                }, "software_crater"))
-            weld_steps.extend([
-                managed({
-                    "type": "digital_weld", "command": "off",
-                    "settings": copy.deepcopy(settings),
-                    "parallel_slot": arc_off_slot, "duration": 0.0,
-                    "trigger_before_goal": not software_crater_enabled,
-                    "usable_seam_start": copy.deepcopy(start),
-                    "usable_seam_goal": copy.deepcopy(goal),
-                    "arc_off_delay_s": arc_off_delay_ms * 0.001,
-                    "tcp_speed_m_s": float(weld_motion.get("tcp_speed_m_s", 0.0)),
-                    "velocity_scale": float(weld_motion.get("velocity_scale", 0.0)),
-                    "path_to_seam_speed_factor": path_to_seam_speed_factor,
-                }, "arc_off"),
-                named_step(
-                    "weld_goal_wait",
-                    goal_wait_data,
-                    goal_wait_slot,
-                    "goal_wait",
-                ),
-                named_step(
-                    "weld_finish", finish_data, finish_slot, "finish"
-                ),
-                managed({
-                    "type": "digital_output",
-                    "io_backend": FASTECH_TOUCH_BACKEND,
-                    "port": FASTECH_TOUCH_OUTPUT_PORT,
-                    "value": True,
-                    "parallel_slot": final_slot,
-                    "duration": 0.0,
-                }, "touch_output_on"),
-            ])
-            steps.extend(weld_steps)
-            if approach_mode == "taught_wait":
-                steps = taught_wait_approach_steps(steps, start_wait_data[3], goal_wait_data[3])
-            for step in steps:
-                step["weld_approach_mode"] = approach_mode
-                if step.get("type") in ("motion", "named_pose"):
-                    # Snapshot the shared slider at Build. Welding retains its
-                    # physical seam-travel target; approach/exit use scale mode.
-                    step["velocity_scale"] = max(
-                        0.01, min(1.0, float(self.velocity_percent.get()) / 100.0)
-                    )
-                    if step.get("weld_scenario_stage") != "weld_motion":
-                        step["tcp_speed_m_s"] = 0.0
-            validate_managed_weld_sequence(steps, require_complete=True)
         except (ValueError, TypeError, tk.TclError) as error:
             self.error(f"Cannot build sensed weld sequence: {error}")
             return
         if append:
             self.sequence_model.extend(steps)
             self.refresh_sequence_table(select_last=True)
+        start_source = endpoints.start_source
+        goal_source = endpoints.goal_source
+        has_lead_in = approach.has_lead_in
+        weave_cycles = path.weave_cycles
+        weave_actual_pitch_mm = path.weave_actual_pitch_mm
+        weave_crescent_bulge_mm = path.weave_crescent_bulge_mm
+        custom_hot_start_enabled = bool(settings["custom_hot_start_enabled"])
+        software_crater_enabled = bool(settings["software_crater_enabled"])
         self.log(
             f"Built weld workflow from {start_source} to {goal_source} · "
             f"approach={approach_mode} · "
@@ -8928,130 +8520,12 @@ class WeldActionGui:
         self.refresh_sequence_table()
         self.sequence_table.selection_set(str(target))
 
-    @staticmethod
-    def _pose_execution_conditions(pose):
-        if pose is None or not pose_is_valid(pose):
-            return None
-        return {
-            "position_m": {
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
-                "z": float(pose.position.z),
-            },
-            "orientation_xyzw": {
-                "x": float(pose.orientation.x),
-                "y": float(pose.orientation.y),
-                "z": float(pose.orientation.z),
-                "w": float(pose.orientation.w),
-            },
-        }
+    _pose_execution_conditions = staticmethod(pose_execution_conditions)
 
     def _sequence_execution_conditions(
         self, steps, indices, execute_requested, run_all
     ):
-        recorded_steps = []
-        for stored_index, step in zip(indices, steps):
-            condition = {
-                "sequence_number": int(stored_index) + 1,
-                "type": step.get("type"),
-            }
-            for key in (
-                "parallel_slot",
-                "duration",
-                "planning_group",
-                "velocity_scale",
-                "tcp_speed_m_s",
-                "interpolation_step",
-                "path_kind",
-                "pose_name",
-                "pose_label",
-                "touch_guard",
-                "continue_after_touch",
-                "accept_initial_touch",
-                "allow_initial_touch_motion",
-                "command",
-                "port",
-                "value",
-                "enabled",
-                "direction",
-                "seconds",
-                "weld_scenario_id",
-                "weld_scenario_stage",
-                "lead_in_mm",
-                "lead_out_mm",
-                "linear_motion_profile",
-                "path_to_seam_speed_factor",
-                "trigger_before_goal",
-                "arc_off_delay_s",
-                "waypoint_hold_s",
-                "weld_weave_enabled",
-                "weld_weave_pattern",
-                "weld_weave_amplitude_mm",
-                "weld_weave_pitch_mm",
-                "weld_weave_cycles",
-                "weld_weave_actual_pitch_mm",
-                "weld_weave_crescent_bulge_mm",
-                "weld_weave_left_dwell_s",
-                "weld_weave_right_dwell_s",
-                "weld_weave_axis",
-                "joint1_rad",
-                "joint2_rad",
-                "cleaner_source_index",
-                "cleaner_anchor",
-                "cleaner_world_offset_m",
-                "resolve_target_tcp_ik",
-                "work_cycle_id",
-                "work_cycle_number",
-                "fake_arc_required",
-                "spray_kind",
-                "distance_m",
-                "radius_m",
-                "unique_points",
-                "closed",
-                "face_center",
-            ):
-                if key in step:
-                    condition[key] = step[key]
-            if step.get("settings") is not None:
-                condition["settings"] = copy.deepcopy(step["settings"])
-            if step.get("type") == "motion":
-                points = step.get("points", ())
-                condition["waypoint_count"] = len(points)
-                condition["waypoints"] = [
-                    self._pose_execution_conditions(pose) for pose in points
-                ]
-                for pose_key in (
-                    "lead_start",
-                    "usable_seam_start",
-                    "usable_seam_goal",
-                    "lead_end",
-                ):
-                    if pose_key in step:
-                        condition[pose_key] = self._pose_execution_conditions(
-                            step[pose_key]
-                        )
-            elif step.get("type") == "named_pose":
-                condition["target_tcp"] = self._pose_execution_conditions(
-                    step.get("tcp_pose")
-                )
-                condition["joint_names"] = list(step.get("joint_names", ()))
-                condition["joint_positions_rad"] = [
-                    float(value) for value in step.get("positions", ())
-                ]
-            elif step.get("type") in ("dual_arm_pose", "spray_motion"):
-                condition["joint_names"] = list(step["joint_names"])
-                condition["joint_positions_rad"] = list(step["positions"])
-            elif step.get("type") == "planned_trajectory":
-                condition["trajectory_segments"] = len(
-                    step.get("trajectories", ())
-                )
-                condition["trajectory_point_count"] = int(
-                    step.get("point_count", 0)
-                )
-                condition["required_arms"] = list(
-                    step.get("required_arms", ())
-                )
-            recorded_steps.append(condition)
+        recorded_steps = record_step_conditions(steps, indices)
         effective_weld_motion = next((
             step for step in steps
             if step.get("weld_scenario_stage") == "weld_motion"
@@ -9231,7 +8705,7 @@ class WeldActionGui:
         if not indices:
             self.error("Add or select a sequence step")
             return
-        work_cycle = any(step.get("work_cycle_id") for step in steps)
+        work_cycle = is_work_cycle(steps)
         if work_cycle and (not run_all or not all(step.get("fake_arc_required") for step in steps)):
             self.error("Full work cycle must run all rows as a fake-ARC-only sequence")
             return
@@ -9245,14 +8719,7 @@ class WeldActionGui:
         except (TypeError, ValueError, tk.TclError) as error:
             self.error(f"Cannot capture sequence execution conditions: {error}")
             return
-        for step in steps:
-            if (
-                step.get("type") == "digital_weld"
-                and step.get("command") == "on"
-            ):
-                step["execution_conditions"] = copy.deepcopy(
-                    execution_conditions
-                )
+        attach_execution_conditions(steps, execution_conditions)
         try:
             validate_managed_weld_sequence(
                 steps, require_complete=bool(run_all)
@@ -9260,74 +8727,11 @@ class WeldActionGui:
         except (TypeError, ValueError) as error:
             self.error(f"Unsafe generated weld scenario: {error}")
             return
+        executor = _sequence_executor_for(self)
         if execute_requested:
-            requires_fastech = any(
-                step.get("touch_guard", False)
-                or step.get("io_backend") == FASTECH_TOUCH_BACKEND
-                for step in steps
-            )
-            if requires_fastech and not self.fastech_connected:
-                self.error(
-                    "Connect Fastech Ethernet before executing touch-sensing "
-                    "or Fastech output steps"
-                )
-                return
-            required_arms = set()
-            for step in steps:
-                if step["type"] == "planned_trajectory":
-                    required_arms.update(step.get("required_arms", ()))
-                elif step["type"] in ("motion", "named_pose", "spray_motion", "software_crater", "custom_hot_start"):
-                    required_arms.add(
-                        step["planning_group"].removesuffix("_manipulator")
-                    )
-                elif step["type"] == "dual_arm_pose":
-                    required_arms.update(("left", "right"))
-                elif (
-                    step["type"] == "digital_output"
-                    and step.get("io_backend") != FASTECH_TOUCH_BACKEND
-                ):
-                    required_arms.add("right")
-            disconnected = [
-                arm for arm in sorted(required_arms)
-                if not self.robot_connected.get(arm, False)
-            ]
-            if not self.execution_allowed or disconnected:
-                self.error(
-                    "Physical execution is unavailable or a required robot is "
-                    f"disconnected: {', '.join(disconnected) or 'execution disabled'}"
-                )
-                return
-            contains_weld_command = any(
-                step["type"] in ("digital_weld", "gas", "software_crater", "custom_hot_start") for step in steps
-            )
-            if contains_weld_command and not work_cycle and (
-                not self.hicomm_connected
-            ):
-                self.error(
-                    "Connect Hi-COMM"
-                )
-                return
-            contains_arc_on = any(
-                step["type"] == "digital_weld"
-                and step["command"] == "on"
-                for step in steps
-            )
-            motion_counts = {}
-            for local_index, step in enumerate(steps):
-                if step["type"] not in (
-                    "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion"
-                ):
-                    continue
-                slot = step.get("parallel_slot", local_index + 1)
-                motion_counts[slot] = motion_counts.get(slot, 0) + 1
-            duplicate_motion_slots = [
-                slot for slot, count in motion_counts.items() if count > 1
-            ]
-            if duplicate_motion_slots:
-                self.error(
-                    "Only one robot motion is allowed in each parallel slot: "
-                    + ", ".join(map(str, duplicate_motion_slots))
-                )
+            preflight_error = executor.execution_preflight_error(steps, work_cycle)
+            if preflight_error is not None:
+                self.error(preflight_error)
                 return
             if not messagebox.askyesno(
                 "Execute sequence",
@@ -9335,390 +8739,35 @@ class WeldActionGui:
             ):
                 return
             if self.hicomm_client is not None and not work_cycle and (
-                steps_override is None or contains_weld_command
+                steps_override is None or contains_weld_command(steps)
             ):
                 self.hicomm_client.allow_outputs()
-        self._sequence_fake_arc_snapshot = bool(work_cycle or self.fake_arc_enabled.get())
-        with self.weld_feedback_lock:
-            self._weld_feedback_stopped = False
-        self.sequence_model.start(indices, execute_requested)
-        self.sequence_stop_requested = False
-        mode = "EXECUTE" if execute_requested else "PLAN"
-        self._set_sequence_status(
-            f"{mode} running · {len(steps)} step(s)"
+        executor.begin(
+            steps, indices, execute_requested,
+            bool(work_cycle or self.fake_arc_enabled.get()),
         )
-        threading.Thread(
-            target=self._sequence_worker,
-            args=(steps, indices, execute_requested),
-            daemon=True,
-        ).start()
 
+    # Sequence execution lives in application.sequence_executor.  These
+    # entry points keep their names so callers and per-instance overrides
+    # (tests, diagnostics) keep working; the executor calls back through them.
     def _interruptible_wait(self, seconds):
-        deadline = time.monotonic() + max(0.0, seconds)
-        while time.monotonic() < deadline:
-            if self.sequence_stop_requested:
-                return False
-            time.sleep(min(0.05, deadline - time.monotonic()))
-        return True
+        return _sequence_executor_for(self).interruptible_wait(seconds)
 
     def _execution_fake_arc(self):
-        # Tk variable reads from workers wait for the GUI event loop. Freeze
-        # this operator setting at Execute rather than at the ARC boundary.
-        if getattr(self, "sequence_running", False) and hasattr(self, "_sequence_fake_arc_snapshot"):
-            return self._sequence_fake_arc_snapshot
-        return bool(self.fake_arc_enabled.get())
+        return _sequence_executor_for(self).fake_arc()
 
     def _sequence_worker(self, steps, indices, execute_requested):
-        try:
-            if execute_requested:
-                arc_step = next((s for s in steps if s.get("type") == "digital_weld"
-                                 and s.get("command") == "on"), None)
-                if arc_step is not None:
-                    self._finish_weld_feedback_record("closed before new sequence")
-                    self._begin_weld_feedback_record(
-                        arc_step["settings"], arc_step.get("execution_conditions")
-                    )
-            self._sequence_worker_body(steps, indices, execute_requested)
-        except Exception as error:
-            # Otherwise a worker traceback leaves sequence_running latched and
-            # every later Plan/Execute reports "A sequence is already running".
-            self.weld_motion_done_event.set()
-            self.sequence_stop_requested = True
-            client = self.hicomm_client
-            if execute_requested:
-                if client is not None and not WeldActionGui._execution_fake_arc(self):
-                    try:
-                        client.inhibit_outputs()
-                    except Exception:
-                        pass
-                try:
-                    self.node.cancel_active_motion()
-                except Exception:
-                    pass
-                try:
-                    self._finish_weld_feedback_record(
-                        f"failed: sequence worker exception: {error}",
-                        client.latest_status() if client is not None else None,
-                    )
-                except Exception as feedback_error:
-                    self.post(self.error, f"Weld feedback cleanup failed: {feedback_error}")
-            self.post(self._sequence_finished, False, f"internal sequence error: {error}")
-        finally:
-            # Normal fake completion keeps recording until STOP or a new run.
-            if execute_requested and (
-                self.sequence_stop_requested or not WeldActionGui._execution_fake_arc(self)
-            ):
-                self._finish_weld_feedback_record(
-                    "stopped" if self.sequence_stop_requested else "sequence ended",
-                    self.hicomm_client.latest_status() if self.hicomm_client is not None else None,
-                )
+        return _sequence_executor_for(self).run_worker(
+            steps, indices, execute_requested
+        )
 
     def _sequence_worker_body(self, steps, indices, execute_requested):
-        # The worker may also be exercised without the GUI constructor by
-        # tests; keep its application state lazy like sequence_steps.
-        if not hasattr(self, "sequence_model"):
-            self.sequence_model = SequenceModel()
-        success = True
-        message = "complete"
-        groups = []
-        group_lookup = {}
-        for local_index, (stored_index, step) in enumerate(zip(indices, steps)):
-            key = (
-                ("sleep", stored_index)
-                if step["type"] == "sleep"
-                else ("slot", step.get("parallel_slot", local_index + 1))
-            )
-            if key not in group_lookup:
-                group_lookup[key] = []
-                groups.append((key, group_lookup[key]))
-            group_lookup[key].append((stored_index, step))
-
-        for group_index, (key, members) in enumerate(groups, start=1):
-            if self.sequence_stop_requested:
-                success, message = False, "stopped by operator"
-                break
-            slot_label = key[1] if key[0] == "slot" else "sleep"
-            self.sequence_model.set_progress(
-                slot_label, group_index, len(groups),
-                tuple(index for index, _step in members),
-            )
-            self.post(
-                self._set_sequence_status,
-                f"Parallel slot {slot_label} · group "
-                f"{group_index}/{len(groups)} · {len(members)} task(s)",
-            )
-            results = {}
-            workers = []
-            weld_motion_group = any(
-                step.get("weld_scenario_stage") == "weld_motion"
-                for _stored_index, step in members
-            )
-            if weld_motion_group:
-                self.weld_motion_done_event.clear()
-                self.weld_motion_success = False
-            if any(step.get("weld_scenario_stage") == "arc_on"
-                   for _stored_index, step in members):
-                self.weld_arc_established_event.clear()
-                self.weld_arc_on_done_event.clear()
-                self.weld_arc_on_success = False
-            if execute_requested:
-                arc_on_step = next((
-                    step for _stored_index, step in members
-                    if step.get("type") == "digital_weld"
-                    and step.get("command") == "on"
-                ), None)
-                if arc_on_step is not None:
-                    # Establish one common monotonic time base before motion and
-                    # HICOMM workers race each other to their first callback.
-                    self._begin_weld_feedback_record(
-                        arc_on_step.get("settings"),
-                        arc_on_step.get("execution_conditions"),
-                    )
-            tcp_recorder = None
-            if execute_requested and weld_motion_group:
-                weld_motion_step = next(
-                    step for _stored_index, step in members
-                    if step.get("weld_scenario_stage") == "weld_motion"
-                )
-                tcp_recorder = threading.Thread(
-                    target=self._record_actual_tcp_until_motion_done,
-                    args=(weld_motion_step,),
-                    daemon=True,
-                )
-                tcp_recorder.start()
-
-            def run_member(result_key, member_step):
-                member_result = (False, "sequence task did not run")
-                task_started = time.monotonic()
-                try:
-                    member_result = self._run_sequence_step(
-                        member_step, execute_requested
-                    )
-                    results[result_key] = member_result
-                    if execute_requested and not member_result[0]:
-                        client = self.hicomm_client
-                        if client is not None and not WeldActionGui._execution_fake_arc(self):
-                            client.inhibit_outputs()
-                        self.node.cancel_active_motion()
-                finally:
-                    self.post(self.log,
-                        f"SEQUENCE STEP TIMING · #{result_key + 1} · "
-                        f"stage={member_step.get('weld_scenario_stage', member_step['type'])} · "
-                        f"duration={time.monotonic() - task_started:.3f}s · "
-                        f"success={bool(member_result[0])}"
-                    )
-                    if member_step.get("weld_scenario_stage") == "weld_motion":
-                        self.weld_motion_success = bool(member_result[0])
-                        self.weld_motion_done_event.set()
-
-            for stored_index, step in members:
-                worker = threading.Thread(
-                    target=run_member,
-                    args=(stored_index, step),
-                    daemon=True,
-                )
-                workers.append(worker)
-                worker.start()
-            for worker in workers:
-                worker.join()
-            if tcp_recorder is not None:
-                tcp_recorder.join(timeout=2.0)
-            for stored_index, _step in members:
-                step_success, step_message = results.get(
-                    stored_index, (False, "parallel task produced no result")
-                )
-                self.post(
-                    self.log,
-                    f"Sequence #{stored_index + 1} · "
-                    f"{'OK' if step_success else 'FAILED'} · {step_message}",
-                )
-                if not step_success:
-                    success, message = False, step_message
-                    break
-            if not success:
-                break
-            if execute_requested and any(
-                step.get("weld_scenario_stage") == "arc_off"
-                and step.get("trigger_before_goal", False)
-                for _stored_index, step in members
-            ):
-                if not WeldActionGui._execution_fake_arc(self):
-                    final_status = self._pending_weld_final_status()
-                    self._finish_weld_feedback_record("completed", final_status)
-        if execute_requested and (not success or self.sequence_stop_requested):
-            client = self.hicomm_client
-            if client is not None and not WeldActionGui._execution_fake_arc(self):
-                client.clear_outputs()
-            software_step = next((step for step in steps if step.get("weld_scenario_stage") == "software_crater"), None)
-            if software_step is not None and client is not None:
-                try:
-                    self._software_crater_restore(validate_digital_weld_settings(software_step["settings"]))
-                except Exception as restore_error:
-                    self.post(self.error, f"Software crater failure cleanup restore failed: {restore_error}")
-            # Keep touch-enable unchanged on STOP or failure. Explicit
-            # scenario/GUI DO0 commands remain responsible for this output.
-            self._finish_weld_feedback_record(
-                "stopped" if self.sequence_stop_requested else f"failed: {message}",
-                client.latest_status() if client is not None else None,
-            )
-        # Imported cleaner tasks must never leave a cutter/cleaner latched ON,
-        # including when a later motion fails. Do not change touch-enable DO0.
-        if execute_requested:
-            cleaner_ports = {
-                int(step["port"]) for step in steps
-                if step.get("task_cleaner_output") and step.get("port") in (5, 6, 7)
-            }
-            for port in sorted(cleaner_ports):
-                try:
-                    off_ok, off_message = self._set_fastech_output_sync(port, False)
-                except Exception as error:
-                    off_ok, off_message = False, str(error)
-                if not off_ok:
-                    success, message = False, f"Cleaner DO{port} cleanup OFF failed: {off_message}"
-                    self.post(self.error, message)
-        self.post(self._sequence_finished, success, message)
+        return _sequence_executor_for(self).run_groups(
+            steps, indices, execute_requested
+        )
 
     def _run_sequence_step(self, step, execute_requested):
-        if step["type"] == "motion":
-            if (
-                execute_requested
-                and step.get("weld_scenario_stage") == "weld_motion"
-            ):
-                # The legacy path shares ARC ON and motion in one slot; custom
-                # hot start uses preceding ARC ON/hold slots. Either way, the
-                # robot cannot leave the motion start before establishment.
-                deadline = time.monotonic() + 6.0
-                while not self.weld_arc_established_event.is_set():
-                    if self.sequence_stop_requested:
-                        return False, "weld motion interrupted before ARC established"
-                    if (
-                        self.weld_arc_on_done_event.is_set()
-                        and not self.weld_arc_on_success
-                    ):
-                        return False, "weld motion aborted: ARC ON failed"
-                    if time.monotonic() >= deadline:
-                        return False, "weld motion timed out waiting for ARC established"
-                    time.sleep(0.01)
-
-                self._mark_weld_motion_timing("start")
-                try:
-                    return self.node.run_sequence_cartesian_motion(
-                        step, execute_requested
-                    )
-                finally:
-                    self._mark_weld_motion_timing("complete")
-            return self.node.run_sequence_cartesian_motion(step, execute_requested)
-        if step["type"] == "planned_trajectory":
-            return self.node.run_sequence_planned_trajectory(
-                step, execute_requested
-            )
-        if step["type"] == "named_pose":
-            return self.node.run_sequence_named_pose(step, execute_requested)
-        if step["type"] == "dual_arm_pose":
-            return self.node.run_sequence_dual_arm_pose(step, execute_requested)
-        if step["type"] == "spray_motion":
-            return self.node.run_sequence_spray_motion(step, execute_requested)
-        if step["type"] == "head_motion":
-            return self.node.run_sequence_head_motion(step, execute_requested)
-        if step["type"] == "sleep":
-            if not execute_requested:
-                return True, "sleep planned (no wait)"
-            success = self._interruptible_wait(step["seconds"])
-            return success, (
-                f"slept {step['seconds']:.3f} seconds"
-                if success
-                else "sleep interrupted"
-            )
-        if step["type"] == "software_crater":
-            if not execute_requested:
-                return True, "software_crater planned (no setpoint sent)"
-            return self._execute_software_crater(step)
-        if step["type"] == "custom_hot_start":
-            if not execute_requested:
-                return True, "Custom Hot Start planned (no hold)"
-            return self._execute_custom_hot_start(step)
-        if not execute_requested:
-            return True, "Equipment output command planned (no output sent)"
-        duration = float(step.get("duration", 0.0))
-        if step["type"] == "digital_weld":
-            if step.get("command") == "off" and step.get(
-                "trigger_before_goal", False
-            ):
-                return self._execute_triggered_arc_off(step)
-            success, message = self._execute_hicomm_weld(
-                step["command"],
-                step["settings"],
-                step.get("execution_conditions"),
-            )
-            if not success:
-                return success, message
-            if step["command"] == "on" and duration <= 0.0:
-                return True, f"{message} · remains ON until D-WELD OFF"
-            waited = self._interruptible_wait(duration)
-            if step["command"] == "on":
-                off_success, off_message = self._execute_hicomm_weld(
-                    "off", step["settings"]
-                )
-                if not off_success:
-                    return False, off_message
-            return waited, (
-                f"{message} · duration {duration:.3f} seconds"
-                if waited
-                else "D-WELD duration interrupted"
-            )
-        if step["type"] == "gas":
-            client = self.hicomm_client
-            if client is None or not client.connected:
-                return False, "Hi-COMM disconnected"
-            enabled = bool(step["enabled"])
-            try:
-                client.set_command_bit(BIT_GAS, enabled)
-                if not enabled:
-                    return True, "GAS OFF sent"
-                # A positive duration makes GAS ON a timed pulse.  Duration 0
-                # keeps gas on until an explicit GAS OFF sequence step.
-                if duration <= 0.0:
-                    return True, "GAS ON sent; remains on until GAS OFF"
-                waited = self._interruptible_wait(duration)
-                client.set_command_bit(BIT_GAS, False)
-                return waited, (
-                    f"GAS ON for {duration:.3f} seconds, then OFF"
-                    if waited
-                    else "GAS timer interrupted; GAS OFF sent"
-                )
-            except Exception as error:
-                client.set_command_bit(BIT_GAS, False)
-                return False, str(error)
-        if step["type"] == "digital_output":
-            port = int(step["port"])
-            enabled = bool(step["value"])
-            backend = step.get("io_backend", "rainbow_legacy")
-            if backend == FASTECH_TOUCH_BACKEND:
-                set_output = self._set_fastech_output_sync
-                output_name = "Fastech DO"
-            else:
-                set_output = self.node._set_legacy_digital_output_sync
-                output_name = "Legacy Rainbow DO"
-            success, message = set_output(port, enabled)
-            if not success:
-                return False, f"{output_name}{port} command failed: {message}"
-            if not enabled or duration <= 0.0:
-                return True, (
-                    f"{output_name}{port} "
-                    f"{'ON' if enabled else 'OFF'} confirmed"
-                )
-            waited = self._interruptible_wait(duration)
-            off_success, off_message = set_output(port, False)
-            if not off_success:
-                return False, (
-                    f"{output_name}{port} timed OFF failed: {off_message}"
-                )
-            return waited, (
-                f"{output_name}{port} ON for {duration:.3f} seconds, then OFF"
-                if waited
-                else f"{output_name}{port} duration interrupted; OFF confirmed"
-            )
-        return False, "unsupported sequence step"
+        return _sequence_executor_for(self).run_step(step, execute_requested)
 
     def _set_sequence_status(self, text):
         self.sequence_model.status = text
