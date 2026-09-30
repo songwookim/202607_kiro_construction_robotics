@@ -6,6 +6,7 @@ import pytest
 
 from construct_robot.weld_action_gui import WeldActionGui, WeldGuiNode
 from construct_robot import weld_action_gui
+from construct_robot.nodes import weld_runtime_node
 
 
 def node_stub():
@@ -84,7 +85,7 @@ def test_retract_uses_fresh_pose_and_honors_stop(monkeypatch, canceled):
     node._current_tcp_pose = Mock(return_value=current)
     node.run_sequence_cartesian_motion = Mock(return_value=(True, "returned"))
     waypoints = Mock(return_value=[])
-    monkeypatch.setattr(weld_action_gui, "linear_pose_waypoints", waypoints)
+    monkeypatch.setattr(weld_runtime_node, "linear_pose_waypoints", waypoints)
     WeldGuiNode.return_touch_probe(
         node, "right_manipulator", old_contact, start, .01, .001, "wall", 0,
     )

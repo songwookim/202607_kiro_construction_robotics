@@ -4,8 +4,9 @@ import pytest
 import yaml
 from geometry_msgs.msg import Pose
 
-from construct_robot.task_teaching_panel import (
-    TaskTeachingPanel, atomic_yaml, decode, encode, validate_task_group,
+from construct_robot.task_teaching_model import (
+    atomic_yaml, build_task_path_steps, decode, encode, safe_task_name,
+    validate_task_group,
 )
 
 
@@ -38,10 +39,10 @@ def test_unsafe_serialization_rejected():
     with pytest.raises(ValueError):
         decode({"ros_type": "Unknown", "fields": {}})
     with pytest.raises(ValueError):
-        TaskTeachingPanel.safe_name("../other")
+        safe_task_name("../other")
 
 
-def test_right_weld_builder_remains_runnable_from_task_library():
+def test_right_weld_task_group_validation():
     validate_task_group([
         {"type": "digital_output", "io_backend": "fastech_ethernet", "port": 0},
         {"type": "digital_weld", "command": "on"},
@@ -51,22 +52,18 @@ def test_right_weld_builder_remains_runnable_from_task_library():
 
 
 def test_continuous_path_preserves_order_and_arm(tmp_path):
-    panel = object.__new__(TaskTeachingPanel)
-    panel.speed = SimpleNamespace(get=lambda: "5")
-    panel.category = SimpleNamespace(get=lambda: "Left · Spray path")
-    panel.order = SimpleNamespace(get=lambda *args: ("a", "b", "c"))
-    panel.base = lambda: tmp_path
     poses = []
     for value in (0.1, 0.2, 0.3):
         pose = Pose()
         pose.position.z = value
         pose.orientation.w = 1.0
         poses.append(pose)
-    panel.load_pose = lambda path: ("left_manipulator", [f"left_manipulator_joint{i}" for i in range(1, 7)],
-                                    [0.0] * 6, poses["abc".index(path.stem)])
-    result = []
-    panel.replace_builder = result.extend
-    panel.build_path()
+    stored = [
+        ("left_manipulator", [f"left_manipulator_joint{i}" for i in range(1, 7)],
+         [0.0] * 6, pose)
+        for pose in poses
+    ]
+    result = build_task_path_steps(("a", "b", "c"), stored, "left_manipulator", 5)
     assert [s["type"] for s in result] == ["named_pose", "motion"]
     assert result[0]["use_joint_planning"] is True
     assert result[0]["parallel_slot"] != result[1]["parallel_slot"]

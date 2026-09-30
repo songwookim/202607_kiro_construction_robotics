@@ -18,3 +18,24 @@ def test_legacy_imports_share_implementations():
     assert SequenceModel is CoreModel
     assert compute_safe_weld_approach is CoreApproach
     assert legacy_welder is welder
+
+
+def test_weld_runtime_node_is_reexported_and_independent_of_gui():
+    import ast
+    from pathlib import Path
+
+    import construct_robot.weld_action_gui as legacy_gui
+    from construct_robot.gui import weld_action_gui as gui
+    from construct_robot.nodes import weld_runtime_node
+
+    assert gui.WeldGuiNode is weld_runtime_node.WeldGuiNode
+    assert legacy_gui.WeldGuiNode is weld_runtime_node.WeldGuiNode
+
+    tree = ast.parse(Path(weld_runtime_node.__file__).read_text(encoding="utf-8"))
+    imported = {
+        node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+    } | {
+        alias.name for node in ast.walk(tree) if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert not any(name and ("gui" in name or name == "tkinter") for name in imported)
