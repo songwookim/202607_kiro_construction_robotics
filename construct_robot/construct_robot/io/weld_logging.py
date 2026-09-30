@@ -1,11 +1,16 @@
 """Pure welding-feedback calculations, report text, and atomic save."""
+import copy
+import hashlib
 import math
 from pathlib import Path
 import tempfile
 
 import yaml
 
+from construct_robot.core.cartesian_path_common import pose_is_valid
+from construct_robot.core.seam_geometry import _pose_position_tuple
 from construct_robot.core.weld_quality_metrics import format_quality_summary
+from construct_robot.io.teaching_yaml import _pose_from_yaml_dict
 
 
 def calculate_weld_production_metrics(
@@ -363,3 +368,225 @@ def save_weld_feedback_log(path, document):
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
+
+
+def read_last_execution_settings(path):
+    """Recover GUI-parameter defaults from a previously saved weld feedback
+    log's ``[commanded]``/``[execution_conditions]`` sections.
+
+    Lets a new GUI session start from exactly what last actually ran (recipe
+    I/V/material and motion speed/lead/ARC timing) instead of hard-coded
+    fallbacks. Returns ``{}`` (or a partial dict) if the log is missing or a
+    field was never recorded -- callers must fall back to their own default
+    for anything absent.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    sections = {}
+    section = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+            sections[section] = {}
+            continue
+        if section is None or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        sections[section][key] = value
+
+    def cast(section_name, key, converter):
+        raw = sections.get(section_name, {}).get(key)
+        if raw is None:
+            return None
+        try:
+            return converter(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def cast_bool(section_name, key):
+        raw = sections.get(section_name, {}).get(key)
+        if raw is None:
+            return None
+        return raw.strip().lower() in ("1", "true", "yes")
+
+    settings = {}
+    for key, converter in (
+        ("current_a", lambda v: int(round(float(v)))),
+        ("voltage_tenths", lambda v: int(round(float(v)))),
+        ("material", str),
+        ("diameter_mm", float),
+        ("mode", str),
+        ("gas", str),
+        ("correction", float),
+        ("hot_start_percent", float),
+        ("hot_start_hold_adjustment", lambda v: int(round(float(v)))),
+        ("custom_hot_start_hold_s", float),
+        ("custom_hot_start_percent", float),
+        ("crater_panel_current_ref_a", float),
+        ("crater_panel_voltage_ref_v", float),
+        ("crater_panel_time_ref_s", float),
+        ("software_crater_ratio_percent", float),
+        ("software_crater_voltage_v", float),
+        ("software_crater_hold_s", float),
+        ("wire_consumable_alpha_mm", float),
+    ):
+        value = cast("commanded", key, converter)
+        if value is not None:
+            settings[key] = value
+    synergic = cast_bool("commanded", "synergic")
+    if synergic is not None:
+        settings["synergic"] = synergic
+    for key in ("hot_start_enabled", "custom_hot_start_enabled",
+                "expect_native_crater", "software_crater_enabled"):
+        value = cast_bool("commanded", key)
+        if value is not None:
+            settings[key] = value
+    for old, new, converter in (
+        ("crater_enabled", "expect_native_crater", lambda raw: raw.strip().lower() in ("1", "true", "yes")),
+        ("crater_current_a", "crater_panel_current_ref_a", float),
+        ("crater_voltage_v", "crater_panel_voltage_ref_v", float),
+        ("crater_seconds", "crater_panel_time_ref_s", float),
+    ):
+        if new not in settings:
+            value = cast("commanded", old, converter)
+            if value is not None:
+                settings[new] = value
+
+    motion = {}
+
+    for key, converter in (
+        ("gui_velocity_percent", float),
+        ("gui_speed_mode", str),
+        ("gui_tcp_speed_mm_s", float),
+        ("weld_lead_in_mm", float),
+        ("weld_lead_out_mm", float),
+        ("weld_safe_approach_mm", float),
+        ("weld_approach_mode", str),
+        ("weld_pre_start_lead_mm", float),
+        ("weld_arc_off_delay_ms", float),
+        ("weld_tcp_speed_mm_s", float),
+        ("weld_fixed_tilt_x_deg", float),
+        ("weld_fixed_tilt_y_deg", float),
+        ("weld_fixed_tilt_z_deg", float),
+        ("weld_weave_pattern", str),
+        ("capping_width_mm", float),
+        ("capping_pitch_mm", float),
+        ("capping_left_dwell_s", float),
+        ("capping_right_dwell_s", float),
+        ("weld_weave_amplitude_mm", float),
+        ("weld_weave_pitch_mm", float),
+        ("weld_weave_left_dwell_s", float),
+        ("weld_weave_right_dwell_s", float),
+        ("weld_weave_cycles", lambda value: int(float(value))),
+        ("weld_weave_samples_per_cycle", lambda value: int(float(value))),
+        ("weld_weave_axis", str),
+    ):
+        value = cast("execution_conditions", key, converter)
+        if value is not None:
+            motion[key] = value
+
+    weave_enabled = cast_bool(
+        "execution_conditions", "weld_weave_enabled"
+    )
+    if weave_enabled is not None:
+        motion["weld_weave_enabled"] = weave_enabled
+
+    return {"settings": settings, "motion": motion}
+
+
+def read_teaching_and_touch_snapshot(path):
+    """Parse the ``[teaching_snapshot_yaml]``/``[touch_snapshot_yaml]``
+    sections a weld feedback log embeds (see ``format_weld_feedback_log``).
+
+    Returns ``(teaching_raw, touch_raw)`` -- plain dicts as they appear in
+    the log, not yet validated against ``ARM_JOINT_NAMES`` etc. Older logs
+    written before this feature existed have neither section, so both come
+    back empty rather than raising.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return {}, {}
+    section = None
+    blocks = {"teaching_snapshot_yaml": [], "touch_snapshot_yaml": []}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+            continue
+        if section in blocks:
+            blocks[section].append(line)
+
+    def load_block(name):
+        text = "\n".join(blocks[name]).strip()
+        if not text:
+            return {}
+        try:
+            loaded = yaml.load(text, Loader=yaml.CSafeLoader)
+        except yaml.YAMLError:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    return load_block("teaching_snapshot_yaml"), load_block("touch_snapshot_yaml")
+
+
+def read_weld_pass_reference(path):
+    """Read one pass's WAIT/START/GOAL WAIT/GOAL set from a completed log."""
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"Pass reference log is missing: {path}")
+    raw = path.read_bytes()
+    if not any(line == "result=completed" for line in
+               raw.decode("utf-8").splitlines()[:8]):
+        raise ValueError(f"Pass reference must be a completed weld: {path.name}")
+    teaching, _touches = read_teaching_and_touch_snapshot(path)
+    poses = {}
+    joint_states = {}
+    for endpoint, name in (
+        ("start_wait", "weld_start_wait"),
+        ("start", "weld_start"),
+        ("goal_wait", "weld_goal_wait"),
+        ("goal", "weld_end"),
+    ):
+        entry = teaching.get(name)
+        if not isinstance(entry, dict) or entry.get("planning_group") != "right_manipulator":
+            raise ValueError(f"{path.name} has no right-arm {name} reference")
+        pose = _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
+        if not pose_is_valid(pose):
+            raise ValueError(f"{path.name} has an invalid {name} TCP pose")
+        poses[endpoint] = pose
+        joint_state = entry.get("joint_state")
+        if isinstance(joint_state, dict):
+            names = tuple(joint_state.get("names", ()))
+            positions = tuple(float(value) for value in
+                              joint_state.get("positions_rad", ()))
+            if (
+                len(names) == 6
+                and len(positions) == 6
+                and all(math.isfinite(value) for value in positions)
+            ):
+                joint_states[endpoint] = (names, positions)
+    if math.dist(_pose_position_tuple(poses["start"]),
+                 _pose_position_tuple(poses["goal"])) < 0.001:
+        raise ValueError(f"{path.name} seam is shorter than 1 mm")
+    additional_pose_entries = {}
+    for name in ("robot_start", "weld_wait", "weld_finish"):
+        entry = teaching.get(name)
+        if (
+            isinstance(entry, dict)
+            and entry.get("planning_group") == "right_manipulator"
+        ):
+            try:
+                _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
+            except (TypeError, ValueError):
+                continue
+            additional_pose_entries[name] = copy.deepcopy(entry)
+    return {
+        "path": str(path.resolve()),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "reference_kind": "completed_weld_log",
+        **poses,
+        "joint_states": joint_states,
+        "additional_pose_entries": additional_pose_entries,
+    }

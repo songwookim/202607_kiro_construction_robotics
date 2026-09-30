@@ -15,24 +15,30 @@ from tkinter import filedialog, messagebox, ttk
 import rclpy
 import yaml
 from geometry_msgs.msg import Pose
-from moveit_msgs.msg import (
-    Constraints,
-    OrientationConstraint,
-    PositionConstraint,
-)
 from rclpy.executors import MultiThreadedExecutor
-from shape_msgs.msg import SolidPrimitive
 from tf2_ros import TransformException
 
 from construct_robot.core.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
-    circular_weaving_from_path,
+    WELD_WEAVE_SAMPLES_PER_CYCLE,
+    _quaternion_rotate_vector,
     linear_pose_waypoints,
+    midpoint_pose,
+    named_tcp_linear_waypoints,
     pose_is_valid,
+    pose_with_local_rpy_offset,
+    pose_with_rpy_offset,
+    position_only_goal_constraints,
+    quaternion_angular_distance,
+    tcp_pose_goal_constraints,
+    tcp_position_is_valid,
     trajectory_duration_seconds,
     tip_link_for_group,
-    sine_weaving_with_dwell,
+    transform_xyz,
+    validated_seam_speed_factor,
     weave_cycles_for_pitch,
+    weave_path_speed_m_s,
+    weld_weave_geometry,
 )
 from construct_robot.io.hicomm_welder import (
     BIT_ARC,
@@ -54,14 +60,17 @@ from construct_robot.core.sequence_model import (
     SequenceModel,
     WELD_SCENARIO_STAGE_ORDER,
     next_sequential_slot,
+    taught_wait_approach_steps,
+    update_weld_scenario_motion_values,
     validate_managed_weld_sequence,
 )
 from construct_robot.core.work_cycle import assemble_work_cycle, load_work_cycle
 from construct_robot.core.seam_geometry import (
+    CORNER_TOUCH_NAMES,
     CorrectedSeamGeometry,
+    _axis_unit_vector,
     _pose_position_tuple,
     _unit_vector,
-    _vector_cross,
     _vector_dot,
     compute_corrected_seam_endpoints,
     compute_corrected_seam_geometry,
@@ -72,7 +81,26 @@ from construct_robot.core.seam_geometry import (
     compute_surface_plane,
     project_point_to_line,
     seam_lead_poses,
-    seam_direction,
+    aligned_wait_pose,
+    apply_sensed_seam_orientation,
+    corner_endpoint_from_two_touches,
+    corner_seam_from_touches,
+    corrected_corner_seam_from_four_touches,
+    fixed_tilt_wait_reference_poses,
+    generalized_corner_endpoint_from_two_touches,
+    intersect_three_planes,
+    seam_xy_normal,
+    seam_yaw,
+    translated_wait_pose,
+    two_touch_corner_seam,
+    wide_sensing_path_poses,
+    yaw_corrected_seam_poses,
+)
+from construct_robot.core.keyboard_jog import (
+    KEYBOARD_JOG_SELECTIONS,
+    keyboard_jog_velocity,
+    keyboard_velocity_vector,
+    next_keyboard_speed,
 )
 from construct_robot.core.multipass import (
     MultiPassState,
@@ -83,21 +111,38 @@ from construct_robot.core.multipass import (
 from construct_robot.io.weld_logging import (
     calculate_weld_production_metrics,
     format_weld_feedback_log,
+    read_last_execution_settings,
+    read_teaching_and_touch_snapshot,
+    read_weld_pass_reference,
     save_weld_feedback_log,
     weld_weave_settings_text,
 )
-from construct_robot.core.task_teaching_model import TEACHING_POSES, TeachingState
+from construct_robot.core.task_teaching_model import (
+    JOINT_RECALL_TEACHING_POSES,
+    SEAM_REFERENCE_TEACHING_POSES,
+    TCP_POSE_TEACHING_POSES,
+    TEACHING_POSES,
+    TOUCH_GUARDED_TEACHING_POSES,
+    TeachingState,
+)
 from construct_robot.io.teaching_yaml import (
-    ARM_JOINT_NAMES, _finite_float, _pose_from_yaml_dict,
+    ARM_JOINT_NAMES, _pose_from_yaml_dict,
     load_initial_state_yaml,
+    load_seam_teaching_reference_yaml,
+    parse_teaching_snapshot_entry,
+    read_pass_teaching_reference,
+    save_initial_state_yaml,
+    save_seam_teaching_reference_yaml,
+    save_seam_touch_yaml,
 )
 from construct_robot.core.weld_config import (
     DEFAULT_DIGITAL_WELD_SETTINGS, DIGITAL_WELD_COMMANDS,
     DIGITAL_WELD_RECIPE_KEYS, digital_weld_recipe,
     validate_digital_weld_settings, weld_current_profile,
 )
-# WeldGuiNode and the constants/helpers it uses now live in the node module;
-# they are re-exported here so existing ``weld_action_gui.<name>`` imports keep working.
+# Helpers formerly defined in this module now live in core/, io/ and nodes/.
+# Unused-looking imports above and below are deliberate re-exports so existing
+# ``weld_action_gui.<name>`` imports keep working.
 from construct_robot.nodes.weld_runtime_node import (
     CONTROLLED_JOINT_NAMES,
     CONTROLLER_NAMES,
@@ -105,7 +150,6 @@ from construct_robot.nodes.weld_runtime_node import (
     FASTECH_TOUCH_OUTPUT_PORT,
     HEAD_JOINT_NAME_ORDER,
     HEAD_JOINT_NAMES,
-    KEYBOARD_JOG_SELECTIONS,
     KEYBOARD_TF_LOOKUP_TIMEOUT_S,
     KEYBOARD_VELOCITY_CONTROLLER_NAMES,
     KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S,
@@ -113,18 +157,7 @@ from construct_robot.nodes.weld_runtime_node import (
     KEYBOARD_ZERO_BURST_COUNT,
     LEGACY_RAINBOW_TOUCH_INPUT_PORT,
     LEGACY_RAINBOW_TOUCH_OUTPUT_PORT,
-    TCP_POSE_TEACHING_POSES,
-    TOUCH_GUARDED_TEACHING_POSES,
     WeldGuiNode,
-    _quaternion_rotate_vector,
-    keyboard_jog_velocity,
-    keyboard_velocity_vector,
-    midpoint_pose,
-    named_tcp_linear_waypoints,
-    pose_with_rpy_offset,
-    quaternion_angular_distance,
-    transform_xyz,
-    wide_sensing_path_poses,
 )
 
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
@@ -150,1216 +183,8 @@ KEYBOARD_TEACHING_POSE_SHORTCUTS = {
     "m": "robot_start",
 }
 
-CORNER_TOUCH_NAMES = (
-    "start_floor",
-    "start_wall",
-    "goal_floor",
-    "goal_wall",
-)
-
 WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed World-XYZ tilt"
 LEGACY_WAIT_FIXED_TILT_ORIENTATION_MODE = "Wait poses + fixed Tool-XYZ tilt"
-
-JOINT_RECALL_TEACHING_POSES = frozenset(TEACHING_POSES) - TCP_POSE_TEACHING_POSES
-SEAM_REFERENCE_TEACHING_POSES = frozenset((
-    "weld_start_wait", "weld_start", "weld_goal_wait", "weld_end", "weld_finish",
-))
-
-def corner_seam_from_touches(touches, count):
-    """Build a seam between two floor/wall touch-pair midpoints."""
-    missing = [name for name in CORNER_TOUCH_NAMES if touches.get(name) is None]
-    if missing:
-        raise ValueError("missing corner touches: " + ", ".join(missing))
-    start = midpoint_pose(touches["start_floor"], touches["start_wall"])
-    end = midpoint_pose(touches["goal_floor"], touches["goal_wall"])
-    return linear_pose_waypoints(start, end, count)
-
-
-def corrected_corner_seam_from_four_touches(
-    touches,
-    seam_axis,
-    count,
-    wall_offset=0.0,
-    floor_offset=0.0,
-):
-    """Project START/GOAL wall-floor touch pairs onto the corner seam."""
-    missing = [name for name in CORNER_TOUCH_NAMES if touches.get(name) is None]
-    if missing:
-        raise ValueError("missing corner touches: " + ", ".join(missing))
-    if seam_axis.lower() != "x":
-        raise ValueError("Y/Z touch seam calculation requires World X axis")
-    endpoints = []
-    for endpoint in ("start", "goal"):
-        floor = touches[f"{endpoint}_floor"]
-        wall = touches[f"{endpoint}_wall"]
-        pose = midpoint_pose(floor, wall)
-        # Y/Z probing reconstructs the corner using only these components:
-        # X = common probe cross-section (1:1 mean), Y = wall, Z = floor.
-        pose.position.x = (wall.position.x + floor.position.x) * 0.5
-        pose.position.y = wall.position.y + wall_offset
-        pose.position.z = floor.position.z + floor_offset
-        endpoints.append(pose)
-    return linear_pose_waypoints(endpoints[0], endpoints[1], count)
-
-
-def corner_endpoint_from_two_touches(
-    wall_touch,
-    floor_touch,
-    orientation_pose,
-    seam_axis,
-    wall_offset=0.0,
-    floor_offset=0.0,
-):
-    """Reconstruct one seam XYZ from World-axis wall/floor probes.
-
-    Both probes start from the same cross-section and move only along the
-    configured World wall axis or World Z.  Their nominal seam-axis coordinate
-    is therefore the mean of the two measured TCP coordinates.  The taught
-    pose supplies orientation only; none of its XYZ values enter the result.
-    """
-    for name, pose in (
-        ("wall touch", wall_touch),
-        ("floor touch", floor_touch),
-        ("orientation pose", orientation_pose),
-    ):
-        if not pose_is_valid(pose):
-            raise ValueError(f"{name} pose is invalid")
-    if seam_axis.lower() != "x":
-        raise ValueError("Y/Z touch seam calculation requires World X axis")
-    result = copy.deepcopy(orientation_pose)
-    result.position.x = (
-        wall_touch.position.x + floor_touch.position.x
-    ) * 0.5
-    result.position.y = wall_touch.position.y + wall_offset
-
-    # The wall touch measures the lateral wall coordinate; the floor touch
-    # measures the floor height.  Orientation is intentionally untouched.
-    result.position.z = floor_touch.position.z + floor_offset
-    return result
-
-
-def aligned_wait_pose(wait_pose, seam_point, seam_axis):
-    """Align a wait pose to the seam cross-section while retaining stand-off."""
-    if not pose_is_valid(wait_pose) or not pose_is_valid(seam_point):
-        raise ValueError("wait pose and seam point must be valid")
-    result = copy.deepcopy(wait_pose)
-    axis = seam_axis.lower()
-    if axis == "x":
-        result.position.y = seam_point.position.y
-    elif axis == "y":
-        result.position.x = seam_point.position.x
-    else:
-        raise ValueError("0°/90° seam axis must be World X or Y")
-    result.position.z = seam_point.position.z
-    return result
-
-
-def translated_wait_pose(wait_pose, taught_seam_pose, corrected_seam_pose):
-    """Move a taught wait TCP with its corrected seam endpoint.
-
-    The taught wait-to-seam offset is the intentional approach clearance.  A
-    wall/floor touch midpoint is a measurement artifact, not a safe wait pose,
-    so never replace that clearance with the midpoint coordinates.
-    """
-    for name, pose in (
-        ("wait pose", wait_pose),
-        ("taught seam pose", taught_seam_pose),
-        ("corrected seam pose", corrected_seam_pose),
-    ):
-        if not pose_is_valid(pose):
-            raise ValueError(f"{name} is invalid")
-    result = copy.deepcopy(wait_pose)
-    result.position.x += (
-        corrected_seam_pose.position.x - taught_seam_pose.position.x
-    )
-    result.position.y += (
-        corrected_seam_pose.position.y - taught_seam_pose.position.y
-    )
-    result.position.z += (
-        corrected_seam_pose.position.z - taught_seam_pose.position.z
-    )
-    return result
-
-
-def tcp_position_is_valid(target_pose):
-    return target_pose is not None and all(
-        math.isfinite(float(getattr(target_pose.position, axis)))
-        for axis in ("x", "y", "z")
-    )
-
-
-def position_only_goal_constraints(planning_group, target_pose, tolerance=0.001):
-    """Build a World-frame TCP position goal without orientation constraints."""
-    if not tcp_position_is_valid(target_pose):
-        raise ValueError("position-only target XYZ is invalid")
-    if tolerance <= 0.0:
-        raise ValueError("position-only tolerance must be positive")
-    primitive = SolidPrimitive()
-    primitive.type = SolidPrimitive.SPHERE
-    primitive.dimensions = [float(tolerance)]
-    center = Pose()
-    center.position = copy.deepcopy(target_pose.position)
-    center.orientation.w = 1.0
-    position = PositionConstraint()
-    position.header.frame_id = "World"
-    position.link_name = tip_link_for_group(planning_group)
-    position.constraint_region.primitives = [primitive]
-    position.constraint_region.primitive_poses = [center]
-    position.weight = 1.0
-    constraints = Constraints()
-    constraints.position_constraints.append(position)
-    return constraints
-
-
-def tcp_pose_goal_constraints(
-    planning_group,
-    target_pose,
-    position_tolerance=0.001,
-    orientation_tolerance=0.01,
-):
-    """Use corrected XYZ together with the orientation captured for this pose."""
-    if not pose_is_valid(target_pose):
-        raise ValueError("complete TCP target pose is invalid")
-    constraints = position_only_goal_constraints(
-        planning_group, target_pose, position_tolerance
-    )
-    orientation = OrientationConstraint()
-    orientation.header.frame_id = "World"
-    orientation.link_name = tip_link_for_group(planning_group)
-    orientation.orientation = copy.deepcopy(target_pose.orientation)
-    orientation.absolute_x_axis_tolerance = float(orientation_tolerance)
-    orientation.absolute_y_axis_tolerance = float(orientation_tolerance)
-    orientation.absolute_z_axis_tolerance = float(orientation_tolerance)
-    orientation.weight = 1.0
-    constraints.orientation_constraints.append(orientation)
-    return constraints
-
-
-def two_touch_corner_seam(
-    wall_touch,
-    floor_touch,
-    taught_start,
-    taught_end,
-    seam_axis,
-    count,
-    wall_offset=0.0,
-    floor_offset=0.0,
-):
-    """Build an orthogonal seam from wall/floor touches and taught endpoints."""
-    for name, pose in (
-        ("wall touch", wall_touch),
-        ("floor touch", floor_touch),
-        ("taught start", taught_start),
-        ("taught end", taught_end),
-    ):
-        if not pose_is_valid(pose):
-            raise ValueError(f"{name} pose is invalid")
-    axis = seam_axis.lower()
-    if axis not in ("x", "y"):
-        raise ValueError("0°/90° seam axis must be World X or Y")
-    start = copy.deepcopy(taught_start)
-    end = copy.deepcopy(taught_end)
-    if axis == "x":
-        start.position.y = wall_touch.position.y + wall_offset
-        end.position.y = start.position.y
-    else:
-        start.position.x = wall_touch.position.x + wall_offset
-        end.position.x = start.position.x
-    start.position.z = floor_touch.position.z + floor_offset
-    end.position.z = start.position.z
-    return linear_pose_waypoints(start, end, count)
-
-
-def _axis_unit_vector(axis):
-    axis = str(axis).strip().lower().replace("world ", "")
-    vectors = {
-        "x": (1.0, 0.0, 0.0),
-        "y": (0.0, 1.0, 0.0),
-        "z": (0.0, 0.0, 1.0),
-    }
-    if axis not in vectors:
-        raise ValueError(f"unsupported World probe axis: {axis}")
-    return vectors[axis]
-
-
-def next_keyboard_speed(current, choices):
-    """Return the next discrete teaching speed, wrapping to the first."""
-    values = tuple(float(value) for value in choices)
-    if not values:
-        raise ValueError("keyboard speed choices must not be empty")
-    try:
-        index = next(
-            i for i, value in enumerate(values)
-            if math.isclose(float(current), value, abs_tol=1e-9)
-        )
-    except (StopIteration, TypeError, ValueError):
-        return values[0]
-    return values[(index + 1) % len(values)]
-
-
-WELD_WEAVE_SAMPLES_PER_CYCLE = 12
-
-
-def weld_weave_geometry(
-    seam_start, seam_goal, pattern, amplitude_mm, pitch_mm, axis,
-    left_dwell_s=0.0, right_dwell_s=0.0, transverse_vector=None,
-):
-    """Derive whole cycles from pitch and build one consistent weld weave."""
-    seam_length = math.sqrt(sum(
-        (getattr(seam_goal.position, component)
-         - getattr(seam_start.position, component)) ** 2
-        for component in ("x", "y", "z")
-    ))
-    cycles = weave_cycles_for_pitch(seam_length, float(pitch_mm))
-    amplitude = float(amplitude_mm) * 0.001
-    if not math.isfinite(amplitude) or not 0.0001 <= amplitude <= 0.05:
-        raise ValueError("Weave one-side amplitude must be in 0.1..50 mm")
-    if pattern in ("sine", "crescent"):
-        points, holds = sine_weaving_with_dwell(
-            (seam_start, seam_goal), amplitude, cycles,
-            float(left_dwell_s), float(right_dwell_s), axis,
-            transverse_vector, pattern,
-        )
-    elif pattern == "circle":
-        if float(left_dwell_s) != 0.0 or float(right_dwell_s) != 0.0:
-            raise ValueError("Circle weave has no left/right peaks; set dwell to 0 or use sine")
-        points = circular_weaving_from_path(
-            (seam_start, seam_goal), amplitude, cycles,
-            WELD_WEAVE_SAMPLES_PER_CYCLE, axis, transverse_vector,
-        )
-        holds = [0.0] * len(points)
-    else:
-        raise ValueError("Weld weave pattern must be sine, crescent or circle")
-    return points, holds, cycles, seam_length * 1000.0 / cycles
-
-
-def weave_path_speed_m_s(seam_length_m, path_length_m, travel_mm_s, holds):
-    """Nominal TCP speed for requested average seam advance, including dwell."""
-    target_s = seam_length_m / (travel_mm_s * 0.001)
-    moving_s = target_s - sum(holds)
-    if moving_s <= 0.0:
-        raise ValueError(
-            "Weave dwell exceeds travel-time target; lower dwell or seam speed"
-        )
-    if path_length_m <= 0.0 or seam_length_m <= 0.0:
-        raise ValueError("Weave path has no usable travel distance")
-    return path_length_m / moving_s
-
-
-def validated_seam_speed_factor(value):
-    """Accept harmless round-off above one, but reject invalid geometry."""
-    factor = float(value)
-    if not math.isfinite(factor) or factor <= 0.0 or factor > 1.0 + 1e-9:
-        raise ValueError("invalid path/seam speed factor")
-    return min(factor, 1.0)
-
-
-def update_weld_scenario_motion_values(
-    steps, motion_index, *, tcp_speed_mm_s, lead_in_mm, lead_out_mm
-):
-    """Return scenario steps with one weld-motion edit applied consistently.
-
-    A generated weld is represented by linked motion, ARC OFF, and lead-in
-    approach steps.  Editing only the visible motion row used to leave the
-    hidden ARC OFF speed at the Build-time value, and ``weld_tcp_speed_mm_s``
-    then overwrote the user's edit at execution.  Keep every linked step and
-    the physical lead endpoints in one immutable update instead.
-    """
-    candidate = copy.deepcopy(steps)
-    if not 0 <= int(motion_index) < len(candidate):
-        raise ValueError("Weld motion index is out of range")
-    motion = candidate[int(motion_index)]
-    if (
-        motion.get("type") != "motion"
-        or motion.get("weld_scenario_stage") != "weld_motion"
-    ):
-        raise ValueError("Selected step is not a generated weld motion")
-    values = (float(tcp_speed_mm_s), float(lead_in_mm), float(lead_out_mm))
-    if not all(math.isfinite(value) for value in values):
-        raise ValueError("Weld motion values must be finite")
-    tcp_speed_mm_s, lead_in_mm, lead_out_mm = values
-    if not 0.1 <= tcp_speed_mm_s <= 100.0:
-        raise ValueError("Weld TCP speed must be in 0.1..100 mm/s")
-    if not 0.0 <= lead_in_mm <= 100.0:
-        raise ValueError("Weld lead-in must be in 0..100 mm")
-    if not 0.0 <= lead_out_mm <= 100.0:
-        raise ValueError("Weld lead-out must be in 0..100 mm")
-    seam_start = motion.get("usable_seam_start")
-    seam_goal = motion.get("usable_seam_goal")
-    if not pose_is_valid(seam_start) or not pose_is_valid(seam_goal):
-        raise ValueError("Generated weld motion has invalid seam geometry")
-
-    lead_start, lead_end = seam_lead_poses(
-        seam_start,
-        seam_goal,
-        lead_in_mm * 0.001,
-        lead_out_mm * 0.001,
-    )
-    if motion.get("weld_weave_enabled", False):
-        core_points, holds, cycles, actual_pitch = weld_weave_geometry(
-            seam_start, seam_goal,
-            motion.get("weld_weave_pattern", "sine"),
-            motion.get("weld_weave_amplitude_mm", 3.0),
-            motion.get("weld_weave_pitch_mm", 5.0),
-            motion.get("weld_weave_axis", "tool_y"),
-            motion.get("weld_weave_left_dwell_s", 0.0),
-            motion.get("weld_weave_right_dwell_s", 0.0),
-            motion.get("weld_weave_transverse_vector"),
-        )
-        motion["usable_weld_points"] = copy.deepcopy(core_points)
-        motion["weld_weave_cycles"] = cycles
-        motion["weld_weave_actual_pitch_mm"] = actual_pitch
-        updated_points = []
-        if lead_in_mm > 1e-6:
-            updated_points.append(copy.deepcopy(lead_start))
-        updated_points.extend(copy.deepcopy(core_points))
-        if lead_out_mm > 1e-6:
-            updated_points.append(copy.deepcopy(lead_end))
-        motion["points"] = tuple(updated_points)
-        if any(holds):
-            motion["waypoint_hold_s"] = (
-                ([0.0] if lead_in_mm > 1e-6 else []) + holds
-                + ([0.0] if lead_out_mm > 1e-6 else [])
-            )
-            motion["linear_motion_profile"] = False
-        else:
-            motion.pop("waypoint_hold_s", None)
-            motion["linear_motion_profile"] = True
-    else:
-        motion["points"] = (
-            copy.deepcopy(lead_start if lead_in_mm > 1e-6 else seam_start),
-            copy.deepcopy(lead_end if lead_out_mm > 1e-6 else seam_goal),
-        )
-        motion["path_to_seam_speed_factor"] = 1.0
-    motion["lead_start"] = copy.deepcopy(lead_start)
-    motion["lead_end"] = copy.deepcopy(lead_end)
-    motion["lead_in_mm"] = lead_in_mm
-    motion["lead_out_mm"] = lead_out_mm
-    motion["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
-    if motion.get("weld_weave_enabled"):
-        seam_length = math.sqrt(sum((getattr(seam_goal.position, a)-getattr(seam_start.position, a))**2 for a in ("x", "y", "z")))
-        core = motion["usable_weld_points"]
-        path_length = sum(math.sqrt(sum((getattr(b.position, a)-getattr(c.position, a))**2 for a in ("x", "y", "z"))) for c, b in zip(core[:-1], core[1:]))
-        motion["path_to_seam_speed_factor"] = validated_seam_speed_factor(
-            seam_length / path_length
-        )
-        motion["tcp_speed_m_s"] = weave_path_speed_m_s(
-            seam_length, path_length, tcp_speed_mm_s,
-            motion.get("waypoint_hold_s", ()),
-        )
-    # Retain this metadata for readable logs, but keep it synchronized instead
-    # of treating it as an authoritative Build-time override.
-    motion["weld_tcp_speed_mm_s"] = tcp_speed_mm_s
-
-    scenario_id = motion.get("weld_scenario_id")
-    if not scenario_id:
-        raise ValueError("Generated weld motion has no scenario identifier")
-    linked_arc_off = False
-    linked_lead_approach = lead_in_mm <= 1e-6
-    for linked in candidate:
-        if (linked.get("weld_scenario_id") == scenario_id
-                and linked.get("taught_wait_direct", False)):
-            linked["points"] = (copy.deepcopy(motion["points"][0]),)
-            linked["lead_in_mm"] = lead_in_mm
-            linked_lead_approach = True
-        if (
-            linked.get("weld_scenario_id") == scenario_id
-            and linked.get("weld_scenario_stage") == "arc_off"
-        ):
-            linked["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
-            if motion.get("weld_weave_enabled"):
-                linked["tcp_speed_m_s"] = motion["tcp_speed_m_s"]
-            linked["path_to_seam_speed_factor"] = motion["path_to_seam_speed_factor"]
-            linked["lead_in_mm"] = lead_in_mm
-            linked["lead_out_mm"] = lead_out_mm
-            linked_arc_off = True
-        if (linked.get("weld_scenario_id") == scenario_id
-                and linked.get("weld_scenario_stage") == "software_crater"):
-            linked["endpoint"] = copy.deepcopy(motion["points"][-1])
-        if (
-            linked.get("role") == "lead_in"
-            and linked.get("related_weld_scenario_id") == scenario_id
-        ):
-            points = tuple(linked.get("points", ()))
-            if not points:
-                raise ValueError("Lead-in approach has no path points")
-            if linked.get("safe_retract_geometry", False):
-                e_a = _unit_vector(
-                    linked.get("safe_approach_direction", ()),
-                    "saved safe approach direction",
-                )
-                safe_distance_m = (
-                    float(linked.get("safe_approach_mm", 0.0)) * 0.001
-                )
-                if safe_distance_m <= 0.0:
-                    raise ValueError("Saved safe approach distance is invalid")
-                safe_over_lead = copy.deepcopy(lead_start)
-                for index, axis in enumerate(("x", "y", "z")):
-                    setattr(
-                        safe_over_lead.position,
-                        axis,
-                        getattr(lead_start.position, axis)
-                        + safe_distance_m * e_a[index],
-                    )
-                linked["points"] = (
-                    copy.deepcopy(points[0]),
-                    safe_over_lead,
-                    copy.deepcopy(lead_start),
-                )
-            else:
-                linked["points"] = points[:-1] + (copy.deepcopy(lead_start),)
-            linked["lead_start"] = copy.deepcopy(lead_start)
-            linked["lead_in_mm"] = lead_in_mm
-            linked["lead_out_mm"] = lead_out_mm
-            linked_lead_approach = True
-    if not linked_arc_off:
-        raise ValueError("Generated weld motion has no linked ARC OFF step")
-    if not linked_lead_approach:
-        raise ValueError(
-            "A positive lead-in needs its linked ARC-OFF lead-in approach; "
-            "rebuild this legacy scenario first"
-        )
-    return candidate
-
-
-def taught_wait_approach_steps(steps, start_wait, goal_wait):
-    """Use taught clearance positions and weld attitudes near the workpiece."""
-    steps = copy.deepcopy(steps)
-    motion = next(s for s in steps if s.get("weld_scenario_stage") == "weld_motion")
-    first, last = motion["points"][0], motion["points"][-1]
-    approach = next(s for s in steps if s.get("weld_scenario_stage") == "start_contact")
-    aligned_start = copy.deepcopy(start_wait)
-    aligned_start.orientation = copy.deepcopy(first.orientation)
-    aligned_goal = copy.deepcopy(goal_wait)
-    aligned_goal.orientation = copy.deepcopy(last.orientation)
-    steps = [s for s in steps if s.get("weld_scenario_stage") != "start_safe"
-             and s.get("role") != "lead_in"]
-    alignment = copy.deepcopy(approach)
-    alignment.update(points=(aligned_start,), path_kind="taught_wait_align_weld_attitude",
-                     weld_scenario_stage="start_safe", role="safe_approach",
-                     touch_guard=False, continue_after_touch=False)
-    approach.update(points=(copy.deepcopy(first),), path_kind="taught_wait_to_weld_start",
-                    taught_wait_direct=True, touch_guard=False,
-                    safe_approach=None, approach_lead=None)
-    steps.insert(steps.index(approach), alignment)
-    for step in steps:
-        step["weld_approach_mode"] = "taught_wait"
-        if step.get("weld_scenario_stage") in ("start_wait", "finish"):
-            step["use_joint_planning"] = True
-        if step.get("weld_scenario_stage") == "goal_wait":
-            step.update(type="motion", points=(aligned_goal,),
-                        path_kind="weld_end_to_taught_wait_fixed_attitude",
-                        interpolation_step=approach["interpolation_step"],
-                        collision_checking=True, touch_guard=False)
-    slot = int(steps[0]["parallel_slot"])
-    for index, step in enumerate(steps):
-        stage = step.get("weld_scenario_stage")
-        previous_stage = steps[index - 1].get("weld_scenario_stage") if index else None
-        shared_weld_slot = (
-            (stage == "weld_motion" and previous_stage == "arc_on")
-            or (stage == "arc_off" and previous_stage == "weld_motion"
-                and step.get("trigger_before_goal", False))
-        )
-        if index and not shared_weld_slot:
-            slot += 1
-        step["parallel_slot"] = slot
-    return steps
-
-
-def seam_xy_normal(start, goal):
-    """Return the +90° World-XY normal of the taught START→GOAL seam."""
-    tx, ty, _tz = seam_direction(start, goal, xy_only=True)
-    return (-ty, tx, 0.0)
-
-
-def intersect_three_planes(normal_a, value_a, normal_b, value_b, normal_c, value_c):
-    """Return the unique point satisfying n·p=d for three independent planes."""
-    normal_a = _unit_vector(normal_a, "plane A normal")
-    normal_b = _unit_vector(normal_b, "plane B normal")
-    normal_c = _unit_vector(normal_c, "plane C normal")
-    b_cross_c = _vector_cross(normal_b, normal_c)
-    denominator = _vector_dot(normal_a, b_cross_c)
-    if abs(denominator) < 1e-6:
-        raise ValueError(
-            "probe directions and seam cross-section are not independent; "
-            "choose probe directions that measure two different surfaces"
-        )
-    c_cross_a = _vector_cross(normal_c, normal_a)
-    a_cross_b = _vector_cross(normal_a, normal_b)
-    numerator = tuple(
-        float(value_a) * b_cross_c[index]
-        + float(value_b) * c_cross_a[index]
-        + float(value_c) * a_cross_b[index]
-        for index in range(3)
-    )
-    return tuple(value / denominator for value in numerator)
-
-
-def generalized_corner_endpoint_from_two_touches(
-    wall_touch,
-    floor_touch,
-    orientation_pose,
-    taught_start,
-    taught_goal,
-    wall_normal,
-    floor_normal,
-    wall_offset=0.0,
-    floor_offset=0.0,
-):
-    """Reconstruct a seam endpoint from two touched planes and a seam cross-section.
-
-    The two contact TCP positions define one point on each sensed plane.  The
-    configured probe directions are used as those plane normals.  The third
-    plane is perpendicular to the taught seam direction; its location is the
-    mean longitudinal coordinate of the two contacts.  This is the vector form
-    of the old World-X/Y/Z rule (mean X, wall Y, floor Z).
-    """
-    for name, pose in (
-        ("wall touch", wall_touch),
-        ("floor touch", floor_touch),
-        ("orientation pose", orientation_pose),
-        ("taught start", taught_start),
-        ("taught goal", taught_goal),
-    ):
-        if not pose_is_valid(pose):
-            raise ValueError(f"{name} pose is invalid")
-
-    wall_normal = _unit_vector(wall_normal, "wall probe direction")
-    floor_normal = _unit_vector(floor_normal, "floor probe direction")
-    tangent = seam_direction(taught_start, taught_goal)
-    wall_position = _pose_position_tuple(wall_touch)
-    floor_position = _pose_position_tuple(floor_touch)
-
-    wall_plane = _vector_dot(wall_normal, wall_position) + float(wall_offset)
-    floor_plane = _vector_dot(floor_normal, floor_position) + float(floor_offset)
-    cross_section = 0.5 * (
-        _vector_dot(tangent, wall_position)
-        + _vector_dot(tangent, floor_position)
-    )
-    x, y, z = intersect_three_planes(
-        wall_normal, wall_plane,
-        floor_normal, floor_plane,
-        tangent, cross_section,
-    )
-    result = copy.deepcopy(orientation_pose)
-    result.position.x = x
-    result.position.y = y
-    result.position.z = z
-    return result
-
-
-def apply_sensed_seam_orientation(
-    taught_start,
-    taught_goal,
-    sensed_start,
-    sensed_goal,
-    mode,
-):
-    """Combine sensed XYZ with the orientation policy selected for welding."""
-    normalized = str(mode).strip().lower()
-    if normalized.startswith("wait"):
-        # WAIT XYZ is a probe standby location, not a taught seam endpoint.
-        # Its START→GOAL heading must not rotate the fixed welding attitudes.
-        start = copy.deepcopy(taught_start)
-        goal = copy.deepcopy(taught_goal)
-        start.position = copy.deepcopy(sensed_start.position)
-        goal.position = copy.deepcopy(sensed_goal.position)
-        return start, goal, 0.0, "WAIT + fixed World-XYZ tilt; yaw not applied"
-    if normalized.startswith("yaw") or normalized.startswith("follow"):
-        start, goal, delta_yaw = yaw_corrected_seam_poses(
-            taught_start, taught_goal, sensed_start, sensed_goal
-        )
-        return start, goal, delta_yaw, "yaw-corrected"
-    if normalized.startswith("keep"):
-        start = copy.deepcopy(taught_start)
-        goal = copy.deepcopy(taught_goal)
-        start.position = copy.deepcopy(sensed_start.position)
-        goal.position = copy.deepcopy(sensed_goal.position)
-        return start, goal, 0.0, "teaching orientation kept"
-    raise ValueError(f"unknown seam orientation mode: {mode}")
-
-
-def seam_yaw(start, goal):
-    """Return World-Z seam yaw from two TCP positions."""
-    dx = goal.position.x - start.position.x
-    dy = goal.position.y - start.position.y
-    if math.hypot(dx, dy) < 1e-9:
-        raise ValueError("seam START/GOAL have no usable XY direction")
-    return math.atan2(dy, dx)
-
-
-def yaw_corrected_seam_poses(
-    taught_start,
-    taught_goal,
-    sensed_start,
-    sensed_goal,
-):
-    """Apply sensed-vs-taught seam yaw to taught orientations and sensed XYZ."""
-    for name, pose in (
-        ("taught start", taught_start),
-        ("taught goal", taught_goal),
-        ("sensed start", sensed_start),
-        ("sensed goal", sensed_goal),
-    ):
-        if not pose_is_valid(pose):
-            raise ValueError(f"{name} pose is invalid")
-    taught_yaw = seam_yaw(taught_start, taught_goal)
-    sensed_yaw = seam_yaw(sensed_start, sensed_goal)
-    delta_yaw = math.atan2(
-        math.sin(sensed_yaw - taught_yaw),
-        math.cos(sensed_yaw - taught_yaw),
-    )
-    corrected_start = pose_with_rpy_offset(
-        taught_start, 0.0, 0.0, delta_yaw, reference="world"
-    )
-    corrected_goal = pose_with_rpy_offset(
-        taught_goal, 0.0, 0.0, delta_yaw, reference="world"
-    )
-    corrected_start.position = copy.deepcopy(sensed_start.position)
-    corrected_goal.position = copy.deepcopy(sensed_goal.position)
-    return corrected_start, corrected_goal, delta_yaw
-
-
-def pose_with_local_rpy_offset(pose, roll, pitch, yaw):
-    """Backward-compatible helper for a tool-frame RPY adjustment."""
-    return pose_with_rpy_offset(pose, roll, pitch, yaw, "tool")
-
-
-def fixed_tilt_wait_reference_poses(
-    start_wait,
-    goal_wait,
-    tilt_y_deg,
-    tilt_x_deg=0.0,
-    tilt_z_deg=0.0,
-):
-    """Create consistent seam attitudes from START/GOAL WAIT teaching.
-
-    The WAIT poses supply the two base orientations. Exactly the same fixed
-    World XYZ RPY rotation is then applied at both ends. Their XYZ values are
-    kept so the WAIT-to-WAIT vector can also serve as the nominal seam
-    direction when no separate weld START/GOAL teaching exists.
-    """
-    if not pose_is_valid(start_wait) or not pose_is_valid(goal_wait):
-        raise ValueError("START/GOAL WAIT poses must be valid")
-    tilt_x_deg = float(tilt_x_deg)
-    tilt_y_deg = float(tilt_y_deg)
-    tilt_z_deg = float(tilt_z_deg)
-    tilts = (tilt_x_deg, tilt_y_deg, tilt_z_deg)
-    if not all(
-        math.isfinite(value) and -180.0 <= value <= 180.0
-        for value in tilts
-    ):
-        raise ValueError("fixed World XYZ angles must each be in -180..180 degrees")
-    rpy = tuple(math.radians(value) for value in tilts)
-    return (
-        pose_with_rpy_offset(start_wait, *rpy, reference="world"),
-        pose_with_rpy_offset(goal_wait, *rpy, reference="world"),
-    )
-
-
-def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp, provenance=None):
-    """Atomically save a captured joint state and its TCP pose as YAML."""
-    path = Path(path)
-    document = {
-        "format_version": 1,
-        "planning_group": planning_group,
-        "joint_state": {
-            "names": list(joint_names),
-            "positions_rad": [float(value) for value in positions],
-        },
-        "tcp_pose_world": {
-            "position_m": {
-                "x": float(tcp.position.x),
-                "y": float(tcp.position.y),
-                "z": float(tcp.position.z),
-            },
-            "orientation_xyzw": {
-                "x": float(tcp.orientation.x),
-                "y": float(tcp.orientation.y),
-                "z": float(tcp.orientation.z),
-                "w": float(tcp.orientation.w),
-            },
-        },
-    }
-    if provenance:
-        document["capture_provenance"] = copy.deepcopy(provenance)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary_path = Path(stream.name)
-            yaml.safe_dump(document, stream, sort_keys=False)
-        temporary_path.replace(path)
-        # Do not report a successful teaching update unless the final target
-        # file can be read back and contains exactly what was requested.
-        with path.open("r", encoding="utf-8") as stream:
-            persisted = yaml.load(stream, Loader=yaml.CSafeLoader)
-        if persisted != document:
-            raise OSError(f"YAML read-back verification failed: {path}")
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-
-
-def read_last_execution_settings(path):
-    """Recover GUI-parameter defaults from a previously saved weld feedback
-    log's ``[commanded]``/``[execution_conditions]`` sections.
-
-    Lets a new GUI session start from exactly what last actually ran (recipe
-    I/V/material and motion speed/lead/ARC timing) instead of hard-coded
-    fallbacks. Returns ``{}`` (or a partial dict) if the log is missing or a
-    field was never recorded -- callers must fall back to their own default
-    for anything absent.
-    """
-    path = Path(path)
-    if not path.is_file():
-        return {}
-    sections = {}
-    section = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            section = stripped[1:-1]
-            sections[section] = {}
-            continue
-        if section is None or "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        sections[section][key] = value
-
-    def cast(section_name, key, converter):
-        raw = sections.get(section_name, {}).get(key)
-        if raw is None:
-            return None
-        try:
-            return converter(raw)
-        except (TypeError, ValueError):
-            return None
-
-    def cast_bool(section_name, key):
-        raw = sections.get(section_name, {}).get(key)
-        if raw is None:
-            return None
-        return raw.strip().lower() in ("1", "true", "yes")
-
-    settings = {}
-    for key, converter in (
-        ("current_a", lambda v: int(round(float(v)))),
-        ("voltage_tenths", lambda v: int(round(float(v)))),
-        ("material", str),
-        ("diameter_mm", float),
-        ("mode", str),
-        ("gas", str),
-        ("correction", float),
-        ("hot_start_percent", float),
-        ("hot_start_hold_adjustment", lambda v: int(round(float(v)))),
-        ("custom_hot_start_hold_s", float),
-        ("custom_hot_start_percent", float),
-        ("crater_panel_current_ref_a", float),
-        ("crater_panel_voltage_ref_v", float),
-        ("crater_panel_time_ref_s", float),
-        ("software_crater_ratio_percent", float),
-        ("software_crater_voltage_v", float),
-        ("software_crater_hold_s", float),
-        ("wire_consumable_alpha_mm", float),
-    ):
-        value = cast("commanded", key, converter)
-        if value is not None:
-            settings[key] = value
-    synergic = cast_bool("commanded", "synergic")
-    if synergic is not None:
-        settings["synergic"] = synergic
-    for key in ("hot_start_enabled", "custom_hot_start_enabled",
-                "expect_native_crater", "software_crater_enabled"):
-        value = cast_bool("commanded", key)
-        if value is not None:
-            settings[key] = value
-    for old, new, converter in (
-        ("crater_enabled", "expect_native_crater", lambda raw: raw.strip().lower() in ("1", "true", "yes")),
-        ("crater_current_a", "crater_panel_current_ref_a", float),
-        ("crater_voltage_v", "crater_panel_voltage_ref_v", float),
-        ("crater_seconds", "crater_panel_time_ref_s", float),
-    ):
-        if new not in settings:
-            value = cast("commanded", old, converter)
-            if value is not None:
-                settings[new] = value
-
-    motion = {}
-
-    for key, converter in (
-        ("gui_velocity_percent", float),
-        ("gui_speed_mode", str),
-        ("gui_tcp_speed_mm_s", float),
-        ("weld_lead_in_mm", float),
-        ("weld_lead_out_mm", float),
-        ("weld_safe_approach_mm", float),
-        ("weld_approach_mode", str),
-        ("weld_pre_start_lead_mm", float),
-        ("weld_arc_off_delay_ms", float),
-        ("weld_tcp_speed_mm_s", float),
-        ("weld_fixed_tilt_x_deg", float),
-        ("weld_fixed_tilt_y_deg", float),
-        ("weld_fixed_tilt_z_deg", float),
-        ("weld_weave_pattern", str),
-        ("capping_width_mm", float),
-        ("capping_pitch_mm", float),
-        ("capping_left_dwell_s", float),
-        ("capping_right_dwell_s", float),
-        ("weld_weave_amplitude_mm", float),
-        ("weld_weave_pitch_mm", float),
-        ("weld_weave_left_dwell_s", float),
-        ("weld_weave_right_dwell_s", float),
-        ("weld_weave_cycles", lambda value: int(float(value))),
-        ("weld_weave_samples_per_cycle", lambda value: int(float(value))),
-        ("weld_weave_axis", str),
-    ):
-        value = cast("execution_conditions", key, converter)
-        if value is not None:
-            motion[key] = value
-
-    weave_enabled = cast_bool(
-        "execution_conditions", "weld_weave_enabled"
-    )
-    if weave_enabled is not None:
-        motion["weld_weave_enabled"] = weave_enabled
-
-    return {"settings": settings, "motion": motion}
-
-
-def read_teaching_and_touch_snapshot(path):
-    """Parse the ``[teaching_snapshot_yaml]``/``[touch_snapshot_yaml]``
-    sections a weld feedback log embeds (see ``format_weld_feedback_log``).
-
-    Returns ``(teaching_raw, touch_raw)`` -- plain dicts as they appear in
-    the log, not yet validated against ``ARM_JOINT_NAMES`` etc. Older logs
-    written before this feature existed have neither section, so both come
-    back empty rather than raising.
-    """
-    path = Path(path)
-    if not path.is_file():
-        return {}, {}
-    section = None
-    blocks = {"teaching_snapshot_yaml": [], "touch_snapshot_yaml": []}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            section = stripped[1:-1]
-            continue
-        if section in blocks:
-            blocks[section].append(line)
-
-    def load_block(name):
-        text = "\n".join(blocks[name]).strip()
-        if not text:
-            return {}
-        try:
-            loaded = yaml.load(text, Loader=yaml.CSafeLoader)
-        except yaml.YAMLError:
-            return {}
-        return loaded if isinstance(loaded, dict) else {}
-
-    return load_block("teaching_snapshot_yaml"), load_block("touch_snapshot_yaml")
-
-
-def read_weld_pass_reference(path):
-    """Read one pass's WAIT/START/GOAL WAIT/GOAL set from a completed log."""
-    path = Path(path)
-    if not path.is_file():
-        raise ValueError(f"Pass reference log is missing: {path}")
-    raw = path.read_bytes()
-    if not any(line == "result=completed" for line in
-               raw.decode("utf-8").splitlines()[:8]):
-        raise ValueError(f"Pass reference must be a completed weld: {path.name}")
-    teaching, _touches = read_teaching_and_touch_snapshot(path)
-    poses = {}
-    joint_states = {}
-    for endpoint, name in (
-        ("start_wait", "weld_start_wait"),
-        ("start", "weld_start"),
-        ("goal_wait", "weld_goal_wait"),
-        ("goal", "weld_end"),
-    ):
-        entry = teaching.get(name)
-        if not isinstance(entry, dict) or entry.get("planning_group") != "right_manipulator":
-            raise ValueError(f"{path.name} has no right-arm {name} reference")
-        pose = _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
-        if not pose_is_valid(pose):
-            raise ValueError(f"{path.name} has an invalid {name} TCP pose")
-        poses[endpoint] = pose
-        joint_state = entry.get("joint_state")
-        if isinstance(joint_state, dict):
-            names = tuple(joint_state.get("names", ()))
-            positions = tuple(float(value) for value in
-                              joint_state.get("positions_rad", ()))
-            if (
-                len(names) == 6
-                and len(positions) == 6
-                and all(math.isfinite(value) for value in positions)
-            ):
-                joint_states[endpoint] = (names, positions)
-    if math.dist(_pose_position_tuple(poses["start"]),
-                 _pose_position_tuple(poses["goal"])) < 0.001:
-        raise ValueError(f"{path.name} seam is shorter than 1 mm")
-    additional_pose_entries = {}
-    for name in ("robot_start", "weld_wait", "weld_finish"):
-        entry = teaching.get(name)
-        if (
-            isinstance(entry, dict)
-            and entry.get("planning_group") == "right_manipulator"
-        ):
-            try:
-                _pose_from_yaml_dict(entry.get("tcp_pose_world"), name)
-            except (TypeError, ValueError):
-                continue
-            additional_pose_entries[name] = copy.deepcopy(entry)
-    return {
-        "path": str(path.resolve()),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "reference_kind": "completed_weld_log",
-        **poses,
-        "joint_states": joint_states,
-        "additional_pose_entries": additional_pose_entries,
-    }
-
-
-def read_pass_teaching_reference(path, expected_pass):
-    """Read one independently saved pass teaching YAML as a reference."""
-    path = Path(path)
-    if not path.is_file():
-        raise ValueError(f"Pass teaching reference is missing: {path}")
-    raw = path.read_bytes()
-    document = yaml.load(raw.decode("utf-8"), Loader=yaml.CSafeLoader) or {}
-    if document.get("schema") != "construct_robot_pass_teaching_v1":
-        raise ValueError(f"Unsupported pass teaching schema: {path.name}")
-    if int(document.get("pass", 0)) != int(expected_pass):
-        raise ValueError(
-            f"{path.name} contains Pass {document.get('pass')}, "
-            f"expected Pass {expected_pass}"
-        )
-    entries = document.get("poses")
-    if not isinstance(entries, dict):
-        raise ValueError(f"{path.name} has no poses mapping")
-    poses = {}
-    joint_states = {}
-    for endpoint, pose_name in (
-        ("start_wait", "weld_start_wait"),
-        ("start", "weld_start"),
-        ("goal_wait", "weld_goal_wait"),
-        ("goal", "weld_end"),
-    ):
-        group, names, positions, tcp = parse_teaching_snapshot_entry(
-            pose_name, entries.get(pose_name)
-        )
-        if group != "right_manipulator":
-            raise ValueError(f"{path.name} {pose_name} is not a right-arm pose")
-        poses[endpoint] = copy.deepcopy(tcp)
-        joint_states[endpoint] = (tuple(names), tuple(positions))
-    if math.dist(
-        _pose_position_tuple(poses["start"]),
-        _pose_position_tuple(poses["goal"]),
-    ) < 0.001:
-        raise ValueError(f"{path.name} seam is shorter than 1 mm")
-    additional_pose_entries = {
-        pose_name: copy.deepcopy(entries[pose_name])
-        for pose_name in ("robot_start", "weld_wait", "weld_finish")
-        if pose_name in entries
-    }
-    return {
-        "path": str(path.resolve()),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "reference_kind": "saved_pass_teaching",
-        "source_reference": document.get("source_reference"),
-        "source_reference_sha256": document.get("source_reference_sha256"),
-        "source_log": document.get("source_log"),
-        "source_log_sha256": document.get("source_log_sha256"),
-        "requires_ik": bool(document.get("requires_ik", False)),
-        "correction_history": copy.deepcopy(
-            document.get("correction_history", [])
-            if isinstance(document.get("correction_history", []), list)
-            else []
-        ),
-        **poses,
-        "joint_states": joint_states,
-        "additional_pose_entries": additional_pose_entries,
-    }
-
-
-def save_seam_touch_yaml(
-    path,
-    planning_group,
-    seam_axis,
-    touches,
-    starts,
-    stopped_poses=None,
-    probe_configuration=None,
-):
-    """Atomically save raw Fastech DI0 contact and probe-start poses for diagnostics."""
-    path = Path(path)
-
-    def pose_document(pose):
-        if pose is None:
-            return None
-        return {
-            "position_m": {
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
-                "z": float(pose.position.z),
-            },
-            # Retained only to diagnose TCP/sensor-offset consistency.  Seam
-            # geometry intentionally uses position_m only.
-            "orientation_xyzw": {
-                "x": float(pose.orientation.x),
-                "y": float(pose.orientation.y),
-                "z": float(pose.orientation.z),
-                "w": float(pose.orientation.w),
-            },
-        }
-
-    records = {}
-    stopped_poses = stopped_poses or {}
-    for name in CORNER_TOUCH_NAMES:
-        contact = touches.get(name)
-        start = starts.get(name)
-        stopped = stopped_poses.get(name)
-        if contact is None and start is None and stopped is None:
-            continue
-        records[name] = {
-            "contact_tcp": pose_document(contact),
-            "stopped_tcp": pose_document(stopped),
-            "probe_start_tcp": pose_document(start),
-        }
-    document = {
-        "format_version": 1,
-        "planning_group": planning_group,
-        # Keep seam_axis for compatibility with the existing diagnostic plotter.
-        "seam_axis": str(seam_axis).upper(),
-        "probe_configuration": copy.deepcopy(probe_configuration),
-        "saved_unix_time": time.time(),
-        "note": (
-            "touch orientation is diagnostic only; seam XYZ comes from sensed "
-            "plane intersection and seam orientation is handled separately"
-        ),
-        "touches": records,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary_path = Path(stream.name)
-            yaml.safe_dump(document, stream, sort_keys=False)
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-
-
-def parse_teaching_snapshot_entry(pose_name, entry):
-    """Validate one entry of a weld feedback log's teaching snapshot the way
-    ``load_initial_state_yaml`` validates a standalone per-pose YAML file.
-
-    Raises ``ValueError`` on malformed data.
-    """
-    if not isinstance(entry, dict):
-        raise ValueError(f"{pose_name}: entry must be a mapping")
-    planning_group = entry.get("planning_group")
-    if planning_group not in ("left_manipulator", "right_manipulator"):
-        raise ValueError(
-            f"{pose_name}: planning_group must be left_manipulator or "
-            "right_manipulator"
-        )
-    arm = planning_group.removesuffix("_manipulator")
-    joint_state = entry.get("joint_state")
-    if not isinstance(joint_state, dict):
-        raise ValueError(f"{pose_name}: joint_state must be a mapping")
-    names = joint_state.get("names")
-    positions = joint_state.get("positions_rad")
-    if not isinstance(names, list) or not all(
-        isinstance(name, str) for name in names
-    ):
-        raise ValueError(f"{pose_name}: joint_state.names must be a list")
-    if set(names) != ARM_JOINT_NAMES[arm] or len(names) != 6:
-        raise ValueError(
-            f"{pose_name}: joint_state.names must contain the six {arm} arm joints"
-        )
-    if not isinstance(positions, list) or len(positions) != len(names):
-        raise ValueError(
-            f"{pose_name}: joint_state.positions_rad must match joint_state.names"
-        )
-    positions = tuple(
-        _finite_float(value, f"{pose_name} position")
-        for value in positions
-    )
-    tcp = _pose_from_yaml_dict(entry.get("tcp_pose_world"), f"{pose_name} TCP")
-    return planning_group, tuple(names), positions, tcp
-
-
-def save_seam_teaching_reference_yaml(path, planning_group, references):
-    """Persist pre-correction TCP references used for seam-yaw correction."""
-    document = {
-        "format_version": 1,
-        "planning_group": planning_group,
-        "poses": {},
-    }
-    for name, stored in references.items():
-        pose = stored[3]
-        document["poses"][name] = {
-            "position_m": {
-                axis: float(getattr(pose.position, axis))
-                for axis in ("x", "y", "z")
-            },
-            "orientation_xyzw": {
-                axis: float(getattr(pose.orientation, axis))
-                for axis in ("x", "y", "z", "w")
-            },
-        }
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as stream:
-        temporary_path = Path(stream.name)
-        yaml.safe_dump(document, stream, sort_keys=False)
-    temporary_path.replace(path)
-
-
-def load_seam_teaching_reference_yaml(path):
-    with Path(path).open("r", encoding="utf-8") as stream:
-        document = yaml.load(stream, Loader=yaml.CSafeLoader)
-    poses = {}
-    for name, data in document.get("poses", {}).items():
-        pose = Pose()
-        for axis in ("x", "y", "z"):
-            setattr(pose.position, axis, float(data["position_m"][axis]))
-        for axis in ("x", "y", "z", "w"):
-            setattr(
-                pose.orientation,
-                axis,
-                float(data["orientation_xyzw"][axis]),
-            )
-        if not pose_is_valid(pose):
-            raise ValueError(f"invalid seam teaching reference: {name}")
-        poses[name] = pose
-    return document.get("planning_group"), poses
 
 
 class WeldActionGui:

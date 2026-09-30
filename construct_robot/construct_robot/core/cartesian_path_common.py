@@ -2,6 +2,8 @@ import math
 import copy
 
 from geometry_msgs.msg import Pose
+from moveit_msgs.msg import Constraints, OrientationConstraint, PositionConstraint
+from shape_msgs.msg import SolidPrimitive
 
 
 PLANNING_GROUP_TIPS = {
@@ -786,3 +788,244 @@ def scale_trajectory_to_tcp_speed(trajectory, waypoints, tcp_speed_m_s):
     scale_trajectory_speed(trajectory, applied_scale)
     achieved_duration = duration / applied_scale
     return applied_scale, length / achieved_duration
+
+
+def midpoint_pose(first, second):
+    """Return the 1:1 internal division point, keeping the first TCP attitude."""
+    if not pose_is_valid(first) or not pose_is_valid(second):
+        raise ValueError("both touch poses must be valid")
+    result = copy.deepcopy(first)
+    result.position.x = (first.position.x + second.position.x) * 0.5
+    result.position.y = (first.position.y + second.position.y) * 0.5
+    result.position.z = (first.position.z + second.position.z) * 0.5
+    return result
+
+
+def quaternion_angular_distance(first, second):
+    first_q = (first.x, first.y, first.z, first.w)
+    second_q = (second.x, second.y, second.z, second.w)
+    first_norm = math.sqrt(sum(value * value for value in first_q))
+    second_norm = math.sqrt(sum(value * value for value in second_q))
+    if first_norm < 1e-12 or second_norm < 1e-12:
+        return math.inf
+    dot = abs(sum(
+        a * b / (first_norm * second_norm)
+        for a, b in zip(first_q, second_q)
+    ))
+    return 2.0 * math.acos(max(-1.0, min(1.0, dot)))
+
+
+def named_tcp_linear_waypoints(start, goal):
+    """Sample a named TCP transition with linear XYZ and orientation SLERP."""
+    distance = math.sqrt(sum(
+        (getattr(goal.position, axis) - getattr(start.position, axis)) ** 2
+        for axis in ("x", "y", "z")
+    ))
+    angle = quaternion_angular_distance(start.orientation, goal.orientation)
+    count = max(
+        2,
+        math.ceil(distance / 0.005) + 1,
+        math.ceil(angle / math.radians(2.0)) + 1,
+    )
+    return linear_pose_waypoints(start, goal, count)
+
+
+def pose_with_rpy_offset(pose, roll, pitch, yaw, reference="tool"):
+    """Apply an RPY orientation offset about either tool or World axes."""
+    result = copy.deepcopy(pose)
+    cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+    cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+    cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+    offset = (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+    original = (
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z,
+        pose.orientation.w,
+    )
+    reference = str(reference).strip().lower()
+    if reference == "tool":
+        first, second = original, offset
+    elif reference == "world":
+        first, second = offset, original
+    else:
+        raise ValueError("RPY reference must be 'tool' or 'world'")
+    ax, ay, az, aw = first
+    bx, by, bz, bw = second
+    composed = (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+    norm = math.sqrt(sum(value * value for value in composed))
+    if norm < 1e-12:
+        raise ValueError("RPY adjustment produced an invalid orientation")
+    (
+        result.orientation.x,
+        result.orientation.y,
+        result.orientation.z,
+        result.orientation.w,
+    ) = (value / norm for value in composed)
+    return result
+
+
+def _quaternion_rotate_vector(orientation, vector):
+    """Rotate a 3-vector by a geometry_msgs quaternion."""
+    q = (
+        float(orientation.x),
+        float(orientation.y),
+        float(orientation.z),
+        float(orientation.w),
+    )
+    norm = math.sqrt(sum(value * value for value in q))
+    if norm < 1e-12:
+        raise ValueError("orientation quaternion has near-zero length")
+    qx, qy, qz, qw = (value / norm for value in q)
+    vx, vy, vz = (float(value) for value in vector)
+    tx = 2.0 * (qy * vz - qz * vy)
+    ty = 2.0 * (qz * vx - qx * vz)
+    tz = 2.0 * (qx * vy - qy * vx)
+    return (
+        vx + qw * tx + qy * tz - qz * ty,
+        vy + qw * ty + qz * tx - qx * tz,
+        vz + qw * tz + qx * ty - qy * tx,
+    )
+
+
+def transform_xyz(transform, xyz):
+    """Transform one finite XYZ point using geometry_msgs/TransformStamped."""
+    values = tuple(float(value) for value in xyz)
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        raise ValueError("Wide Sensing point must contain three finite values")
+    rotated = _quaternion_rotate_vector(
+        transform.transform.rotation,
+        values,
+    )
+    translation = transform.transform.translation
+    return (
+        rotated[0] + float(translation.x),
+        rotated[1] + float(translation.y),
+        rotated[2] + float(translation.z),
+    )
+
+
+def tcp_position_is_valid(target_pose):
+    return target_pose is not None and all(
+        math.isfinite(float(getattr(target_pose.position, axis)))
+        for axis in ("x", "y", "z")
+    )
+
+
+def position_only_goal_constraints(planning_group, target_pose, tolerance=0.001):
+    """Build a World-frame TCP position goal without orientation constraints."""
+    if not tcp_position_is_valid(target_pose):
+        raise ValueError("position-only target XYZ is invalid")
+    if tolerance <= 0.0:
+        raise ValueError("position-only tolerance must be positive")
+    primitive = SolidPrimitive()
+    primitive.type = SolidPrimitive.SPHERE
+    primitive.dimensions = [float(tolerance)]
+    center = Pose()
+    center.position = copy.deepcopy(target_pose.position)
+    center.orientation.w = 1.0
+    position = PositionConstraint()
+    position.header.frame_id = "World"
+    position.link_name = tip_link_for_group(planning_group)
+    position.constraint_region.primitives = [primitive]
+    position.constraint_region.primitive_poses = [center]
+    position.weight = 1.0
+    constraints = Constraints()
+    constraints.position_constraints.append(position)
+    return constraints
+
+
+def tcp_pose_goal_constraints(
+    planning_group,
+    target_pose,
+    position_tolerance=0.001,
+    orientation_tolerance=0.01,
+):
+    """Use corrected XYZ together with the orientation captured for this pose."""
+    if not pose_is_valid(target_pose):
+        raise ValueError("complete TCP target pose is invalid")
+    constraints = position_only_goal_constraints(
+        planning_group, target_pose, position_tolerance
+    )
+    orientation = OrientationConstraint()
+    orientation.header.frame_id = "World"
+    orientation.link_name = tip_link_for_group(planning_group)
+    orientation.orientation = copy.deepcopy(target_pose.orientation)
+    orientation.absolute_x_axis_tolerance = float(orientation_tolerance)
+    orientation.absolute_y_axis_tolerance = float(orientation_tolerance)
+    orientation.absolute_z_axis_tolerance = float(orientation_tolerance)
+    orientation.weight = 1.0
+    constraints.orientation_constraints.append(orientation)
+    return constraints
+
+
+def pose_with_local_rpy_offset(pose, roll, pitch, yaw):
+    """Backward-compatible helper for a tool-frame RPY adjustment."""
+    return pose_with_rpy_offset(pose, roll, pitch, yaw, "tool")
+
+
+WELD_WEAVE_SAMPLES_PER_CYCLE = 12
+
+
+def weld_weave_geometry(
+    seam_start, seam_goal, pattern, amplitude_mm, pitch_mm, axis,
+    left_dwell_s=0.0, right_dwell_s=0.0, transverse_vector=None,
+):
+    """Derive whole cycles from pitch and build one consistent weld weave."""
+    seam_length = math.sqrt(sum(
+        (getattr(seam_goal.position, component)
+         - getattr(seam_start.position, component)) ** 2
+        for component in ("x", "y", "z")
+    ))
+    cycles = weave_cycles_for_pitch(seam_length, float(pitch_mm))
+    amplitude = float(amplitude_mm) * 0.001
+    if not math.isfinite(amplitude) or not 0.0001 <= amplitude <= 0.05:
+        raise ValueError("Weave one-side amplitude must be in 0.1..50 mm")
+    if pattern in ("sine", "crescent"):
+        points, holds = sine_weaving_with_dwell(
+            (seam_start, seam_goal), amplitude, cycles,
+            float(left_dwell_s), float(right_dwell_s), axis,
+            transverse_vector, pattern,
+        )
+    elif pattern == "circle":
+        if float(left_dwell_s) != 0.0 or float(right_dwell_s) != 0.0:
+            raise ValueError("Circle weave has no left/right peaks; set dwell to 0 or use sine")
+        points = circular_weaving_from_path(
+            (seam_start, seam_goal), amplitude, cycles,
+            WELD_WEAVE_SAMPLES_PER_CYCLE, axis, transverse_vector,
+        )
+        holds = [0.0] * len(points)
+    else:
+        raise ValueError("Weld weave pattern must be sine, crescent or circle")
+    return points, holds, cycles, seam_length * 1000.0 / cycles
+
+
+def weave_path_speed_m_s(seam_length_m, path_length_m, travel_mm_s, holds):
+    """Nominal TCP speed for requested average seam advance, including dwell."""
+    target_s = seam_length_m / (travel_mm_s * 0.001)
+    moving_s = target_s - sum(holds)
+    if moving_s <= 0.0:
+        raise ValueError(
+            "Weave dwell exceeds travel-time target; lower dwell or seam speed"
+        )
+    if path_length_m <= 0.0 or seam_length_m <= 0.0:
+        raise ValueError("Weave path has no usable travel distance")
+    return path_length_m / moving_s
+
+
+def validated_seam_speed_factor(value):
+    """Accept harmless round-off above one, but reject invalid geometry."""
+    factor = float(value)
+    if not math.isfinite(factor) or factor <= 0.0 or factor > 1.0 + 1e-9:
+        raise ValueError("invalid path/seam speed factor")
+    return min(factor, 1.0)

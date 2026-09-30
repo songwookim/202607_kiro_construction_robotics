@@ -6,6 +6,15 @@ remain the responsibility of the existing sequence runner.
 """
 
 import copy
+import math
+
+from construct_robot.core.cartesian_path_common import (
+    pose_is_valid,
+    validated_seam_speed_factor,
+    weave_path_speed_m_s,
+    weld_weave_geometry,
+)
+from construct_robot.core.seam_geometry import _unit_vector, seam_lead_poses
 
 
 def next_sequential_slot(steps, requested=1):
@@ -388,3 +397,215 @@ def validate_managed_weld_sequence(steps, require_complete=False):
         #         "Generated weld scenario is incomplete: " + ", ".join(missing)
         #     )
     return True
+
+
+def update_weld_scenario_motion_values(
+    steps, motion_index, *, tcp_speed_mm_s, lead_in_mm, lead_out_mm
+):
+    """Return scenario steps with one weld-motion edit applied consistently.
+
+    A generated weld is represented by linked motion, ARC OFF, and lead-in
+    approach steps.  Editing only the visible motion row used to leave the
+    hidden ARC OFF speed at the Build-time value, and ``weld_tcp_speed_mm_s``
+    then overwrote the user's edit at execution.  Keep every linked step and
+    the physical lead endpoints in one immutable update instead.
+    """
+    candidate = copy.deepcopy(steps)
+    if not 0 <= int(motion_index) < len(candidate):
+        raise ValueError("Weld motion index is out of range")
+    motion = candidate[int(motion_index)]
+    if (
+        motion.get("type") != "motion"
+        or motion.get("weld_scenario_stage") != "weld_motion"
+    ):
+        raise ValueError("Selected step is not a generated weld motion")
+    values = (float(tcp_speed_mm_s), float(lead_in_mm), float(lead_out_mm))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Weld motion values must be finite")
+    tcp_speed_mm_s, lead_in_mm, lead_out_mm = values
+    if not 0.1 <= tcp_speed_mm_s <= 100.0:
+        raise ValueError("Weld TCP speed must be in 0.1..100 mm/s")
+    if not 0.0 <= lead_in_mm <= 100.0:
+        raise ValueError("Weld lead-in must be in 0..100 mm")
+    if not 0.0 <= lead_out_mm <= 100.0:
+        raise ValueError("Weld lead-out must be in 0..100 mm")
+    seam_start = motion.get("usable_seam_start")
+    seam_goal = motion.get("usable_seam_goal")
+    if not pose_is_valid(seam_start) or not pose_is_valid(seam_goal):
+        raise ValueError("Generated weld motion has invalid seam geometry")
+
+    lead_start, lead_end = seam_lead_poses(
+        seam_start,
+        seam_goal,
+        lead_in_mm * 0.001,
+        lead_out_mm * 0.001,
+    )
+    if motion.get("weld_weave_enabled", False):
+        core_points, holds, cycles, actual_pitch = weld_weave_geometry(
+            seam_start, seam_goal,
+            motion.get("weld_weave_pattern", "sine"),
+            motion.get("weld_weave_amplitude_mm", 3.0),
+            motion.get("weld_weave_pitch_mm", 5.0),
+            motion.get("weld_weave_axis", "tool_y"),
+            motion.get("weld_weave_left_dwell_s", 0.0),
+            motion.get("weld_weave_right_dwell_s", 0.0),
+            motion.get("weld_weave_transverse_vector"),
+        )
+        motion["usable_weld_points"] = copy.deepcopy(core_points)
+        motion["weld_weave_cycles"] = cycles
+        motion["weld_weave_actual_pitch_mm"] = actual_pitch
+        updated_points = []
+        if lead_in_mm > 1e-6:
+            updated_points.append(copy.deepcopy(lead_start))
+        updated_points.extend(copy.deepcopy(core_points))
+        if lead_out_mm > 1e-6:
+            updated_points.append(copy.deepcopy(lead_end))
+        motion["points"] = tuple(updated_points)
+        if any(holds):
+            motion["waypoint_hold_s"] = (
+                ([0.0] if lead_in_mm > 1e-6 else []) + holds
+                + ([0.0] if lead_out_mm > 1e-6 else [])
+            )
+            motion["linear_motion_profile"] = False
+        else:
+            motion.pop("waypoint_hold_s", None)
+            motion["linear_motion_profile"] = True
+    else:
+        motion["points"] = (
+            copy.deepcopy(lead_start if lead_in_mm > 1e-6 else seam_start),
+            copy.deepcopy(lead_end if lead_out_mm > 1e-6 else seam_goal),
+        )
+        motion["path_to_seam_speed_factor"] = 1.0
+    motion["lead_start"] = copy.deepcopy(lead_start)
+    motion["lead_end"] = copy.deepcopy(lead_end)
+    motion["lead_in_mm"] = lead_in_mm
+    motion["lead_out_mm"] = lead_out_mm
+    motion["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
+    if motion.get("weld_weave_enabled"):
+        seam_length = math.sqrt(sum((getattr(seam_goal.position, a)-getattr(seam_start.position, a))**2 for a in ("x", "y", "z")))
+        core = motion["usable_weld_points"]
+        path_length = sum(math.sqrt(sum((getattr(b.position, a)-getattr(c.position, a))**2 for a in ("x", "y", "z"))) for c, b in zip(core[:-1], core[1:]))
+        motion["path_to_seam_speed_factor"] = validated_seam_speed_factor(
+            seam_length / path_length
+        )
+        motion["tcp_speed_m_s"] = weave_path_speed_m_s(
+            seam_length, path_length, tcp_speed_mm_s,
+            motion.get("waypoint_hold_s", ()),
+        )
+    # Retain this metadata for readable logs, but keep it synchronized instead
+    # of treating it as an authoritative Build-time override.
+    motion["weld_tcp_speed_mm_s"] = tcp_speed_mm_s
+
+    scenario_id = motion.get("weld_scenario_id")
+    if not scenario_id:
+        raise ValueError("Generated weld motion has no scenario identifier")
+    linked_arc_off = False
+    linked_lead_approach = lead_in_mm <= 1e-6
+    for linked in candidate:
+        if (linked.get("weld_scenario_id") == scenario_id
+                and linked.get("taught_wait_direct", False)):
+            linked["points"] = (copy.deepcopy(motion["points"][0]),)
+            linked["lead_in_mm"] = lead_in_mm
+            linked_lead_approach = True
+        if (
+            linked.get("weld_scenario_id") == scenario_id
+            and linked.get("weld_scenario_stage") == "arc_off"
+        ):
+            linked["tcp_speed_m_s"] = tcp_speed_mm_s * 0.001
+            if motion.get("weld_weave_enabled"):
+                linked["tcp_speed_m_s"] = motion["tcp_speed_m_s"]
+            linked["path_to_seam_speed_factor"] = motion["path_to_seam_speed_factor"]
+            linked["lead_in_mm"] = lead_in_mm
+            linked["lead_out_mm"] = lead_out_mm
+            linked_arc_off = True
+        if (linked.get("weld_scenario_id") == scenario_id
+                and linked.get("weld_scenario_stage") == "software_crater"):
+            linked["endpoint"] = copy.deepcopy(motion["points"][-1])
+        if (
+            linked.get("role") == "lead_in"
+            and linked.get("related_weld_scenario_id") == scenario_id
+        ):
+            points = tuple(linked.get("points", ()))
+            if not points:
+                raise ValueError("Lead-in approach has no path points")
+            if linked.get("safe_retract_geometry", False):
+                e_a = _unit_vector(
+                    linked.get("safe_approach_direction", ()),
+                    "saved safe approach direction",
+                )
+                safe_distance_m = (
+                    float(linked.get("safe_approach_mm", 0.0)) * 0.001
+                )
+                if safe_distance_m <= 0.0:
+                    raise ValueError("Saved safe approach distance is invalid")
+                safe_over_lead = copy.deepcopy(lead_start)
+                for index, axis in enumerate(("x", "y", "z")):
+                    setattr(
+                        safe_over_lead.position,
+                        axis,
+                        getattr(lead_start.position, axis)
+                        + safe_distance_m * e_a[index],
+                    )
+                linked["points"] = (
+                    copy.deepcopy(points[0]),
+                    safe_over_lead,
+                    copy.deepcopy(lead_start),
+                )
+            else:
+                linked["points"] = points[:-1] + (copy.deepcopy(lead_start),)
+            linked["lead_start"] = copy.deepcopy(lead_start)
+            linked["lead_in_mm"] = lead_in_mm
+            linked["lead_out_mm"] = lead_out_mm
+            linked_lead_approach = True
+    if not linked_arc_off:
+        raise ValueError("Generated weld motion has no linked ARC OFF step")
+    if not linked_lead_approach:
+        raise ValueError(
+            "A positive lead-in needs its linked ARC-OFF lead-in approach; "
+            "rebuild this legacy scenario first"
+        )
+    return candidate
+
+
+def taught_wait_approach_steps(steps, start_wait, goal_wait):
+    """Use taught clearance positions and weld attitudes near the workpiece."""
+    steps = copy.deepcopy(steps)
+    motion = next(s for s in steps if s.get("weld_scenario_stage") == "weld_motion")
+    first, last = motion["points"][0], motion["points"][-1]
+    approach = next(s for s in steps if s.get("weld_scenario_stage") == "start_contact")
+    aligned_start = copy.deepcopy(start_wait)
+    aligned_start.orientation = copy.deepcopy(first.orientation)
+    aligned_goal = copy.deepcopy(goal_wait)
+    aligned_goal.orientation = copy.deepcopy(last.orientation)
+    steps = [s for s in steps if s.get("weld_scenario_stage") != "start_safe"
+             and s.get("role") != "lead_in"]
+    alignment = copy.deepcopy(approach)
+    alignment.update(points=(aligned_start,), path_kind="taught_wait_align_weld_attitude",
+                     weld_scenario_stage="start_safe", role="safe_approach",
+                     touch_guard=False, continue_after_touch=False)
+    approach.update(points=(copy.deepcopy(first),), path_kind="taught_wait_to_weld_start",
+                    taught_wait_direct=True, touch_guard=False,
+                    safe_approach=None, approach_lead=None)
+    steps.insert(steps.index(approach), alignment)
+    for step in steps:
+        step["weld_approach_mode"] = "taught_wait"
+        if step.get("weld_scenario_stage") in ("start_wait", "finish"):
+            step["use_joint_planning"] = True
+        if step.get("weld_scenario_stage") == "goal_wait":
+            step.update(type="motion", points=(aligned_goal,),
+                        path_kind="weld_end_to_taught_wait_fixed_attitude",
+                        interpolation_step=approach["interpolation_step"],
+                        collision_checking=True, touch_guard=False)
+    slot = int(steps[0]["parallel_slot"])
+    for index, step in enumerate(steps):
+        stage = step.get("weld_scenario_stage")
+        previous_stage = steps[index - 1].get("weld_scenario_stage") if index else None
+        shared_weld_slot = (
+            (stage == "weld_motion" and previous_stage == "arc_on")
+            or (stage == "arc_off" and previous_stage == "weld_motion"
+                and step.get("trigger_before_goal", False))
+        )
+        if index and not shared_weld_slot:
+            slot += 1
+        step["parallel_slot"] = slot
+    return steps

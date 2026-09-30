@@ -36,37 +36,36 @@ from construct_msgs.action import CartesianPath
 from construct_msgs.msg import DigitalIoState
 from construct_msgs.srv import SetDigitalOutput as FastechSetDigitalOutput
 from construct_robot.core.cartesian_path_common import (
+    _quaternion_rotate_vector,
     circle_waypoints,
     circular_weaving_from_path,
     linear_pose_waypoints,
+    midpoint_pose,
+    named_tcp_linear_waypoints,
     pose_is_valid,
+    pose_with_rpy_offset,
+    quaternion_angular_distance,
     scale_trajectory_speed,
     straight_waypoints,
     tip_link_for_group,
     weaving_from_path,
 )
 from construct_robot.nodes.cartesian_path_server import make_weld_visualization
-from construct_robot.core.seam_geometry import _pose_position_tuple, _unit_vector
-from construct_robot.core.task_teaching_model import TEACHING_POSES
+from construct_robot.core.keyboard_jog import keyboard_velocity_vector
+from construct_robot.core.seam_geometry import (
+    _pose_position_tuple,
+    _unit_vector,
+    wide_sensing_path_poses,
+)
+from construct_robot.core.task_teaching_model import (
+    TCP_POSE_TEACHING_POSES,
+    TOUCH_GUARDED_TEACHING_POSES,
+)
 from construct_robot.io.teaching_yaml import ARM_JOINT_NAMES
 
 
 FASTECH_TOUCH_INPUT_PORT = 4
 FASTECH_TOUCH_OUTPUT_PORT = 0
-KEYBOARD_JOG_SELECTIONS = {
-    "X": (0,),
-    "Y": (1,),
-    "Z": (2,),
-    "RX": (3,),
-    "RY": (4,),
-    "RZ": (5,),
-    "XY": (0, 1),
-    "XZ": (0, 2),
-    "YZ": (1, 2),
-    "RX/RY": (3, 4),
-    "RX/RZ": (3, 5),
-    "RY/RZ": (4, 5),
-}
 
 # Kept for the Controller Digital I/O test panel and later legacy inspection.
 # Production touch sensing no longer consumes these Rainbow ports.
@@ -99,236 +98,6 @@ KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S = 0.25
 KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S = 0.80
 KEYBOARD_ZERO_BURST_COUNT = 5
 KEYBOARD_TF_LOOKUP_TIMEOUT_S = 0.05
-
-# Every Named TCP Teaching execution is contact guarded.  Planning remains
-# unguarded because it does not command physical motion.
-TOUCH_GUARDED_TEACHING_POSES = frozenset(TEACHING_POSES)
-
-# Corrected seam teaching poses combine sensed/corrected XYZ with the
-# orientation originally captured for that individual named pose.
-TCP_POSE_TEACHING_POSES = frozenset((
-    "weld_start",
-    "weld_end",
-))
-
-
-def midpoint_pose(first, second):
-    """Return the 1:1 internal division point, keeping the first TCP attitude."""
-    if not pose_is_valid(first) or not pose_is_valid(second):
-        raise ValueError("both touch poses must be valid")
-    result = copy.deepcopy(first)
-    result.position.x = (first.position.x + second.position.x) * 0.5
-    result.position.y = (first.position.y + second.position.y) * 0.5
-    result.position.z = (first.position.z + second.position.z) * 0.5
-    return result
-
-
-def quaternion_angular_distance(first, second):
-    first_q = (first.x, first.y, first.z, first.w)
-    second_q = (second.x, second.y, second.z, second.w)
-    first_norm = math.sqrt(sum(value * value for value in first_q))
-    second_norm = math.sqrt(sum(value * value for value in second_q))
-    if first_norm < 1e-12 or second_norm < 1e-12:
-        return math.inf
-    dot = abs(sum(
-        a * b / (first_norm * second_norm)
-        for a, b in zip(first_q, second_q)
-    ))
-    return 2.0 * math.acos(max(-1.0, min(1.0, dot)))
-
-
-def named_tcp_linear_waypoints(start, goal):
-    """Sample a named TCP transition with linear XYZ and orientation SLERP."""
-    distance = math.sqrt(sum(
-        (getattr(goal.position, axis) - getattr(start.position, axis)) ** 2
-        for axis in ("x", "y", "z")
-    ))
-    angle = quaternion_angular_distance(start.orientation, goal.orientation)
-    count = max(
-        2,
-        math.ceil(distance / 0.005) + 1,
-        math.ceil(angle / math.radians(2.0)) + 1,
-    )
-    return linear_pose_waypoints(start, goal, count)
-
-
-def pose_with_rpy_offset(pose, roll, pitch, yaw, reference="tool"):
-    """Apply an RPY orientation offset about either tool or World axes."""
-    result = copy.deepcopy(pose)
-    cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
-    cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
-    cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
-    offset = (
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-        cr * cp * cy + sr * sp * sy,
-    )
-    original = (
-        pose.orientation.x,
-        pose.orientation.y,
-        pose.orientation.z,
-        pose.orientation.w,
-    )
-    reference = str(reference).strip().lower()
-    if reference == "tool":
-        first, second = original, offset
-    elif reference == "world":
-        first, second = offset, original
-    else:
-        raise ValueError("RPY reference must be 'tool' or 'world'")
-    ax, ay, az, aw = first
-    bx, by, bz, bw = second
-    composed = (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-    norm = math.sqrt(sum(value * value for value in composed))
-    if norm < 1e-12:
-        raise ValueError("RPY adjustment produced an invalid orientation")
-    (
-        result.orientation.x,
-        result.orientation.y,
-        result.orientation.z,
-        result.orientation.w,
-    ) = (value / norm for value in composed)
-    return result
-
-
-def _quaternion_rotate_vector(orientation, vector):
-    """Rotate a 3-vector by a geometry_msgs quaternion."""
-    q = (
-        float(orientation.x),
-        float(orientation.y),
-        float(orientation.z),
-        float(orientation.w),
-    )
-    norm = math.sqrt(sum(value * value for value in q))
-    if norm < 1e-12:
-        raise ValueError("orientation quaternion has near-zero length")
-    qx, qy, qz, qw = (value / norm for value in q)
-    vx, vy, vz = (float(value) for value in vector)
-    tx = 2.0 * (qy * vz - qz * vy)
-    ty = 2.0 * (qz * vx - qx * vz)
-    tz = 2.0 * (qx * vy - qy * vx)
-    return (
-        vx + qw * tx + qy * tz - qz * ty,
-        vy + qw * ty + qz * tx - qx * tz,
-        vz + qw * tz + qx * ty - qy * tx,
-    )
-
-
-def transform_xyz(transform, xyz):
-    """Transform one finite XYZ point using geometry_msgs/TransformStamped."""
-    values = tuple(float(value) for value in xyz)
-    if len(values) != 3 or not all(math.isfinite(value) for value in values):
-        raise ValueError("Wide Sensing point must contain three finite values")
-    rotated = _quaternion_rotate_vector(
-        transform.transform.rotation,
-        values,
-    )
-    translation = transform.transform.translation
-    return (
-        rotated[0] + float(translation.x),
-        rotated[1] + float(translation.y),
-        rotated[2] + float(translation.z),
-    )
-
-
-def keyboard_jog_velocity(selection, direction, linear_speed, angular_speed):
-    """Build a signed 6D keyboard-axis vector using linear/angular magnitudes."""
-    axes = KEYBOARD_JOG_SELECTIONS.get(str(selection))
-    if axes is None:
-        raise ValueError(f"unsupported keyboard jog selection: {selection}")
-    direction = str(direction)
-    if len(axes) == 1:
-        if direction not in ("Left", "Right", "Up", "Down"):
-            raise ValueError(f"unsupported keyboard jog direction: {direction}")
-        axis = axes[0]
-        sign = 1.0 if direction in ("Right", "Up") else -1.0
-    else:
-        mapping = {
-            "Left": (axes[0], -1.0),
-            "Right": (axes[0], 1.0),
-            "Down": (axes[1], -1.0),
-            "Up": (axes[1], 1.0),
-        }
-        if direction not in mapping:
-            raise ValueError(f"unsupported keyboard jog direction: {direction}")
-        axis, sign = mapping[direction]
-    speed = float(angular_speed if axis >= 3 else linear_speed)
-    if not math.isfinite(speed) or speed <= 0.0:
-        raise ValueError("keyboard jog speed must be positive and finite")
-    velocity = [0.0] * 6
-    velocity[axis] = sign * speed
-    return tuple(velocity)
-
-
-def keyboard_velocity_vector(
-    orientation,
-    selection,
-    direction,
-    linear_speed_m_s,
-    angular_speed_rad_s,
-    reference,
-):
-    """Use the selected frame for XYZ; rotations always follow World axes."""
-    values = keyboard_jog_velocity(
-        selection,
-        direction,
-        linear_speed_m_s,
-        angular_speed_rad_s,
-    )
-    reference = str(reference).strip().lower()
-    if reference == "world":
-        world_linear = values[:3]
-    elif reference == "tool":
-        world_linear = _quaternion_rotate_vector(orientation, values[:3])
-    else:
-        raise ValueError("keyboard velocity frame must be World or Tool")
-    # Previous angular mapping (retained for comparison):
-    # if reference == "world":
-    #     world_angular = values[3:]
-    # elif reference == "tool":
-    #     world_angular = _quaternion_rotate_vector(orientation, values[3:])
-    # RX/RY/RZ now refer to fixed World axes, independent of TCP attitude
-    # and the XYZ frame selector. resolve_keyboard_velocity still converts
-    # this World vector into the robot base required by jog_robot_l(mode=1).
-    world_angular = values[3:]
-    return tuple(world_linear) + tuple(world_angular)
-
-
-def wide_sensing_path_poses(
-    start_xyz,
-    end_xyz,
-    world_from_sensor,
-    orientation,
-    offset_m=(0.0, 0.0, 0.0),
-    reverse=False,
-):
-    """Convert a sensed metric segment into two World-frame weld poses."""
-    start = transform_xyz(world_from_sensor, start_xyz)
-    end = transform_xyz(world_from_sensor, end_xyz)
-    if reverse:
-        start, end = end, start
-    offset = tuple(float(value) for value in offset_m)
-    if len(offset) != 3 or not all(math.isfinite(value) for value in offset):
-        raise ValueError("Wide Sensing World offset must be finite XYZ")
-    poses = []
-    for xyz in (start, end):
-        pose = Pose()
-        pose.position.x = xyz[0] + offset[0]
-        pose.position.y = xyz[1] + offset[1]
-        pose.position.z = xyz[2] + offset[2]
-        pose.orientation = copy.deepcopy(orientation)
-        if not pose_is_valid(pose):
-            raise ValueError("Wide Sensing produced an invalid World pose")
-        poses.append(pose)
-    if math.dist(start, end) < 1e-5:
-        raise ValueError("Wide Sensing weld segment is shorter than 0.01 mm")
-    return tuple(poses)
 
 
 class WeldGuiNode(Node):

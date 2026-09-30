@@ -24,6 +24,23 @@ TEACHING_POSES = {
     "weld_finish": "7 · Weld end pose",
 }
 
+# Every Named TCP Teaching execution is contact guarded.  Planning remains
+# unguarded because it does not command physical motion.
+TOUCH_GUARDED_TEACHING_POSES = frozenset(TEACHING_POSES)
+
+# Corrected seam teaching poses combine sensed/corrected XYZ with the
+# orientation originally captured for that individual named pose.
+TCP_POSE_TEACHING_POSES = frozenset((
+    "weld_start",
+    "weld_end",
+))
+
+JOINT_RECALL_TEACHING_POSES = frozenset(TEACHING_POSES) - TCP_POSE_TEACHING_POSES
+
+SEAM_REFERENCE_TEACHING_POSES = frozenset((
+    "weld_start_wait", "weld_start", "weld_goal_wait", "weld_end", "weld_finish",
+))
+
 
 def task_base_path(folder, category):
     if category not in TASK_GROUPS:
