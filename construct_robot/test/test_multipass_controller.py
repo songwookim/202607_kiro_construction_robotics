@@ -119,6 +119,7 @@ def make_host(folder, **overrides):
         node=SimpleNamespace(
             active_motion_goal=None,
             _current_tcp_pose=lambda group: pose(0.0, -0.05, 0.05),
+            _path_start_tcp_pose=lambda group: pose(0.0, -0.05, 0.05),
             run_sequence_cartesian_motion=Mock(return_value=(True, "reached")),
             clear_keyboard_velocity=Mock(),
             set_keyboard_velocity_controller_enabled=Mock(return_value=(True, "ok")),

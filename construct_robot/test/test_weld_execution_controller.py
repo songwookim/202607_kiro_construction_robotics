@@ -88,6 +88,39 @@ def make_host(tmp_path=None, fake=False, **overrides):
     return host, controller, recorder
 
 
+def test_background_finish_detaches_before_saving_and_freezes_end_time():
+    import time
+    host, _controller, recorder = make_host()
+    entered, release = threading.Event(), threading.Event()
+    saved = []
+
+    def slow_save(session, result, final_status, ended, ended_monotonic):
+        entered.set()
+        assert release.wait(2)
+        saved.append((session, ended, ended_monotonic))
+        return "saved.log"
+
+    recorder._finish_session = slow_save
+    recorder.begin(settings())
+    session = host.active_weld_feedback_session
+    try:
+        future = recorder.finish("operator stop", background=True)
+        detached_at = time.monotonic()
+        assert host.active_weld_feedback_session is None
+        assert entered.wait(1)
+        assert not future.done()
+        # A new session can collect feedback while the older one is saving.
+        recorder.begin(settings())
+        assert host.active_weld_feedback_session is not session
+        release.set()
+        assert future.result(timeout=1) == "saved.log"
+        assert saved[0][0] is session
+        assert saved[0][2] <= detached_at
+    finally:
+        release.set()
+        recorder.shutdown()
+
+
 def test_controller_imports_no_tkinter_or_gui():
     tree = ast.parse(Path(controller_module.__file__).read_text(encoding="utf-8"))
     imported = {
@@ -156,7 +189,7 @@ def test_arc_off_without_finalize_keeps_session_and_pending_status():
 
 
 def test_arc_off_failure_clears_arc_and_finalizes_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr(controller_module.subprocess, "Popen", Mock())
+    monkeypatch.setattr(controller_module.subprocess, "Popen", Mock(return_value=Mock(wait=Mock(return_value=0))))
     host, controller, recorder = make_host(tmp_path)
     recorder.begin(settings())
     host.hicomm_client.arc_off = Mock(side_effect=TimeoutError("not clear"))
@@ -230,7 +263,7 @@ def test_custom_hot_start_requires_established_arc():
 
 
 def test_feedback_session_respects_stop_and_saves_once(tmp_path, monkeypatch):
-    popen = Mock()
+    popen = Mock(return_value=Mock(wait=Mock(return_value=0)))
     monkeypatch.setattr(controller_module.subprocess, "Popen", popen)
     host, _controller, recorder = make_host(tmp_path, _weld_feedback_stopped=True)
     recorder.begin(settings())
@@ -248,3 +281,39 @@ def test_feedback_session_respects_stop_and_saves_once(tmp_path, monkeypatch):
     assert (tmp_path / "latest_weld_feedback.log").is_file()
     popen.assert_called_once()
     assert recorder.finish("again") is None
+
+
+def plot_report(tmp_path, output, returncode=0):
+    from construct_robot.application.weld_execution_controller import WeldFeedbackRecorder
+    host = SimpleNamespace(calls=[])
+    host.post = lambda fn, *args: fn(*args)
+    host.log = lambda message: host.calls.append(("log", message))
+    host.error = lambda message: host.calls.append(("error", message))
+    recorder = object.__new__(WeldFeedbackRecorder)
+    recorder.host = host
+    history = tmp_path / "weld_feedback_20261002_172811_139.log"
+    plot_log = history.with_suffix(".plot.log")
+    plot_log.write_text(output, encoding="utf-8")
+    recorder._report_feedback_plot(Mock(wait=Mock(return_value=returncode)), plot_log, history)
+    return host.calls
+
+
+def test_plot_report_logs_saved_pngs(tmp_path):
+    calls = plot_report(tmp_path, f"{tmp_path}/weld_feedback_20261002_172811_139.png\n"
+                                  f"{tmp_path}/latest_weld_feedback.png\n")
+    assert calls[0][0] == "log" and "PNG SAVED" in calls[0][1]
+    assert "latest_weld_feedback" not in calls[0][1]
+
+
+def test_plot_report_errors_when_matplotlib_is_broken(tmp_path):
+    output = ("AttributeError: _ARRAY_API not found\n"
+              "SKIPPED weld_feedback_20261002_172811_139.log · feedback plot: matplotlib is unavailable\n")
+    calls = plot_report(tmp_path, output, returncode=1)
+    assert calls[0][0] == "error" and "PNG NOT saved" in calls[0][1]
+    assert "matplotlib is unavailable" in calls[0][1]
+
+
+def test_plot_report_missing_tcp_trajectory_is_only_a_note(tmp_path):
+    calls = plot_report(tmp_path, f"{tmp_path}/weld_feedback_20261002_172811_139.png\n"
+                        "SKIPPED weld_feedback_20261002_172811_139.log · 3D trajectory plot: no recorded actual TCP samples\n")
+    assert calls[0][0] == "log" and "no recorded actual TCP samples" in calls[0][1]

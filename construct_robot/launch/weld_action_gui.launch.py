@@ -91,6 +91,14 @@ def _debugpy_prefix(enabled_argument, port_argument):
     ])
 
 
+def _launch_parameters(*specifications):
+    """Map explicit (parameter, launch argument, type) rows to typed values."""
+    return {
+        parameter: ParameterValue(LaunchConfiguration(argument), value_type=value_type)
+        for parameter, argument, value_type in specifications
+    }
+
+
 def generate_launch_description():
     declarations = [
         DeclareLaunchArgument(
@@ -132,32 +140,14 @@ def generate_launch_description():
         package="construct_robot",
         executable="fastech_io_node",
         output="screen",
-        parameters=[{
-            "ip_address": ParameterValue(
-                LaunchConfiguration("fastech_ip"),
-                value_type=str,
-            ),
-            "board_id": ParameterValue(
-                LaunchConfiguration("fastech_board_id"),
-                value_type=int,
-            ),
-            "poll_period_s": ParameterValue(
-                LaunchConfiguration("fastech_poll_period_s"),
-                value_type=float,
-            ),
-            "touch_input_channel": ParameterValue(
-                LaunchConfiguration("fastech_touch_input_channel"),
-                value_type=int,
-            ),
-            "reconnect_period_s": ParameterValue(
-                LaunchConfiguration("fastech_reconnect_period_s"),
-                value_type=float,
-            ),
-            "auto_connect": ParameterValue(
-                LaunchConfiguration("fastech_auto_connect"),
-                value_type=bool,
-            ),
-        }],
+        parameters=[_launch_parameters(
+            ("ip_address", "fastech_ip", str),
+            ("board_id", "fastech_board_id", int),
+            ("poll_period_s", "fastech_poll_period_s", float),
+            ("touch_input_channel", "fastech_touch_input_channel", int),
+            ("reconnect_period_s", "fastech_reconnect_period_s", float),
+            ("auto_connect", "fastech_auto_connect", bool),
+        )],
     )
     keyboard_teaching = Node(
         package="construct_robot",
@@ -170,56 +160,20 @@ def generate_launch_description():
         executable="weld_action_gui",
         output="screen",
         prefix=_debugpy_prefix("debug_gui", "debug_gui_port"),
-        parameters=[{
-            "expected_execute_motion": ParameterValue(
-                LaunchConfiguration("execute_motion"),
-                value_type=bool,
-            ),
-            "left_robot_ip": ParameterValue(
-                LaunchConfiguration("left_robot_ip"),
-                value_type=str,
-            ),
-            "right_robot_ip": ParameterValue(
-                LaunchConfiguration("right_robot_ip"),
-                value_type=str,
-            ),
-            "use_fake_head_hardware": ParameterValue(
-                LaunchConfiguration("use_fake_head_hardware"),
-                value_type=bool,
-            ),
-            "keyboard_teaching_backend": ParameterValue(
-                LaunchConfiguration("keyboard_teaching_backend"),
-                value_type=str,
-            ),
-            "hicomm_source_ip": ParameterValue(
-                LaunchConfiguration("hicomm_source_ip"),
-                value_type=str,
-            ),
-            "hicomm_welder_ip": ParameterValue(
-                LaunchConfiguration("hicomm_welder_ip"),
-                value_type=str,
-            ),
-            "hicomm_port": ParameterValue(
-                LaunchConfiguration("hicomm_port"),
-                value_type=int,
-            ),
-            "fastech_ip": ParameterValue(
-                LaunchConfiguration("fastech_ip"),
-                value_type=str,
-            ),
-            "fastech_board_id": ParameterValue(
-                LaunchConfiguration("fastech_board_id"),
-                value_type=int,
-            ),
-            "fastech_poll_period_s": ParameterValue(
-                LaunchConfiguration("fastech_poll_period_s"),
-                value_type=float,
-            ),
-            "wide_sensing_result_topic": ParameterValue(
-                LaunchConfiguration("wide_sensing_result_topic"),
-                value_type=str,
-            ),
-        }],
+        parameters=[_launch_parameters(
+            ("expected_execute_motion", "execute_motion", bool),
+            ("left_robot_ip", "left_robot_ip", str),
+            ("right_robot_ip", "right_robot_ip", str),
+            ("use_fake_head_hardware", "use_fake_head_hardware", bool),
+            ("keyboard_teaching_backend", "keyboard_teaching_backend", str),
+            ("hicomm_source_ip", "hicomm_source_ip", str),
+            ("hicomm_welder_ip", "hicomm_welder_ip", str),
+            ("hicomm_port", "hicomm_port", int),
+            ("fastech_ip", "fastech_ip", str),
+            ("fastech_board_id", "fastech_board_id", int),
+            ("fastech_poll_period_s", "fastech_poll_period_s", float),
+            ("wide_sensing_result_topic", "wide_sensing_result_topic", str),
+        )],
     )
     # Avoid stale Fast DDS shared-memory locks by keeping the complete launch
     # on localhost UDP. These actions must precede all included nodes.

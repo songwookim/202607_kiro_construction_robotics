@@ -204,6 +204,11 @@ def test_quality_integrates_arc_energy_using_seam_length_not_weave_path(tmp_path
     assert "signed_weave_offset_mm" in rendered
     assert "ARC_ON_CMD.elapsed_s=" in rendered
     assert len(parse_weld_trajectory_log(path)["actual"]) == len(tcp)
+    from construct_robot.io.weld_logging import analyze_saved_weld_log
+    reloaded = analyze_saved_weld_log(path)
+    assert reloaded["production"]["arc_energy_J"] == pytest.approx(3000.0)
+    assert reloaded["production"]["wire_consumed_weld_motion_mm"] == pytest.approx(100.0)
+    assert path.read_text() == rendered  # Offline analysis does not rewrite evidence.
 
 
 def test_crater_requires_observed_rx_state_and_timeline_uses_send_time():

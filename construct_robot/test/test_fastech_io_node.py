@@ -1,8 +1,12 @@
 from pathlib import Path
+import threading
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from construct_robot.io.fastech_ethernet import FastechIoSnapshot
 from construct_robot.nodes.fastech_io_node import (
     FastechConnectionManager,
+    FastechIONode,
     TOUCH_INPUT_CHANNEL,
     TOUCH_OUTPUT_CHANNEL,
 )
@@ -103,3 +107,50 @@ def test_gui_does_not_own_or_poll_the_fastech_protocol_adapter():
     assert "def _fastech_connect_worker" not in gui_source
     assert "def _fastech_poll_worker" not in gui_source
     assert ".read_io(" not in gui_source
+
+
+def test_poll_publication_cannot_be_overtaken_by_output_readback():
+    node = object.__new__(FastechIONode)
+    node._operation_lock = threading.RLock()
+    node._connection_requested = threading.Event()
+    node._connection_requested.set()
+    node._stop_event = threading.Event()
+    entered, release, output_read = threading.Event(), threading.Event(), threading.Event()
+    published = []
+
+    def publish(snapshot):
+        if snapshot == "old":
+            entered.set()
+            assert release.wait(2)
+        published.append(snapshot)
+
+    node._publish_snapshot = publish
+    node._manager = SimpleNamespace(
+        read_io=lambda: "old",
+        set_output=lambda *a: (output_read.set(), "new")[1])
+    poll = threading.Thread(target=node._poll_once)
+    output = threading.Thread(target=lambda: node._command_output(0, True))
+    poll.start()
+    try:
+        assert entered.wait(1)
+        output.start()
+        assert not output_read.wait(0.03)
+    finally:
+        release.set()
+        poll.join(1)
+        output.join(1)
+    assert published == ["old", "new"]
+
+
+def test_disconnected_poll_and_connect_attempt_do_not_republish_old_state():
+    node = object.__new__(FastechIONode)
+    node._operation_lock = threading.RLock()
+    node._connection_requested = threading.Event()
+    node._stop_event = threading.Event()
+    node._manager = Mock()
+    node._publish_snapshot = Mock()
+    assert node._poll_once() is None
+    assert node._attempt_connect()[0] is False
+    node._manager.read_io.assert_not_called()
+    node._manager.connect.assert_not_called()
+    node._publish_snapshot.assert_not_called()

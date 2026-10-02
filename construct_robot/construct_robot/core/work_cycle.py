@@ -1,13 +1,10 @@
 """Validate the operator's combined-cycle joint teaching and stage settings."""
 import math
 import copy
-from pathlib import Path
-
-import yaml
 
 
-def load_work_cycle(path):
-    document = yaml.load(Path(path).read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+def validate_work_cycle(document):
+    """Validate the approved geometry/output policy without reading files."""
     if not isinstance(document, dict) or document.get("schema") != "construct_robot_combined_work_cycle_v1":
         raise ValueError("Unsupported combined work cycle YAML")
     for phase in ("initial", "designated"):

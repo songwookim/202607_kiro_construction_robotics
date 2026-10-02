@@ -21,10 +21,12 @@ The FAKE ARC decision is injected as ``fake_arc`` (the sequence executor's).
 """
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import math
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 from geometry_msgs.msg import Pose
@@ -41,12 +43,11 @@ from construct_robot.core.weld_config import (
     validate_digital_weld_settings,
     weld_current_profile,
 )
-from construct_robot.core.weld_quality_metrics import analyze_weld_quality
-from construct_robot.io.hicomm_welder import BIT_ARC, PERIOD_SECONDS
-from construct_robot.io.weld_logging import (
-    calculate_weld_production_metrics,
-    save_weld_feedback_log,
+from construct_robot.core.weld_quality_metrics import (
+    analyze_weld_quality, calculate_weld_production_metrics,
 )
+from construct_robot.io.hicomm_welder import BIT_ARC, PERIOD_SECONDS
+from construct_robot.io.weld_logging import save_weld_feedback_log
 
 
 def weld_status_snapshot(status):
@@ -81,6 +82,8 @@ class WeldFeedbackRecorder:
     def __init__(self, host, *, tcp_sample_period_s):
         self.host = host
         self.tcp_sample_period_s = tcp_sample_period_s
+        self._save_lock = threading.Lock()
+        self._save_executor = None
 
     def record_software_crater(self, **values):
         host = self.host
@@ -450,13 +453,49 @@ class WeldFeedbackRecorder:
                 return None
             return copy.deepcopy(session.get("pending_final_status"))
 
-    def finish(self, result, final_status=None):
+    def finish(self, result, final_status=None, *, background=False):
+        """Detach at the stop boundary, then serialize saves off the UI thread.
+
+        Synchronous callers retain their Path return value. UI callers receive
+        a Future; one writer preserves history/latest ordering across sessions.
+        """
         host = self.host
-        with host.weld_feedback_lock:
-            session = host.active_weld_feedback_session
-            host.active_weld_feedback_session = None
-        if session is None:
-            return None
+        with self._save_lock:
+            with host.weld_feedback_lock:
+                session = host.active_weld_feedback_session
+                host.active_weld_feedback_session = None
+                ended = time.time()
+                ended_monotonic = time.monotonic()
+            if session is None:
+                return None
+            if self._save_executor is None:
+                self._save_executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="weld-feedback-save"
+                )
+            future = self._save_executor.submit(
+                self._finish_session, session, result,
+                None if final_status is None else dict(final_status),
+                ended, ended_monotonic,
+            )
+        if background:
+            future.add_done_callback(self._save_finished)
+            return future
+        return future.result()
+
+    def _save_finished(self, future):
+        error = future.exception()
+        if error is not None:
+            self.host.post(self.host.error, f"Weld feedback save failed: {error}")
+
+    def shutdown(self):
+        """Join pending saves after the GUI loop has exited."""
+        with self._save_lock:
+            executor = self._save_executor
+        if executor is not None:
+            executor.shutdown(wait=True)
+
+    def _finish_session(self, session, result, final_status, ended, ended_monotonic):
+        host = self.host
 
         def statistics(values):
             if not values:
@@ -514,7 +553,6 @@ class WeldFeedbackRecorder:
                     0.0, wcr_clear_elapsed - command_elapsed
                 )
 
-        ended = time.time()
         motion_timing = copy.deepcopy(session.get("weld_motion_timing", {}))
         production_metrics = calculate_weld_production_metrics(
             session.get("samples", ()),
@@ -549,7 +587,7 @@ class WeldFeedbackRecorder:
             "started_unix_time": float(session["started_unix_time"]),
             "ended_unix_time": ended,
             "elapsed_seconds": max(
-                0.0, time.monotonic() - float(session["started_monotonic"])
+                0.0, ended_monotonic - float(session["started_monotonic"])
             ),
             "commanded": session["commanded"],
             "rx_setting_echo": session["setting_echo"],
@@ -619,27 +657,78 @@ class WeldFeedbackRecorder:
         except (KeyError, OSError, TypeError, ValueError) as error:
             host.post(host.error, f"Weld feedback save failed: {error}")
             return None
+        parameter_panel = getattr(host, "weld_parameter_panel", None)
+        if parameter_panel is not None:
+            host.post(parameter_panel.refresh)
         workspace_python = Path.home() / "ros2_ws" / ".venv" / "bin" / "python"
         python = str(
             workspace_python if workspace_python.is_file() else sys.executable
         )
+        # Keep the plotter's output next to the log and report its outcome:
+        # a broken plotting environment used to fail silently for weeks.
+        plot_log_path = history_path.with_suffix(".plot.log")
         try:
-            subprocess.Popen((
-                python,
-                "-m",
-                "construct_robot.io.weld_feedback_plot",
-                str(history_path),
-                str(latest_path),
-                "--no-show",
-            ))
+            with open(plot_log_path, "w", encoding="utf-8") as plot_log:
+                process = subprocess.Popen(
+                    (
+                        python,
+                        "-m",
+                        "construct_robot.io.weld_feedback_plot",
+                        str(history_path),
+                        str(latest_path),
+                        "--no-show",
+                    ),
+                    stdout=plot_log,
+                    stderr=subprocess.STDOUT,
+                )
         except OSError as error:
             host.post(host.error, f"Weld feedback plot launch failed: {error}")
+        else:
+            threading.Thread(
+                target=self._report_feedback_plot,
+                args=(process, plot_log_path, history_path),
+                daemon=True,
+            ).start()
         host.post(
             host.log,
             f"WELD FEEDBACK SAVED · {history_path} · "
             f"feedback + trajectory_3d PNG generation requested · result={result}",
         )
         return history_path
+
+    def _report_feedback_plot(self, process, plot_log_path, history_path):
+        host = self.host
+        try:
+            returncode = process.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            host.post(host.error, f"Weld feedback plot timed out · see {plot_log_path}")
+            return
+        try:
+            lines = plot_log_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        history_skips = [
+            line for line in lines
+            if line.startswith(f"SKIPPED {history_path.name}")
+        ]
+        if returncode != 0 or any("feedback plot:" in line for line in history_skips):
+            detail = next(
+                (line for line in reversed(lines) if line.strip()),
+                f"exit code {returncode}",
+            )
+            host.post(
+                host.error,
+                f"Weld feedback PNG NOT saved · {detail} · see {plot_log_path}",
+            )
+            return
+        saved = [line for line in lines if line.endswith(".png")
+                 and history_path.stem in line]
+        note = f" · {'; '.join(history_skips)}" if history_skips else ""
+        host.post(
+            host.log,
+            f"WELD FEEDBACK PNG SAVED · {', '.join(saved) or history_path.stem}{note}",
+        )
 
 
 class WeldExecutionController:

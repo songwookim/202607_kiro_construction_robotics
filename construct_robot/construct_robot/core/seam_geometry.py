@@ -787,3 +787,51 @@ def wide_sensing_path_poses(
     if math.dist(start, end) < 1e-5:
         raise ValueError("Wide Sensing weld segment is shorter than 0.01 mm")
     return tuple(poses)
+
+
+WEAVE_REFERENCES = ("touch_pair", "bisector", "manual")
+TOUCH_PAIR_MIN_SEPARATION_M = 0.0005
+
+
+def touch_pair_weave_direction(touches, d_real, orientation_reference=None):
+    """Weave across the joint: from each endpoint's wall touch to its floor touch.
+
+    For every endpoint with both touches, the wall→floor contact vector is
+    projected perpendicular to the actual seam ``d_real``; START and GOAL
+    results are averaged.  The weave then oscillates in the plane spanned by
+    the seam and the line between the two touched points: across a groove's
+    two faces (3G) or across a fillet's two legs.  ``orientation_reference``
+    (the bisector ``e_w``) only fixes the +/- sign so left/right dwell keep
+    their meaning.  Returns None when no endpoint has a usable touch pair.
+    """
+    d_real = _unit_vector(d_real, "actual seam direction")
+    directions = []
+    for endpoint in ("start", "goal"):
+        wall = touches.get(f"{endpoint}_wall")
+        floor = touches.get(f"{endpoint}_floor")
+        if wall is None or floor is None:
+            continue
+        across = tuple(
+            b - a for a, b in zip(_pose_position_tuple(wall), _pose_position_tuple(floor))
+        )
+        along = _vector_dot(across, d_real)
+        across = tuple(across[i] - along * d_real[i] for i in range(3))
+        if math.sqrt(_vector_dot(across, across)) < TOUCH_PAIR_MIN_SEPARATION_M:
+            continue
+        directions.append(_unit_vector(across, f"{endpoint} touch-pair direction"))
+    if not directions:
+        return None
+    first = directions[0]
+    summed = [0.0, 0.0, 0.0]
+    for direction in directions:
+        sign = -1.0 if _vector_dot(direction, first) < 0.0 else 1.0
+        for index in range(3):
+            summed[index] += sign * direction[index]
+    along = _vector_dot(summed, d_real)
+    weave = _unit_vector(
+        tuple(summed[i] - along * d_real[i] for i in range(3)),
+        "touch-pair weave direction",
+    )
+    if orientation_reference is not None and _vector_dot(weave, orientation_reference) < 0.0:
+        weave = tuple(-value for value in weave)
+    return weave

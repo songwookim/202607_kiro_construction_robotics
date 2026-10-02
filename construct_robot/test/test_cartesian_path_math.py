@@ -2197,9 +2197,13 @@ def test_cartesian_cancel_is_forwarded_to_active_moveit_execution():
             self.canceled = True
 
     execute_handle = ExecuteHandle()
+    from construct_robot.nodes.action_call import ActionCall
+    call = ActionCall("MoveIt execution")
+    call.handle = execute_handle
     fake_server = type("FakeServer", (), {})()
     fake_server._execute_handle_lock = threading.Lock()
-    fake_server._active_execute_handle = execute_handle
+    fake_server._execute_calls = {None: call}
+    fake_server._canceled_execute_goals = set()
     fake_server.get_logger = lambda: _TestLogger()
 
     response = CartesianPathActionServer.cancel_callback(fake_server, None)

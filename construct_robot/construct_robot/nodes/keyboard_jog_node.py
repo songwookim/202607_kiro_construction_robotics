@@ -140,6 +140,9 @@ class ArmJog:
             self.node.get_clock().now() - self.twist_at
         ).nanoseconds * 1e-9 <= timeout
         target = self.twist if fresh else np.zeros(6)
+        # Read every cycle so the ramp can be tuned live (ros2 param set).
+        self.ramp.linear_accel = self.node.get_parameter("max_linear_accel").value
+        self.ramp.angular_accel = self.node.get_parameter("max_angular_accel").value
         twist = self.ramp.step(target, dt)
         if not np.any(twist):
             if self.moving:
@@ -206,8 +209,9 @@ class KeyboardJogNode(Node):
         # before the next one replaces it.
         self.declare_parameter("cycle_s", 0.032)
         self.declare_parameter("command_timeout_s", 0.2)
-        self.declare_parameter("max_linear_accel", 0.5)      # m/s^2
-        self.declare_parameter("max_angular_accel", 3.0)     # rad/s^2
+        # 100 mm/s in ~67 ms; RB Servo-J filtering smooths the edges.
+        self.declare_parameter("max_linear_accel", 1.5)      # m/s^2
+        self.declare_parameter("max_angular_accel", 6.0)     # rad/s^2
         self.declare_parameter("joint_velocity_scale", 0.5)  # of URDF limits
         self.declare_parameter("joint_limit_margin_rad", 0.05)
         self.declare_parameter("singularity_slow_sigma", 0.05)

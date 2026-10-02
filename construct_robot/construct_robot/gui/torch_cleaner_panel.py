@@ -1,37 +1,39 @@
 """Operator-confirmed cleaner teaching and motion, using existing GUI motion APIs."""
-import math
 import threading
-import time
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk
 
-import yaml
-
-from construct_robot.io.teaching_paths import teaching_config_dir
-from construct_robot.core.torch_cleaner_teaching import (
-    CleanerTeachingState,
-    build_cleaner_sequence_steps,
-    cleaner_output_step,
+from construct_robot.application.weld_sequence_builder import build_cleaner_sequence_steps
+from construct_robot.core.task_teaching_model import CleanerTeachingState
+from construct_robot.io.teaching_yaml import (
     cleaner_pose_path,
     load_cleaner_order,
-    save_cleaner_correction,
+    teaching_config_dir,
 )
+
+# Torch Cleaner tab keyboard shortcuts: key -> cleaner teaching pose.
+CLEANER_KEY_POSES = {
+    "u": "start",
+    "i": "clear1_top",
+    "j": "clear1_inside",
+    "o": "clear2_top",
+    "k": "clear2_inside",
+    "p": "clear3_top",
+    "l": "clear3_inside",
+}
 
 
 class TorchCleanerPanel:
     def __init__(self, gui, parent, save_pose, load_pose):
         self.gui, self.save_pose, self.load_pose = gui, save_pose, load_pose
         self.busy = False
-        self.active = False
-        self.steps = []
-        self.index = 0
         self.folder = tk.StringVar(value=str(teaching_config_dir() / "torch_cleaner_teaching"))
         self.state = CleanerTeachingState(Path(self.folder.get()))
         self.selected = tk.StringVar(value="start")
         self.selected_label = tk.StringVar()
         self.position_names = []
-        self.order = tk.StringVar(value="start, cleaner1_top, cleaner1_inside, DO7:ON, DO7:OFF, cleaner1_top, cleaner2_top, cleaner2_entry, DO6:2, cleaner2_top, cleaner1_return_top, cleaner1_return_inside, DO7:1, cleaner1_return_top, end")
+        self.order = tk.StringVar(value="start, clear1_top, clear1_inside, WIRE_FORWARD:0.75, DO7:ON, DO7:OFF, clear1_top, clear2_top, clear2_inside, DO6:2, clear2_top, clear3_top, clear3_inside, DO5:1, clear3_top, start")
         self.status = tk.StringVar(value="Select a numbered teaching pose, or build the cleaner sequence")
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
@@ -43,19 +45,15 @@ class TorchCleanerPanel:
         self.positions.pack(side=tk.LEFT)
         self.positions.bind("<<ComboboxSelected>>", self.select_position)
         ttk.Button(row, text="Save current right-arm pose", command=self.capture).pack(side=tk.LEFT)
-        ttk.Button(
-            row, text="Correct this & later from current TCP",
-            command=self.correct_from_current_tcp,
-        ).pack(side=tk.LEFT)
         ttk.Button(row, text="Build → Sequence Builder", command=self.send_to_sequence).pack(side=tk.LEFT)
         ttk.Button(row, text="Plan", command=lambda: self.plan_or_execute(False)).pack(side=tk.LEFT)
         ttk.Button(row, text="Execute", command=lambda: self.plan_or_execute(True)).pack(side=tk.LEFT)
         ttk.Label(parent, textvariable=self.status, wraplength=850).pack(anchor=tk.W)
         ttk.Label(
             parent,
-            text=("Correction: jog to the selected pose's new TCP position, release the key, "
-                  "then apply its measured World XYZ offset from the first occurrence onward. "
-                  "Plan/Execute only the selected pose before running the full sequence."),
+            text=("Keyboard Teaching saves the current right-arm pose: "
+                  + " · ".join(f"{key.upper()}={name}" for key, name in CLEANER_KEY_POSES.items())
+                  + ". The sequence returns to start at the end."),
             wraplength=850,
         ).pack(anchor=tk.W)
         ttk.Label(parent, text="Cleaner 1 = DO7 · Cleaner 2 = DO6 · Cleaner 3 = DO5. Right arm only; left arm/head are not commanded.").pack(anchor=tk.W)
@@ -79,7 +77,7 @@ class TorchCleanerPanel:
                 self.state.set_order(tokens)
             ordered = list(dict.fromkeys(token for token in tokens if ":" not in token))
         extra = sorted(path.stem for path in folder.glob("*.yaml")
-                       if path.stem not in ordered and path.stem not in ("sequence", "sequence_correction"))
+                       if path.stem not in ordered and path.stem != "sequence")
         self.position_names = ordered + extra
         self.positions.configure(values=[f"{index:02d}. {name}" for index, name
                                          in enumerate(self.position_names, 1)])
@@ -120,75 +118,23 @@ class TorchCleanerPanel:
             self.folder.get(), tokens, self.gui.velocity_percent.get(), self.load_pose
         )
 
-    def seed(self):
-        try:
-            self.idle()
-            from construct_robot.core.torch_cleaner_teaching import JOINT_POSITIONS
-            for name, positions in JOINT_POSITIONS.items():
-                path = self.path(name)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if path.exists():
-                    continue
-                with path.open("x", encoding="utf-8") as stream:
-                    yaml.safe_dump({"schema": "torch_cleaner_joints_v1", "planning_group": "right_manipulator",
-                                    "joint_state": {"names": [f"right_manipulator_joint{i}" for i in range(1, 7)],
-                                                    "positions_rad": positions}}, stream)
-            self.positions.configure(values=list(JOINT_POSITIONS))
-            self.selected.set("start")
-            self.save_order()
-            self.refresh_teaching_index()
-        except Exception as error:
-            self.gui.error(f"Cleaner: {error}")
-
-    def output_step(self, name):
-        return cleaner_output_step(name)
-
-    def idle(self, next_step=False):
+    def idle(self):
         g = self.gui
-        if self.busy or (self.active and not next_step) or (g.sequence_running and not (self.active and next_step)) or g.seam_auto_running or g.multi_pass_registration is not None or g.node.active_motion_goal is not None:
+        if (self.busy or g.sequence_running or g.seam_auto_running
+                or g.multi_pass_registration is not None
+                or g.node.active_motion_goal is not None):
             raise ValueError("Wait for active motion/workflow to finish")
-
-    def browse(self):
-        try:
-            self.idle()
-            folder = filedialog.askdirectory(parent=self.gui.root, initialdir=self.folder.get())
-            if not folder:
-                return
-            self.folder.set(folder)
-            self.state.folder = Path(folder)
-            self.steps = []
-            names = [p.stem for p in Path(folder).glob("*.yaml")
-                     if p.name not in ("sequence.yaml", "sequence_correction.yaml")]
-            self.positions.configure(values=sorted(names))
-            path = Path(folder) / "sequence.yaml"
-            if path.exists():
-                data = yaml.load(path.read_text(), Loader=yaml.CSafeLoader)
-                if not isinstance(data, dict) or not isinstance(data.get("positions"), list):
-                    raise ValueError("Invalid cleaner sequence YAML")
-                positions = data["positions"]
-                if data.get("schema") == "torch_cleaner_sequence_v1":
-                    positions = [
-                        ("DO7:" + value[4:] if value.startswith("DO5:") else
-                         "DO5:" + value[4:] if value.startswith("DO7:") else value)
-                        for value in positions
-                    ]
-                    self.gui.log("Cleaner sequence v1 loaded: swapped DO5/DO7; Save order YAML to persist v2")
-                self.order.set(", ".join(positions))
-                self.state.set_order(positions)
-            self.status.set(f"Loaded folder: {folder}")
-        except Exception as error:
-            self.gui.error(f"Cleaner: {error}")
 
     def path(self, name):
         return cleaner_pose_path(self.folder.get(), name)
 
-    def capture(self):
+    def capture(self, name=None):
+        """Save the measured right-arm pose as ``name`` (default: selected)."""
         try:
             self.idle()
-            path = self.path(self.selected.get().strip())
+            path = self.path(name or self.selected.get().strip())
             group = "right_manipulator"
             self.busy = True
-            self.steps = []
             self.status.set("Capturing measured TCP and joint positions...")
             def work():
                 try:
@@ -202,228 +148,13 @@ class TorchCleanerPanel:
         except Exception as error:
             self.gui.error(f"Cleaner: {error}")
 
-    def correct_from_current_tcp(self):
-        """Measure a World XYZ offset at the selected pose; never move the robot."""
-        try:
-            self.idle()
-            if self.gui.keyboard_velocity_active_key is not None:
-                raise ValueError("Release the jog key before measuring cleaner correction")
-            anchor = self.selected.get().strip()
-            tokens = load_cleaner_order(self.folder.get())
-            if anchor not in tokens:
-                raise ValueError("Select a position used by the cleaner sequence")
-            path = self.path(anchor)
-            document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
-            if not isinstance(document, dict):
-                raise ValueError(f"Invalid cleaner teaching: {path}")
-            if document.get("schema") == "torch_cleaner_joints_v1":
-                joint_state = document["joint_state"]
-                group = document.get("planning_group")
-                names = tuple(joint_state["names"])
-                positions = tuple(float(value) for value in joint_state["positions_rad"])
-            else:
-                group, names, positions, _tcp = self.load_pose(path)
-            expected = {f"right_manipulator_joint{index}" for index in range(1, 7)}
-            if (group != "right_manipulator" or len(names) != 6
-                    or set(names) != expected or len(positions) != 6
-                    or not all(math.isfinite(value) for value in positions)):
-                raise ValueError(f"Invalid right-arm teaching: {path}")
-            self.busy = True
-            self.status.set(f"Measuring cleaner correction at {anchor}...")
-
-            def work():
-                try:
-                    reference = self.gui.node._fk_pose_for_joints(group, names, positions)
-                    _names, _positions, measured, _provenance = (
-                        self.gui.node.capture_measured_teaching_snapshot(group, "torch_cleaner_correction")
-                    )
-                    reference_q = tuple(getattr(reference.orientation, axis)
-                                        for axis in ("x", "y", "z", "w"))
-                    measured_q = tuple(getattr(measured.orientation, axis)
-                                       for axis in ("x", "y", "z", "w"))
-                    norm = math.sqrt(sum(value * value for value in reference_q)
-                                     * sum(value * value for value in measured_q))
-                    if norm < 1e-9:
-                        raise ValueError("Cleaner correction orientation is invalid")
-                    cosine = min(1.0, abs(sum(a * b for a, b in zip(
-                        reference_q, measured_q,
-                    ))) / norm)
-                    angle_deg = math.degrees(2.0 * math.acos(cosine))
-                    if angle_deg > 5.0:
-                        raise ValueError(
-                            f"Cleaner correction changes orientation by {angle_deg:.1f}°; "
-                            "align the taught torch angle first (maximum 5°)"
-                        )
-                    delta = tuple(
-                        getattr(measured.position, axis) - getattr(reference.position, axis)
-                        for axis in ("x", "y", "z")
-                    )
-                    self.gui.post(self._confirm_cleaner_correction, anchor, tokens, delta, None)
-                except Exception as error:
-                    self.gui.post(self._confirm_cleaner_correction, anchor, tokens, None, str(error))
-
-            threading.Thread(target=work, daemon=True).start()
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
-            self.gui.error(f"Cleaner correction: {error}")
-
-    def _confirm_cleaner_correction(self, anchor, tokens, delta, error):
-        self.busy = False
-        if error is not None:
-            self.gui.error(f"Cleaner correction: {error}")
-            return
-        offsets = tuple(value * 1000.0 for value in delta)
-        if not messagebox.askyesno(
-            "Apply cleaner correction",
-            f"{anchor} measured World TCP difference: "
-            f"X {offsets[0]:+.1f}, Y {offsets[1]:+.1f}, Z {offsets[2]:+.1f} mm.\n"
-            "Apply to this position and every later sequence occurrence? "
-            "Saved teaching pose files will stay unchanged.",
-            parent=self.gui.root,
-        ):
-            self.status.set("Cleaner correction canceled")
-            return
-        try:
-            path = save_cleaner_correction(self.folder.get(), tokens, anchor, delta)
-            if not self.gui.build_torch_clean_sequence():
-                raise ValueError("Correction saved; rebuild the cleaner sequence before execution")
-            self.status.set(
-                f"Correction saved · {anchor} onward · World XYZ "
-                f"{offsets[0]:+.1f}/{offsets[1]:+.1f}/{offsets[2]:+.1f} mm · {path}"
-            )
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as save_error:
-            self.gui.error(f"Cleaner correction: {save_error}")
-
     def finished_capture(self, message):
         self.busy = False
         self.status.set(message)
+        self.gui.keyboard_jog_status.set(message)
+        (self.gui.error if message.startswith("Capture failed") else self.gui.log)(
+            f"Cleaner · {message}")
         self.refresh_teaching_index()
-
-    def save_order(self):
-        try:
-            self.idle()
-            import os
-            import tempfile
-            names = [name.strip() for name in self.order.get().split(",") if name.strip()]
-            if not names:
-                raise ValueError("Enter position names")
-            for name in names:
-                self.output_step(name) if ":" in name else self.path(name)
-            folder = self.path("start").parent
-            folder.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as stream:
-                temporary = stream.name
-                yaml.safe_dump({"schema": "torch_cleaner_sequence_v2", "positions": names}, stream)
-            os.replace(temporary, folder / "sequence.yaml")
-            self.status.set(f"Saved order: {folder / 'sequence.yaml'}")
-        except Exception as error:
-            self.gui.error(f"Cleaner: {error}")
-
-    def prepare(self):
-        try:
-            self.idle()
-            self.steps = []
-            names = [name.strip() for name in self.order.get().split(",") if name.strip()]
-            steps = []
-            for name in names:
-                if ":" in name:
-                    self.output_step(name)
-                    steps.append((name, None))
-                    continue
-                path = self.path(name)
-                data = yaml.load(path.read_text(), Loader=yaml.CSafeLoader)
-                if data.get("schema") == "torch_cleaner_joints_v1":
-                    joints = data["joint_state"]
-                    positions = tuple(float(v) for v in joints["positions_rad"])
-                    expected = [f"right_manipulator_joint{i}" for i in range(1, 7)]
-                    if joints["names"] != expected or len(positions) != 6 or not all(map(math.isfinite, positions)):
-                        raise ValueError(f"Invalid joints: {name}")
-                    stored = ("right_manipulator", tuple(expected), positions, None)
-                else:
-                    stored = self.load_pose(path)
-                steps.append((name, stored))
-            if not steps:
-                raise ValueError("Enter position names")
-            if len({pose[0] for _, pose in steps if pose is not None}) != 1:
-                raise ValueError("All cleaner positions must belong to the same arm")
-            self.steps, self.index = steps, 0
-            self.status.set(f"Ready: 1/{len(steps)} → {steps[0][0]}; confirm Next")
-        except Exception as error:
-            self.gui.error(f"Cleaner: {error}")
-
-    def next(self):
-        try:
-            self.idle(next_step=True)
-            g = self.gui
-            if not self.steps or self.index >= len(self.steps):
-                raise ValueError("Prepare the sequence first")
-            name, stored = self.steps[self.index]
-            group, names, positions, tcp = stored or ("right_manipulator", (), (), None)
-            if not g.execution_allowed or not g.robot_connected.get(group.removesuffix("_manipulator"), False):
-                raise ValueError("Connect the robot and enable physical execution")
-            if g.keyboard_velocity_arm is not None or g.keyboard_velocity_switching:
-                raise ValueError("Disable keyboard teaching before moving")
-            speed = float(g.velocity_percent.get()) / 100.0
-            if not 0 < speed <= 1:
-                raise ValueError("Invalid velocity scale")
-            self.busy = True
-            self.active = True
-            g.sequence_running = True
-            g.sequence_stop_requested = False
-            self.status.set(f"Moving {self.index + 1}/{len(self.steps)} → {name}")
-            step = dict(pose_name="weld_start", pose_label=f"Cleaner {name}", planning_group=group,
-                        joint_names=names, positions=positions, tcp_pose=tcp,
-                        velocity_scale=speed, touch_guard=False)
-            def work():
-                try:
-                    if g.sequence_stop_requested:
-                        raise RuntimeError("Cleaner stopped")
-                    if stored is None:
-                        channel, value = self.output_step(name)
-                        success, message = g.node.set_fastech_output_sync(channel, value != "OFF")
-                        if success and value not in ("ON", "OFF"):
-                            try:
-                                deadline = time.monotonic() + float(value)
-                                while time.monotonic() < deadline and not g.sequence_stop_requested:
-                                    time.sleep(0.02)
-                            finally:
-                                success, message = g.node.set_fastech_output_sync(channel, False)
-                    else:
-                        if step["tcp_pose"] is None:
-                            step["tcp_pose"] = g.node._fk_pose_for_joints(group, names, positions)
-                        if g.sequence_stop_requested:
-                            raise RuntimeError("Cleaner stopped")
-                        if name in ("start", "end"):
-                            step["use_joint_planning"] = True
-                        success, message = g.node.run_sequence_named_pose(step, True)
-                except Exception as error:
-                    success, message = False, str(error)
-                if not success or g.sequence_stop_requested:
-                    self.outputs_off()
-                g.post(self.finished_motion, success, message)
-            threading.Thread(target=work, daemon=True).start()
-        except Exception as error:
-            self.gui.error(f"Cleaner: {error}")
-
-    def finished_motion(self, success, message):
-        self.busy = False
-        if not success or self.gui.sequence_stop_requested:
-            self.active = False
-            self.gui.sequence_running = False
-            self.steps = []
-            self.status.set(f"Stopped: {message}; prepare again")
-            return
-        self.index += 1
-        if self.index == len(self.steps):
-            self.active = False
-            self.gui.sequence_running = False
-            threading.Thread(target=self.outputs_off, daemon=True).start()
-        self.status.set("Cleaner sequence complete" if self.index == len(self.steps) else
-                        f"Arrived. Inspect, then confirm Next → {self.steps[self.index][0]} ({self.index + 1}/{len(self.steps)})")
-
-    def stop(self):
-        self.steps = []
-        self.gui.emergency_stop_all()
-        self.status.set("STOP requested; prepare again")
 
     def outputs_off(self):
         for channel in (5, 6, 7):
@@ -435,12 +166,9 @@ class TorchCleanerPanel:
                 self.gui.post(self.gui.error, f"Cleaner DO{channel} OFF failed: {error}")
 
     def abort(self):
-        if not self.active and not self.busy:
-            self.steps = []
-            return
-        self.active = False
+        # SequenceExecutor owns motion/output steps. Preserve the panel's
+        # cleanup while a teaching capture is in progress.
         if not self.busy:
-            self.gui.sequence_running = False
-        self.steps = []
-        self.status.set("Stopped; prepare sequence again")
+            return
+        self.status.set("Stopped")
         threading.Thread(target=self.outputs_off, daemon=True).start()

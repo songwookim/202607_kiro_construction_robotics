@@ -1,0 +1,32 @@
+schema: torch_cleaner_correction_v1
+anchor: cleaner1_top
+anchor_index: 1
+sequence_positions:
+- start
+- cleaner1_top
+- cleaner1_inside
+- WIRE_FORWARD:0.25
+- DO7:ON
+- DO7:OFF
+- cleaner1_top
+- cleaner2_top
+- cleaner2_entry
+- DO6:2
+- cleaner2_top
+- cleaner1_return_top
+- cleaner1_return_inside
+- DO7:1
+- cleaner1_return_top
+- end
+source_sha256:
+  cleaner1_top: 18f78a63028e3009b22d90a888addfef4aa802543346fe7bd9f18735cc10a87d
+  cleaner1_inside: 2daf705fb3180e52e36841a411f5ef28206ac6cce86d426db44e1f50bb04791a
+  cleaner2_top: 073db2bc554989b0d7c1dccd97baf62385d5d25f015b0c5032a6ffd08b3607f4
+  cleaner2_entry: e4b604a8b6645cb2d895f8100594753d2ab26ddba8c77e4bd43b52b580a3f87e
+  cleaner1_return_top: cd1f44eb2358641933e38d56de9debc044f653fb6f08100c8cf4ba7f95b1b028
+  cleaner1_return_inside: 59bd5f3902da7fccfa076e5c455fc689ce7a06d4c35d490f4e3cc0a8a88ccfc1
+  end: 8d36a86fc6ebd0571e30aef6f8c434008e4cd01a9ea810ade0df24d31b7d0c97
+translation_world_m:
+  x: 1.846725570731067e-05
+  y: -1.378902130677595e-05
+  z: 1.7069468263963827e-05

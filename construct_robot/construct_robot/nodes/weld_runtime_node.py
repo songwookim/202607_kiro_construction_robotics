@@ -53,6 +53,7 @@ from construct_robot.core.cartesian_path_common import (
 from construct_robot.nodes.cartesian_path_server import make_weld_visualization
 from construct_robot.core.keyboard_jog import keyboard_velocity_vector
 from construct_robot.nodes.keyboard_servo import KeyboardServoBridge
+from construct_robot.nodes.action_call import ActionCall, wait_for_future
 from construct_robot.core.seam_geometry import (
     _pose_position_tuple,
     _unit_vector,
@@ -241,8 +242,12 @@ class WeldGuiNode(Node):
             "/controller_manager/switch_controller",
         )
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        # Own spin thread: /tf (200 Hz) must not queue behind GUI callbacks,
+        # which made "current TCP" lookups hundreds of ms stale after motion.
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
         self.active_motion_goal = None
+        self._motion_action_calls = set()
+        self._motion_action_lock = threading.Lock()
         self.active_touch_probe = None
         self.touch_probe_edge_pose = None
         self.touch_probe_stop_requested = threading.Event()
@@ -678,24 +683,14 @@ class WeldGuiNode(Node):
     def _call_service_sync(client, request, service_name, timeout=3.0):
         if not client.wait_for_service(timeout_sec=1.0):
             return False, f"ROS service unavailable: {service_name}"
-        completed = threading.Event()
-        result = {}
-
-        def response_ready(future):
-            try:
-                result["response"] = future.result()
-            except Exception as error:
-                result["error"] = str(error)
-            finally:
-                completed.set()
-
-        client.call_async(request).add_done_callback(response_ready)
-        if not completed.wait(timeout):
-            return False, f"ROS service timeout: {service_name}"
-        if "error" in result:
-            return False, result["error"]
-        response = result["response"]
-        return bool(response.success), str(response.message)
+        try:
+            response = wait_for_future(
+                client.call_async(request), timeout, service_name,
+                timeout_message=f"ROS service timeout: {service_name}",
+            )
+            return bool(response.success), str(response.message)
+        except Exception as error:
+            return False, str(error)
 
     def set_fastech_output_sync(self, channel, enabled):
         if int(channel) == FASTECH_TOUCH_OUTPUT_PORT:
@@ -966,23 +961,14 @@ class WeldGuiNode(Node):
         request = SetDigitalOutput.Request()
         request.port = int(port)
         request.value = bool(value)
-        event = threading.Event()
-        outcome = {}
-
-        def completed(future):
-            try:
-                response = future.result()
-                outcome["value"] = (response.success, response.message)
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-            event.set()
-
-        self.legacy_digital_output_client.call_async(request).add_done_callback(
-            completed
-        )
-        if not event.wait(timeout=3.0):
-            return False, "RBPodo digital output command timed out"
-        success, message = outcome["value"]
+        try:
+            response = wait_for_future(
+                self.legacy_digital_output_client.call_async(request), 3.0,
+                "RBPodo digital output", timeout_message="RBPodo digital output command timed out",
+            )
+            success, message = response.success, response.message
+        except Exception as error:
+            return False, str(error)
         if not success:
             return False, message
         deadline = time.monotonic() + 1.0
@@ -1001,21 +987,14 @@ class WeldGuiNode(Node):
     def _call_service_and_wait(client, request, description):
         if not client.wait_for_service(timeout_sec=2.0):
             return False, f"{description} service unavailable"
-        event = threading.Event()
-        outcome = {}
-
-        def completed(future):
-            try:
-                response = future.result()
-                outcome["value"] = (response.success, response.message)
-            except Exception as error:
-                outcome["value"] = (False, str(error))
-            event.set()
-
-        client.call_async(request).add_done_callback(completed)
-        if not event.wait(timeout=10.0):
-            return False, f"{description} timed out"
-        return outcome["value"]
+        try:
+            response = wait_for_future(
+                client.call_async(request), 10.0, description,
+                timeout_message=f"{description} timed out",
+            )
+            return response.success, response.message
+        except Exception as error:
+            return False, str(error)
 
     def _send_action_goal_and_wait(
         self,
@@ -1028,57 +1007,27 @@ class WeldGuiNode(Node):
         feedback_callback=None,
     ):
         """Submit an action goal and block only the calling worker thread."""
-        if not client.wait_for_server(timeout_sec=3.0):
-            raise RuntimeError(f"{description} action server unavailable")
-        accepted = threading.Event()
-        finished = threading.Event()
-        outcome = {}
+        def goal_ready(handle):
+            self.active_motion_goal = handle
+            if on_accepted is not None:
+                on_accepted(handle)
 
-        def result_ready(future):
-            try:
-                outcome["result"] = future.result().result
-            except Exception as error:
-                outcome["error"] = str(error)
-            finished.set()
-
-        def goal_ready(future):
-            try:
-                handle = future.result()
-                if not handle.accepted:
-                    outcome["error"] = f"{description} goal rejected"
-                    finished.set()
-                    return
-                outcome["handle"] = handle
-                self.active_motion_goal = handle
-                if on_accepted is not None:
-                    on_accepted(handle)
-                handle.get_result_async().add_done_callback(result_ready)
-            except Exception as error:
-                outcome["error"] = str(error)
-                finished.set()
-            finally:
-                accepted.set()
-
-        send_arguments = {}
-        if feedback_callback is not None:
-            send_arguments["feedback_callback"] = feedback_callback
-        client.send_goal_async(goal, **send_arguments).add_done_callback(goal_ready)
-        if not accepted.wait(timeout=5.0):
-            raise TimeoutError(f"{description} goal response timed out")
-        if not finished.wait(timeout=result_timeout):
-            handle = outcome.get("handle")
-            if handle is not None:
-                try:
-                    handle.cancel_goal_async()
-                except Exception:
-                    pass
-            raise TimeoutError(f"{description} timed out")
-        handle = outcome.get("handle")
-        if handle is self.active_motion_goal:
-            self.active_motion_goal = None
-        if "error" in outcome:
-            raise RuntimeError(outcome["error"])
-        return outcome["result"]
+        call = ActionCall(description, on_accepted=goal_ready)
+        # Lazy defaults also support worker-only runtime test doubles.
+        lock = self.__dict__.setdefault("_motion_action_lock", threading.Lock())
+        calls = self.__dict__.setdefault("_motion_action_calls", set())
+        with lock:
+            calls.add(call)
+        try:
+            if not client.wait_for_server(timeout_sec=3.0):
+                raise RuntimeError(f"{description} action server unavailable")
+            call.send(client, goal, feedback_callback)
+            return call.wait(5.0, result_timeout)
+        finally:
+            with lock:
+                calls.discard(call)
+            if call.handle is self.active_motion_goal:
+                self.active_motion_goal = None
 
     def _check_robot_feedback(self):
         self._request_controller_states()
@@ -1252,6 +1201,36 @@ class WeldGuiNode(Node):
             rclpy.time.Time(),
             timeout=Duration(seconds=1.0),
         )
+
+    def _path_start_tcp_pose(self, planning_group, timeout=1.0):
+        """TCP for the start of a new path: FK of joints measured *after* now.
+
+        A path that starts from a stale TCP makes the planner move the arm
+        back to it first (6-18 mm against the previous move in cleaner
+        sequences).  Falls back to TF if no fresh joint state arrives.
+        """
+        arm = planning_group.removesuffix("_manipulator")
+        requested = self.get_clock().now().nanoseconds * 1e-9
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.measured_joint_snapshot_lock:
+                snapshot = copy.deepcopy(self.measured_joint_snapshots.get(arm))
+            if snapshot is not None and snapshot["stamp_sec"] >= requested:
+                names = sorted(snapshot["positions"])
+                try:
+                    return self._fk_pose_for_joints(
+                        planning_group, names,
+                        [snapshot["positions"][name] for name in names],
+                    )
+                except RuntimeError as error:
+                    self.get_logger().warning(f"Path start FK failed, using TF: {error}")
+                    break
+            time.sleep(0.005)
+        else:
+            self.get_logger().warning(
+                f"No fresh {arm} joint state for path start within {timeout:.1f} s; using TF"
+            )
+        return self._current_tcp_pose(planning_group)
 
     def _current_tcp_pose(self, planning_group):
         transform = self._current_tcp_transform(planning_group)
@@ -1774,7 +1753,7 @@ class WeldGuiNode(Node):
         """Execute a straight World-vector probe path; the GUI cancels on Fastech DI0."""
         arm = planning_group.removesuffix("_manipulator")
         try:
-            start = self._current_tcp_pose(planning_group)
+            start = self._path_start_tcp_pose(planning_group)
             self.touch_probe_cancel_event.set()
             self.touch_probe_cancel_event = threading.Event()
             self.active_touch_probe = (
@@ -1976,27 +1955,16 @@ class WeldGuiNode(Node):
             return False, f"{arm} trajectory cancel service unavailable"
         request = CancelGoal.Request()
         # Zero UUID + zero timestamp means cancel all goals.
-        finished = threading.Event()
-        outcome = {}
-
-        def response_ready(future):
-            try:
-                response = future.result()
-                outcome["code"] = int(response.return_code)
-                outcome["count"] = len(response.goals_canceling)
-            except Exception as error:
-                outcome["error"] = str(error)
-            finished.set()
-
-        client.call_async(request).add_done_callback(response_ready)
-        if not finished.wait(timeout=1.0):
-            return False, "cancel response timed out"
-        if "error" in outcome:
-            return False, outcome["error"]
-        success = outcome.get("code") == CancelGoal.Response.ERROR_NONE
-        return success, (
-            f"return_code={outcome.get('code')} · "
-            f"goals_canceling={outcome.get('count', 0)}"
+        try:
+            response = wait_for_future(
+                client.call_async(request), 1.0, "trajectory cancel",
+                timeout_message="cancel response timed out",
+            )
+            code, count = int(response.return_code), len(response.goals_canceling)
+        except Exception as error:
+            return False, str(error)
+        return code == CancelGoal.Response.ERROR_NONE, (
+            f"return_code={code} · goals_canceling={count}"
         )
 
     def stop_sequence_equipment(self, devices):
@@ -2081,23 +2049,14 @@ class WeldGuiNode(Node):
             return False, f"/{arm}_rbpodo_hardware/move_stop unavailable"
         request = MoveStop.Request()
         request.timeout = 2.0
-        finished = threading.Event()
-        outcome = {}
-
-        def response_ready(future):
-            try:
-                response = future.result()
-                outcome["success"] = bool(response.success)
-            except Exception as error:
-                outcome["error"] = str(error)
-            finished.set()
-
-        client.call_async(request).add_done_callback(response_ready)
-        if not finished.wait(timeout=3.0):
-            return False, "service response timed out"
-        if "error" in outcome:
-            return False, outcome["error"]
-        return outcome.get("success", False), "controlled move_stop completed"
+        try:
+            response = wait_for_future(
+                client.call_async(request), 3.0, "controlled move_stop",
+                timeout_message="service response timed out",
+            )
+            return bool(response.success), "controlled move_stop completed"
+        except Exception as error:
+            return False, str(error)
 
     def switch_arm_controller(self, arm, activate):
         """Deactivate to stop command streaming, or reactivate for return."""
@@ -2113,23 +2072,16 @@ class WeldGuiNode(Node):
         request.strictness = SwitchController.Request.BEST_EFFORT
         request.activate_asap = True
         request.timeout.sec = 3
-        finished = threading.Event()
-        outcome = {}
-
-        def response_ready(future):
-            try:
-                outcome["success"] = bool(future.result().ok)
-            except Exception as error:
-                outcome["error"] = str(error)
-            finished.set()
-
-        client.call_async(request).add_done_callback(response_ready)
-        if not finished.wait(timeout=4.0):
-            return False, f"{controller} switch timed out"
-        if "error" in outcome:
-            return False, outcome["error"]
+        try:
+            response = wait_for_future(
+                client.call_async(request), 4.0, controller,
+                timeout_message=f"{controller} switch timed out",
+            )
+            success = bool(response.ok)
+        except Exception as error:
+            return False, str(error)
         action = "activated" if activate else "deactivated"
-        if not outcome.get("success", False):
+        if not success:
             return False, f"{controller} failed to become {action}"
         expected_state = "active" if activate else "inactive"
         if not self.wait_for_controller_state(controller, expected_state):
@@ -2327,7 +2279,7 @@ class WeldGuiNode(Node):
                 raise RuntimeError("Touch probe canceled; automatic retract inhibited")
             # The captured contact/stopped pose can precede settling or a
             # controller exchange. Plan from the actual pose at retract time.
-            current_pose = self._current_tcp_pose(planning_group)
+            current_pose = self._path_start_tcp_pose(planning_group)
             points = linear_pose_waypoints(current_pose, start, 2)
             success, message = self.run_sequence_cartesian_motion(
                 {
@@ -2420,7 +2372,7 @@ class WeldGuiNode(Node):
         )
         if tcp_target:
             try:
-                current_tcp = self._current_tcp_pose(planning_group)
+                current_tcp = self._path_start_tcp_pose(planning_group)
             except TransformException as error:
                 self.ui.post(self.ui.error, f"Current TCP lookup failed: {error}")
                 return
@@ -3162,28 +3114,6 @@ class WeldGuiNode(Node):
                 step["joint_names"], step["positions"], step.get("tcp_pose"))
         except (RuntimeError, ValueError, TransformException) as error:
             return False, f"Named pose recall blocked: {error}"
-        offset = step.get("cleaner_world_offset_m")
-        if offset is not None:
-            try:
-                corrected = copy.deepcopy(step["tcp_pose"])
-                for axis in ("x", "y", "z"):
-                    setattr(
-                        corrected.position, axis,
-                        getattr(corrected.position, axis) + float(offset[axis]),
-                    )
-                corrected_positions = self._cleaner_corrected_joint_target(step, corrected)
-                step = dict(step, tcp_pose=corrected, positions=corrected_positions)
-                self.ui.post(
-                    self.ui.log,
-                    f"Cleaner corrected {step['pose_label']} · World XYZ offset "
-                    f"({float(offset['x'])*1000:+.1f}, "
-                    f"{float(offset['y'])*1000:+.1f}, "
-                    f"{float(offset['z'])*1000:+.1f}) mm · "
-                    f"target=({corrected.position.x:.4f}, "
-                    f"{corrected.position.y:.4f}, {corrected.position.z:.4f}) m",
-                )
-            except (KeyError, TypeError, ValueError, RuntimeError) as error:
-                return False, f"Cleaner correction blocked: {error}"
         tcp_target = bool(
             not step.get("use_joint_planning", False)
             and step.get("pose_name") in TCP_POSE_TEACHING_POSES
@@ -3191,7 +3121,7 @@ class WeldGuiNode(Node):
         )
         if tcp_target:
             try:
-                current_tcp = self._current_tcp_pose(step["planning_group"])
+                current_tcp = self._path_start_tcp_pose(step["planning_group"])
                 points = named_tcp_linear_waypoints(
                     current_tcp, step["tcp_pose"]
                 )
@@ -3528,6 +3458,13 @@ class WeldGuiNode(Node):
             self.ui.post(self.ui.error, result.message)
 
     def cancel_active_motion(self):
-        if self.active_motion_goal is not None:
-            self.active_motion_goal.cancel_goal_async()
+        lock = self.__dict__.setdefault("_motion_action_lock", threading.Lock())
+        with lock:
+            calls = tuple(getattr(self, "_motion_action_calls", ()))
+        for call in calls:
+            call.cancel()
+        handle = self.active_motion_goal
+        if handle is not None and not any(call.handle is handle for call in calls):
+            handle.cancel_goal_async()
+        if calls or handle is not None:
             self.ui.post(self.ui.log, "Cancel requested")

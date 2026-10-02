@@ -193,6 +193,47 @@ def test_timed_outputs_turn_off_and_route_by_backend():
     )
 
 
+@pytest.mark.parametrize("kind", [
+    "planned_trajectory", "named_pose", "dual_arm_pose", "spray_motion", "head_motion",
+])
+@pytest.mark.parametrize("execute", [False, True])
+def test_motion_dispatch_preserves_runtime_method_and_preview_flag(kind, execute):
+    host, executor = make_host()
+    handler = Mock(return_value=(True, "runtime result"))
+    setattr(host.node, f"run_sequence_{kind}", handler)
+    step = {"type": kind}
+    assert executor.run_step(step, execute) == (True, "runtime result")
+    handler.assert_called_once_with(step, execute)
+    host._execute_hicomm_weld.assert_not_called()
+    host.hicomm_client.set_command_bit.assert_not_called()
+
+
+def test_motion_dispatch_does_not_invoke_unlisted_runtime_methods():
+    host, executor = make_host()
+    host.node.run_sequence_unlisted = Mock()
+    assert executor.run_step({"type": "unlisted"}, True) == (False, "unsupported sequence step")
+    host.node.run_sequence_unlisted.assert_not_called()
+
+
+def test_grouping_preserves_first_seen_slot_order_and_separate_sleep():
+    host, executor = make_host()
+    host._run_sequence_step = Mock(return_value=(True, "preview"))
+    steps = [
+        {"type": "head_motion", "parallel_slot": 9}, named(3), named(9),
+        {"type": "sleep", "parallel_slot": 9, "seconds": 0},
+        {"type": "head_motion", "parallel_slot": 3},
+    ]
+    # Slots are first-appearance ordered, not sorted or split at repeated keys.
+    assert executor.execution_preflight_error(steps, work_cycle=False) is None
+    run(executor, steps, execute=False)
+    assert [call.args[0] for call in host._set_sequence_status.call_args_list] == [
+        "Parallel slot 9 · group 1/3 · 2 task(s)",
+        "Parallel slot 3 · group 2/3 · 2 task(s)",
+        "Parallel slot sleep · group 3/3 · 1 task(s)",
+    ]
+    host._sequence_finished.assert_called_once_with(True, "complete")
+
+
 def test_cleaner_outputs_are_forced_off_after_execution():
     host, executor = make_host()
     steps = [{"type": "digital_output", "io_backend": "fastech_ethernet", "port": 7,
@@ -337,3 +378,54 @@ def test_node_reuses_approved_plan_only_for_execution():
     WeldGuiNode.run_sequence_cartesian_motion(node, step, True)
     assert [g.reuse_approved_plan for g in goals] == [False, True]
     assert [g.execute_requested for g in goals] == [False, True]
+
+
+def test_cleaner_failure_turns_off_only_owned_output():
+    from unittest.mock import Mock
+    from construct_robot.gui.weld_action_gui import WeldActionGui
+    gui = object.__new__(WeldActionGui)
+    gui.sequence_stop_requested = False
+    gui.fake_arc_enabled = SimpleNamespace(get=lambda: False)
+    gui.post = Mock()
+    gui.error = Mock()
+    gui._set_sequence_status = Mock()
+    gui._sequence_finished = Mock()
+    gui._run_sequence_step = Mock(return_value=(False, "test failure"))
+    gui._set_fastech_output_sync = Mock(return_value=(True, "OFF"))
+    gui._finish_weld_feedback_record = Mock()
+    gui.hicomm_client = SimpleNamespace(inhibit_outputs=Mock(), clear_outputs=Mock(), latest_status=Mock())
+    gui.node = SimpleNamespace(cancel_active_motion=Mock())
+    gui._sequence_worker([{"type": "digital_output", "port": 7, "value": True,
+                           "task_cleaner_output": True}], [0], True)
+    gui._set_fastech_output_sync.assert_called_once_with(7, False)
+
+
+@pytest.mark.parametrize("waited", [True, False])
+def test_wire_feed_pulse_stops_on_completion_or_interrupt(waited):
+    host, executor = make_host()
+    host.hicomm_client.allow_outputs = Mock()
+    host._interruptible_wait = Mock(return_value=waited)
+    step = {"type": "wire_feed", "duration": 0.25}
+    assert executor.run_step(step, False)[0]
+    host.hicomm_client.set_command_bit.assert_not_called()
+    assert executor.run_step(step, True)[0] is waited
+    host._interruptible_wait.assert_called_once_with(0.25)
+    assert host.hicomm_client.set_command_bit.call_args_list == [
+        ((executor_module.BIT_REVERSE, False),),
+        ((executor_module.BIT_FORWARD, True),),
+        ((executor_module.BIT_FORWARD, False),),
+    ]
+
+
+def test_wire_feed_turns_off_when_wait_raises():
+    host, executor = make_host()
+    host.hicomm_client.allow_outputs = Mock()
+    host._interruptible_wait = Mock(side_effect=RuntimeError("wait failed"))
+    with pytest.raises(RuntimeError, match="wait failed"):
+        executor.run_step({"type": "wire_feed", "duration": 0.25}, True)
+    host.hicomm_client.set_command_bit.assert_called_with(executor_module.BIT_FORWARD, False)
+
+
+def test_wire_feed_preflight_requires_hicomm():
+    host, executor = make_host(hicomm_connected=False)
+    assert executor.execution_preflight_error([{"type": "wire_feed"}], True) == "Connect Hi-COMM before wire feed"

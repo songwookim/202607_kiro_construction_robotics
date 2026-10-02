@@ -54,6 +54,14 @@ def test_core_and_io_do_not_depend_on_gui_or_nodes():
             assert not (name or "").startswith(
                 ("construct_robot.gui", "construct_robot.nodes", "tkinter")
             ), f"{path.name} imports {name}"
+            if path.parent.name == "core":
+                # Weld settings intentionally reuse the one protocol validator;
+                # file adapters and workflows must not leak back into core.
+                assert not (name or "").startswith("construct_robot.io") or (
+                    path.name == "weld_config.py"
+                    and name == "construct_robot.io.hicomm_welder"
+                ), f"{path.name} imports file/device adapter {name}"
+                assert name != "yaml", f"{path.name} parses files in core"
 
 
 def test_moved_gui_helpers_remain_importable_from_the_gui_module():

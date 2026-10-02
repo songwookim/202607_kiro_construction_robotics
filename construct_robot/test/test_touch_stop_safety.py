@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 import threading
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -82,7 +83,7 @@ def test_retract_uses_fresh_pose_and_honors_stop(monkeypatch, canceled):
     node.touch_probe_controller_deactivated = True
     node.restore_touch_controller = Mock(return_value=(True, "restored"))
     current, old_contact, start = object(), object(), object()
-    node._current_tcp_pose = Mock(return_value=current)
+    node._path_start_tcp_pose = Mock(return_value=current)
     node.run_sequence_cartesian_motion = Mock(return_value=(True, "returned"))
     waypoints = Mock(return_value=[])
     monkeypatch.setattr(weld_runtime_node, "linear_pose_waypoints", waypoints)
@@ -143,3 +144,38 @@ def test_delete_all_sequence_steps_resets_builder(monkeypatch):
     assert gui.sequence_steps == []
     gui.sequence_parallel_slot.set.assert_called_once_with(1)
     gui.refresh_sequence_table.assert_called_once_with()
+
+
+def test_path_start_uses_fk_of_joints_measured_after_the_request():
+    """A stale TF TCP made cleaner moves first swing back 6-18 mm."""
+    node = object.__new__(WeldGuiNode)
+    node.measured_joint_snapshot_lock = threading.Lock()
+    names = [f"right_manipulator_joint{i}" for i in range(1, 7)]
+    node.measured_joint_snapshots = {"right": {
+        "positions": dict(zip(names, [0.1] * 6)), "received_monotonic": 0.0, "stamp_sec": 0.0}}
+    clock = SimpleNamespace(t=100.0)
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=int(clock.t * 1e9)))
+    node.get_logger = lambda: Mock()
+    fk_pose = object()
+    node._fk_pose_for_joints = Mock(return_value=fk_pose)
+    node._current_tcp_pose = Mock(return_value="tf")
+
+    def fresh_sample_arrives():
+        time.sleep(0.05)
+        node.measured_joint_snapshots["right"] = {
+            "positions": dict(zip(names, [0.2] * 6)), "received_monotonic": 0.0, "stamp_sec": 100.01}
+
+    threading.Thread(target=fresh_sample_arrives).start()
+    assert WeldGuiNode._path_start_tcp_pose(node, "right_manipulator") is fk_pose
+    assert list(node._fk_pose_for_joints.call_args.args[2]) == [0.2] * 6  # old sample ignored
+    node._current_tcp_pose.assert_not_called()
+
+
+def test_path_start_falls_back_to_tf_without_fresh_joints():
+    node = object.__new__(WeldGuiNode)
+    node.measured_joint_snapshot_lock = threading.Lock()
+    node.measured_joint_snapshots = {}
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=0))
+    node.get_logger = lambda: Mock()
+    node._current_tcp_pose = Mock(return_value="tf")
+    assert WeldGuiNode._path_start_tcp_pose(node, "right_manipulator", timeout=0.05) == "tf"

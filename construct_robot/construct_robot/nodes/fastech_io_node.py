@@ -104,6 +104,9 @@ class FastechIONode(Node):
             self.ip_address,
             self.board_id,
         )
+        # Include publication in the I/O transaction. A poll result must not
+        # be published after a newer output readback or disconnect result.
+        self._operation_lock = threading.RLock()
         self._connection_requested = threading.Event()
         if bool(self.get_parameter("auto_connect").value):
             self._connection_requested.set()
@@ -184,6 +187,12 @@ class FastechIONode(Node):
         )
 
     def _attempt_connect(self):
+        with self._operation_lock:
+            if self._stop_event.is_set() or not self._connection_requested.is_set():
+                return False, "connection no longer requested"
+            return self._connect_locked()
+
+    def _connect_locked(self):
         try:
             snapshot = self._manager.connect()
             self._last_error = ""
@@ -222,25 +231,34 @@ class FastechIONode(Node):
                     next_connect_at = time.monotonic() + self.reconnect_period_s
                     continue
             cycle_started = time.monotonic()
-            try:
-                snapshot = self._manager.read_io()
-                self._publish_snapshot(snapshot)
-            except Exception as error:
-                message = str(error)
+            message = self._poll_once()
+            if message is not None:
                 self.get_logger().warning(
                     f"Fastech connection lost; reconnecting · {message}"
                 )
-                self._manager.disconnect()
-                self._publish_disconnected(message)
                 next_connect_at = time.monotonic() + self.reconnect_period_s
                 continue
             remaining = self.poll_period_s - (time.monotonic() - cycle_started)
             if remaining > 0.0:
                 self._stop_event.wait(remaining)
 
+    def _poll_once(self):
+        with self._operation_lock:
+            if self._stop_event.is_set() or not self._connection_requested.is_set():
+                return None
+            try:
+                self._publish_snapshot(self._manager.read_io())
+            except Exception as error:
+                message = str(error)
+                self._manager.disconnect()
+                self._publish_disconnected(message)
+                return message
+        return None
+
     def _connect(self, _request, response):
-        self._connection_requested.set()
-        success, message = self._attempt_connect()
+        with self._operation_lock:
+            self._connection_requested.set()
+            success, message = self._attempt_connect()
         response.success = success
         response.message = (
             f"Fastech connected: {message}"
@@ -250,20 +268,22 @@ class FastechIONode(Node):
         return response
 
     def _disconnect(self, _request, response):
-        self._connection_requested.clear()
-        self._manager.disconnect()
-        self._publish_disconnected("disconnected by service request")
+        with self._operation_lock:
+            self._connection_requested.clear()
+            self._manager.disconnect()
+            self._publish_disconnected("disconnected by service request")
         response.success = True
         response.message = "Fastech disconnected; outputs were not changed"
         return response
 
     def _command_output(self, channel, value):
-        try:
-            snapshot = self._manager.set_output(channel, value)
-            self._publish_snapshot(snapshot)
-            return True, f"Fastech DO{channel} readback verified"
-        except Exception as error:
-            return False, str(error)
+        with self._operation_lock:
+            try:
+                snapshot = self._manager.set_output(channel, value)
+                self._publish_snapshot(snapshot)
+                return True, f"Fastech DO{channel} readback verified"
+            except Exception as error:
+                return False, str(error)
 
     def _touch_enable(self, request, response):
         response.success, response.message = self._command_output(

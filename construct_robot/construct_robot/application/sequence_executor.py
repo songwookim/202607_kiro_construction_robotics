@@ -18,14 +18,16 @@ Host interface used here (duck-typed; see ``SequenceRuntimeHost``).
 """
 
 import copy
+from collections import Counter, defaultdict
 import threading
 import time
+import math
 from typing import Protocol
 
 from construct_robot.core.cartesian_path_common import pose_is_valid
 from construct_robot.core.sequence_model import SequenceModel
 from construct_robot.core.weld_config import validate_digital_weld_settings
-from construct_robot.io.hicomm_welder import BIT_GAS
+from construct_robot.io.hicomm_welder import BIT_GAS, BIT_FORWARD, BIT_REVERSE
 
 
 class SequenceRuntimeHost(Protocol):
@@ -166,8 +168,6 @@ def record_step_conditions(steps, indices):
             "joint1_rad",
             "joint2_rad",
             "cleaner_source_index",
-            "cleaner_anchor",
-            "cleaner_world_offset_m",
             "resolve_target_tcp_ik",
             "work_cycle_id",
             "work_cycle_number",
@@ -290,6 +290,8 @@ class SequenceExecutor:
                 "Physical execution is unavailable or a required robot is "
                 f"disconnected: {', '.join(disconnected) or 'execution disabled'}"
             )
+        if any(step["type"] == "wire_feed" for step in steps) and not host.hicomm_connected:
+            return "Connect Hi-COMM before wire feed"
         if contains_weld_command(steps) and not work_cycle and (
             not host.hicomm_connected
         ):
@@ -301,14 +303,13 @@ class SequenceExecutor:
             and step["command"] == "on"
             for step in steps
         )
-        motion_counts = {}
-        for local_index, step in enumerate(steps):
-            if step["type"] not in (
+        motion_counts = Counter(
+            step.get("parallel_slot", local_index + 1)
+            for local_index, step in enumerate(steps)
+            if step["type"] in (
                 "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion"
-            ):
-                continue
-            slot = step.get("parallel_slot", local_index + 1)
-            motion_counts[slot] = motion_counts.get(slot, 0) + 1
+            )
+        )
         duplicate_motion_slots = [
             slot for slot, count in motion_counts.items() if count > 1
         ]
@@ -439,20 +440,16 @@ class SequenceExecutor:
             host.sequence_model = SequenceModel()
         success = True
         message = "complete"
-        groups = []
-        group_lookup = {}
+        groups = defaultdict(list)
         for local_index, (stored_index, step) in enumerate(zip(indices, steps)):
             key = (
                 ("sleep", stored_index)
                 if step["type"] == "sleep"
                 else ("slot", step.get("parallel_slot", local_index + 1))
             )
-            if key not in group_lookup:
-                group_lookup[key] = []
-                groups.append((key, group_lookup[key]))
-            group_lookup[key].append((stored_index, step))
+            groups[key].append((stored_index, step))
 
-        for group_index, (key, members) in enumerate(groups, start=1):
+        for group_index, (key, members) in enumerate(groups.items(), start=1):
             if host.sequence_stop_requested:
                 success, message = False, "stopped by operator"
                 break
@@ -638,18 +635,11 @@ class SequenceExecutor:
                 finally:
                     host._mark_weld_motion_timing("complete")
             return host.node.run_sequence_cartesian_motion(step, execute_requested)
-        if step["type"] == "planned_trajectory":
-            return host.node.run_sequence_planned_trajectory(
-                step, execute_requested
-            )
-        if step["type"] == "named_pose":
-            return host.node.run_sequence_named_pose(step, execute_requested)
-        if step["type"] == "dual_arm_pose":
-            return host.node.run_sequence_dual_arm_pose(step, execute_requested)
-        if step["type"] == "spray_motion":
-            return host.node.run_sequence_spray_motion(step, execute_requested)
-        if step["type"] == "head_motion":
-            return host.node.run_sequence_head_motion(step, execute_requested)
+        # Only these whitelisted motion types share the runtime call signature.
+        if step["type"] in (
+            "planned_trajectory", "named_pose", "dual_arm_pose", "spray_motion", "head_motion",
+        ):
+            return getattr(host.node, f"run_sequence_{step['type']}")(step, execute_requested)
         if step["type"] == "sleep":
             if not execute_requested:
                 return True, "sleep planned (no wait)"
@@ -696,6 +686,20 @@ class SequenceExecutor:
                 if waited
                 else "D-WELD duration interrupted"
             )
+        if step["type"] == "wire_feed":
+            client = host.hicomm_client
+            if client is None or not client.connected:
+                return False, "Hi-COMM disconnected"
+            if not math.isfinite(duration) or not 0 < duration <= 30:
+                return False, "Wire feed duration must be 0..30 seconds"
+            try:
+                client.allow_outputs()
+                client.set_command_bit(BIT_REVERSE, False)
+                client.set_command_bit(BIT_FORWARD, True)
+                waited = host._interruptible_wait(duration)
+                return waited, "Wire feed complete" if waited else "Wire feed interrupted"
+            finally:
+                client.set_command_bit(BIT_FORWARD, False)
         if step["type"] == "gas":
             client = host.hicomm_client
             if client is None or not client.connected:

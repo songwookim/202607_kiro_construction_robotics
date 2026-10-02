@@ -1,7 +1,6 @@
 import copy
 import math
 import threading
-import time
 
 import rclpy
 from geometry_msgs.msg import Point, Pose, PoseArray
@@ -16,6 +15,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
+from construct_robot.nodes.action_call import ActionCall, wait_for_future
 from construct_robot.core.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     cartesian_path_length,
@@ -29,7 +29,6 @@ from construct_robot.core.cartesian_path_common import (
 )
 
 
-FUTURE_POLL_PERIOD = 0.01
 PLANNING_TIMEOUT = 30.0
 EXECUTION_TIMEOUT = 120.0
 LINEAR_TCP_RAMP_DURATION_S = 1.0
@@ -181,7 +180,8 @@ class CartesianPathActionServer(Node):
         self._approved_plan_signature = None
         self._approved_plan_response = None
         self._execute_handle_lock = threading.Lock()
-        self._active_execute_handle = None
+        self._execute_calls = {}
+        self._canceled_execute_goals = set()
         callback_group = ReentrantCallbackGroup()
         marker_qos = QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL
@@ -238,12 +238,7 @@ class CartesianPathActionServer(Node):
 
     @staticmethod
     def _wait_for_future(future, timeout, operation):
-        deadline = time.monotonic() + timeout
-        while not future.done():
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f"{operation} timed out after {timeout:.0f} s")
-            time.sleep(FUTURE_POLL_PERIOD)
-        return future.result()
+        return wait_for_future(future, timeout, operation)
 
     def plan_with_moveit(
         self,
@@ -460,31 +455,30 @@ class CartesianPathActionServer(Node):
             self._approved_plan_signature = None
             self._approved_plan_response = None
 
-    def execute_moveit_trajectory(self, trajectory):
-        if not self._execute_client.wait_for_server(timeout_sec=5.0):
-            raise RuntimeError("/execute_trajectory action unavailable")
-        goal = ExecuteTrajectory.Goal()
-        goal.trajectory = trajectory
-        execute_handle = self._wait_for_future(
-            self._execute_client.send_goal_async(goal),
-            PLANNING_TIMEOUT,
-            "MoveIt execution goal submission",
-        )
-        if not execute_handle.accepted:
-            raise RuntimeError("MoveIt execution goal rejected")
+    def execute_moveit_trajectory(self, trajectory, goal_handle=None):
+        key = None if goal_handle is None else bytes(goal_handle.goal_id.uuid)
+        call = ActionCall("MoveIt trajectory execution")
         with self._execute_handle_lock:
-            self._active_execute_handle = execute_handle
+            self._execute_calls[key] = call
+            canceled = key in self._canceled_execute_goals
+        if canceled or (goal_handle is not None and goal_handle.is_cancel_requested):
+            call.cancel()
         try:
-            result_wrapper = self._wait_for_future(
-                execute_handle.get_result_async(),
+            if not self._execute_client.wait_for_server(timeout_sec=5.0):
+                raise RuntimeError("/execute_trajectory action unavailable")
+            goal = ExecuteTrajectory.Goal()
+            goal.trajectory = trajectory
+            call.send(self._execute_client, goal)
+            return call.wait(
+                PLANNING_TIMEOUT,
                 max(EXECUTION_TIMEOUT, trajectory_duration_seconds(trajectory) + 30.0),
-                "MoveIt trajectory execution",
             )
+        except TimeoutError as error:
+            raise RuntimeError(str(error)) from error
         finally:
             with self._execute_handle_lock:
-                if self._active_execute_handle is execute_handle:
-                    self._active_execute_handle = None
-        return result_wrapper.result
+                if self._execute_calls.get(key) is call:
+                    self._execute_calls.pop(key)
 
     def goal_callback(self, goal_request):
         if goal_request.planning_group not in PLANNING_GROUP_TIPS:
@@ -512,22 +506,30 @@ class CartesianPathActionServer(Node):
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
-    def cancel_callback(self, _goal_handle):
+    def cancel_callback(self, goal_handle):
+        key = None if goal_handle is None else bytes(goal_handle.goal_id.uuid)
         with self._execute_handle_lock:
-            execute_handle = self._active_execute_handle
-        if execute_handle is not None:
-            try:
-                execute_handle.cancel_goal_async()
+            self._canceled_execute_goals.add(key)
+            call = self._execute_calls.get(key)
+        if call is not None:
+            call.cancel()
+            if call.cancel_error:
+                self.get_logger().error(f"Failed to cancel /execute_trajectory: {call.cancel_error}")
+            else:
                 self.get_logger().warning(
                     "Forwarded Cartesian cancel to /execute_trajectory"
-                )
-            except Exception as error:
-                self.get_logger().error(
-                    f"Failed to cancel /execute_trajectory: {error}"
                 )
         return CancelResponse.ACCEPT
 
     def execute_callback(self, goal_handle):
+        key = bytes(goal_handle.goal_id.uuid)
+        try:
+            return self._execute_callback(goal_handle)
+        finally:
+            with self._execute_handle_lock:
+                self._canceled_execute_goals.discard(key)
+
+    def _execute_callback(self, goal_handle):
         request = goal_handle.request
         result = CartesianPath.Result()
         self.publish_weld_markers(
@@ -610,7 +612,7 @@ class CartesianPathActionServer(Node):
                 self.consume_approved_plan()
             try:
                 execute_result = self.execute_moveit_trajectory(
-                    moveit_plan.solution
+                    moveit_plan.solution, goal_handle=goal_handle,
                 )
                 if goal_handle.is_cancel_requested:
                     goal_handle.canceled()
@@ -631,7 +633,10 @@ class CartesianPathActionServer(Node):
                     return result
                 executed = True
             except RuntimeError as error:
-                goal_handle.abort()
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                else:
+                    goal_handle.abort()
                 result.success = False
                 result.message = str(error)
                 result.final_pose = request.waypoints[-1]

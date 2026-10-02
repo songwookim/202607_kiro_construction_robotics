@@ -35,9 +35,15 @@ construct_robot/
     │   ├── fastech_io_node.py
     │   └── keyboard_teaching_node.py
     │
+    ├── application/
+    │   ├── multipass_controller.py
+    │   ├── seam_correction_controller.py
+    │   ├── sequence_executor.py
+    │   ├── weld_execution_controller.py
+    │   └── weld_sequence_builder.py
+    │
     ├── gui/
     │   ├── weld_action_gui.py
-    │   ├── task_teaching_panel.py
     │   └── torch_cleaner_panel.py
     │
     ├── core/
@@ -46,7 +52,6 @@ construct_robot/
     │   ├── seam_geometry.py
     │   ├── sequence_model.py
     │   ├── task_teaching_model.py
-    │   ├── torch_cleaner_teaching.py
     │   ├── weld_config.py
     │   ├── weld_quality_metrics.py
     │   └── work_cycle.py
@@ -54,7 +59,6 @@ construct_robot/
     └── io/
         ├── fastech_ethernet.py
         ├── hicomm_welder.py
-        ├── teaching_paths.py
         ├── teaching_yaml.py
         ├── weld_feedback_plot.py
         └── weld_logging.py
@@ -62,13 +66,22 @@ construct_robot/
 
 There are no top-level modules besides `__init__.py`; the old compatibility shims and the PySide6 `gui_qt/` package were removed.
 
+2026-10-02: the inactive Task Library codec and cleaner manual runner were removed.
+Cleaner state lives in `core/task_teaching_model.py`, file loading/atomic writes in
+`io/teaching_yaml.py`, and cleaner step generation in `application/weld_sequence_builder.py`.
+Welding and cleaning share the existing `SequenceExecutor`; no behaviour-tree/FSM
+dependency was added. Production metrics are in `core/weld_quality_metrics.py`;
+saved-log analysis is in `io/weld_logging.py`.
+The migration proposals and pre-extraction size estimates below are historical;
+the current source and tests take precedence.
+
 ---
 
 # Main architectural problem
 
 `gui/weld_action_gui.py` is still much too large and owns too many responsibilities.
 
-At the latest reviewed state it is approximately:
+Before the workflow/runtime extractions it was approximately:
 
 - 17.6k lines
 - ~753 KB

@@ -7,6 +7,8 @@
   <maintainer email="thddn191@gmail.com">irs</maintainer>
   <license>Apache-2.0</license>
 
+  <depend>action_msgs</depend>
+  <depend>builtin_interfaces</depend>
   <depend>construct_msgs</depend>
   <depend>control_msgs</depend>
   <exec_depend>construct_description</exec_depend>
@@ -35,6 +37,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-tk</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>python3-pykdl</exec_depend>
   <exec_depend>urdfdom_py</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

@@ -562,10 +562,6 @@ def analyze_weld_quality(document):
     weave_enabled = bool(conditions.get("weld_weave_enabled"))
     insufficient_samples = len(motion_tcp) < 3 or interval_avg is None
     cycle_insufficient = weave_enabled and (insufficient_samples or len(detected_cycles) == 0)
-    requested_dwell = min((value for value in (
-        _number(conditions.get("weld_weave_left_dwell_s")),
-        _number(conditions.get("weld_weave_right_dwell_s")))
-        if value is not None and value > 0), default=None)
     expected_dwell_peaks = {
         side: int(planned_cycles) if planned_cycles and planned_cycles > 0 else sum(
             peak_side == side for peak_side, _row in peak_rows)
@@ -765,9 +761,6 @@ def analyze_weld_quality(document):
         "requested_delta_a": (requested_hot - requested_main if requested_hot is not None and requested_main is not None else None),
         "feedback_effect": feedback_status if hot_enabled else "NOT_APPLICABLE",
         "feedback_detail": feedback_detail,
-        "requested_current_a": requested_hot,
-        "requested_boost_percent": (_number(commanded.get("hot_start_percent"))
-                                     if hot_enabled else None),
         "tx_current_a": tx_current if hot_enabled else 0,
         "tx_hold_raw": tx_hold,
         "rx_echo_current_a": rx_hot if hot_enabled else None,
@@ -1087,74 +1080,92 @@ def format_quality_summary(document):
     return lines
 
 
-def analyze_saved_weld_log(path):
-    """Calculate the new metrics from an old log without modifying that log."""
-    import datetime
-    import re
-    from construct_robot.io.weld_feedback_plot import (
-        parse_weld_feedback_log, parse_weld_trajectory_log,
-    )
+def calculate_weld_production_metrics(
+    samples,
+    *,
+    weld_motion_start_elapsed_s=None,
+    weld_motion_complete_elapsed_s=None,
+    wire_consumable_alpha_mm=0.0,
+):
+    """Integrate actual ARC time and wire feed on the feedback time base.
 
-    sections, raw_samples = parse_weld_feedback_log(path)
-    trajectory = parse_weld_trajectory_log(path)["actual"]
-    conditions = dict(sections.get("execution_conditions", {}))
-    commanded = dict(sections.get("commanded", {}))
-    production = dict(sections.get("production_metrics", {}))
-    control = dict(sections.get("arc_off_control", {}))
-    custom = dict(sections.get("custom_hot_start", {}))
-    echo = dict(sections.get("rx_welding_setting_echo", {})
-                or sections.get("rx_setting_echo", {}))
-    for mapping in (conditions, commanded, production, control, custom, echo):
-        for key, value in list(mapping.items()):
-            numeric = _number(value)
-            if numeric is not None:
-                mapping[key] = numeric
-            elif value in ("True", "False"):
-                mapping[key] = value == "True"
-    stages = [(int(match.group(1)), value) for key, value in conditions.items()
-              if (match := re.fullmatch(r"steps\[(\d+)\]\.weld_scenario_stage", key))]
-    motion_index = next((index for index, stage in stages if stage == "weld_motion"), None)
-    if motion_index is not None:
-        prefix = f"steps[{motion_index}]"
-        for name, target in (("usable_seam_start", "seam_start_xyz"),
-                             ("usable_seam_goal", "seam_goal_xyz")):
-            values = [_number(conditions.get(f"{prefix}.{name}.position_m.{axis}"))
-                      for axis in "xyz"]
-            if all(value is not None for value in values):
-                conditions[target] = tuple(values)
-        waypoints = {}
-        expression = re.compile(rf"{re.escape(prefix)}\.waypoints\[(\d+)\]\.position_m\.([xyz])")
-        for key, value in conditions.items():
-            match = expression.fullmatch(key)
-            if match and _number(value) is not None:
-                waypoints.setdefault(int(match.group(1)), {})[match.group(2)] = float(value)
-        conditions["planned_weave_waypoints_xyz"] = [
-            tuple(waypoints[index][axis] for axis in "xyz")
-            for index in sorted(waypoints)
-            if all(axis in waypoints[index] for axis in "xyz")
-        ]
-    samples = []
-    state_codes = {"idle": 0, "main_weld": 1, "crater": 2, "weld_end": 3}
-    for raw in raw_samples:
-        samples.append({
-            "elapsed_s": raw["elapsed_s"],
-            "output_state": state_codes.get(raw["state"], 0),
-            "arc_ack": bool(raw["arc"]), "gas_ack": bool(raw["gas"]),
-            "forward_ack": bool(raw["fwd"]), "wcr_detected": bool(raw["wcr"]),
-            "feedback_current_a": raw["current_a"],
-            "feedback_voltage_v": raw["voltage_v"],
-            "wire_feed_m_min": raw["wire_feed_m_min"],
-        })
-    started = sections.get("header", {}).get("started")
-    try:
-        started_unix = datetime.datetime.fromisoformat(started).timestamp()
-    except (TypeError, ValueError):
-        started_unix = None
-    return analyze_weld_quality({
-        "started_unix_time": started_unix,
-        "samples": samples, "tcp_trajectory": trajectory,
-        "execution_conditions": conditions,
-        "commanded": commanded, "rx_welding_setting_echo": echo,
-        "production_metrics": production, "arc_off_control": control,
-        "custom_hot_start": custom,
-    })
+    Each RX value owns the interval until the following RX sample.  An arc is
+    considered physically active from WCR/current/output state, rather than
+    merely from the outbound ARC command bit.  This excludes pre-gas and ARC
+    recognition delay from production time.
+    """
+    ordered = sorted(
+        (sample for sample in samples if sample.get("elapsed_s") is not None),
+        key=lambda sample: float(sample["elapsed_s"]),
+    )
+    arc_on_time_s = 0.0
+    main_weld_arc_time_s = 0.0
+    crater_arc_time_s = 0.0
+    net_weld_arc_time_s = 0.0
+    wire_consumable_base_mm = 0.0
+    arc_started_elapsed_s = None
+    arc_completed_elapsed_s = None
+    start = (
+        None if weld_motion_start_elapsed_s is None
+        else float(weld_motion_start_elapsed_s)
+    )
+    complete = (
+        None if weld_motion_complete_elapsed_s is None
+        else float(weld_motion_complete_elapsed_s)
+    )
+    for first, second in zip(ordered, ordered[1:]):
+        interval_start = float(first["elapsed_s"])
+        interval_end = float(second["elapsed_s"])
+        dt = max(0.0, min(0.25, interval_end - interval_start))
+        effective_end = interval_start + dt
+        output_state = int(first.get("output_state", 0) or 0)
+        active = bool(
+            first.get("wcr_detected")
+            or float(first.get("feedback_current_a", 0.0) or 0.0) > 10.0
+            or output_state in (1, 2)
+        )
+        if not active or dt <= 0.0:
+            continue
+        if arc_started_elapsed_s is None:
+            arc_started_elapsed_s = interval_start
+        arc_completed_elapsed_s = effective_end
+        arc_on_time_s += dt
+        if output_state == 1:
+            main_weld_arc_time_s += dt
+        elif output_state == 2:
+            crater_arc_time_s += dt
+        wire_feed = max(
+            0.0, float(first.get("wire_feed_m_min", 0.0) or 0.0)
+        )
+        wire_consumable_base_mm += wire_feed * 1000.0 / 60.0 * dt
+        if start is not None and complete is not None and complete >= start:
+            overlap = max(
+                0.0,
+                min(effective_end, complete) - max(interval_start, start),
+            )
+            net_weld_arc_time_s += overlap
+    average_wire_feed = (
+        wire_consumable_base_mm * 60.0 / (1000.0 * arc_on_time_s)
+        if arc_on_time_s > 0.0 else 0.0
+    )
+    alpha = float(wire_consumable_alpha_mm)
+    motion_duration = (
+        max(0.0, complete - start)
+        if start is not None and complete is not None else None
+    )
+    return {
+        "arc_started_elapsed_s": arc_started_elapsed_s,
+        "arc_completed_elapsed_s": arc_completed_elapsed_s,
+        "arc_on_time_s": arc_on_time_s,
+        "main_weld_arc_time_s": main_weld_arc_time_s,
+        "crater_arc_time_s": crater_arc_time_s,
+        "weld_motion_start_elapsed_s": start,
+        "weld_motion_complete_elapsed_s": complete,
+        "weld_motion_duration_s": motion_duration,
+        "net_weld_arc_time_s": net_weld_arc_time_s,
+        "wire_feed_average_m_min": average_wire_feed,
+        "wire_consumable_base_mm": wire_consumable_base_mm,
+        "wire_consumable_alpha_mm": alpha,
+        "wire_consumable_mm": wire_consumable_base_mm + alpha,
+        "wire_consumable_formula": "integral(WFS*1000/60*dt)+alpha",
+    }

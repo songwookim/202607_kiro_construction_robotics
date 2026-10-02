@@ -9,16 +9,23 @@ from construct_robot.core.sequence_model import (
 
 def test_sequence_rows_are_owned_without_widgets():
     model = SequenceModel([{"type": "sleep", "parallel_slot": 1}])
-    index = model.add({"type": "named_pose", "parallel_slot": 2})
-    assert index == 1
-    duplicate = model.duplicate(index)
-    assert duplicate == 2
-    assert model.steps[duplicate] is not model.steps[index]
-    assert model.move(duplicate, -1) == 1
-    model.edit(1, {"type": "sleep", "seconds": 0.5})
-    assert model.delete(1)["seconds"] == 0.5
-    assert model.clear() == 2
+    model.extend([{"type": "named_pose", "parallel_slot": 2}])
+    model.select(1)
+    assert model.delete(0)["type"] == "sleep"
+    assert model.selected_index == 0
+    model.replace([{"type": "sleep", "seconds": 0.5}])
+    assert model.steps[0]["seconds"] == 0.5
+    assert model.clear() == 1
     assert model.steps == []
+    assert model.selected_index is None
+
+
+def test_removing_selected_row_clears_selection():
+    model = SequenceModel([{"type": "sleep", "seconds": 1.0}])
+    model.select(0)
+    model.delete(0)
+    assert model.selected_index is None
+    assert model.execution_snapshot(False) == ([], [])
 
 
 def test_cleaner_replacement_preserves_other_rows_and_slots():

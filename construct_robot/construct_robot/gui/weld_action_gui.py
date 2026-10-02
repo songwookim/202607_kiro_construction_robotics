@@ -17,7 +17,6 @@ from tf2_ros import TransformException
 from construct_robot.core.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     WELD_WEAVE_SAMPLES_PER_CYCLE,
-    _quaternion_rotate_vector,
     linear_pose_waypoints,
     midpoint_pose,
     named_tcp_linear_waypoints,
@@ -25,10 +24,7 @@ from construct_robot.core.cartesian_path_common import (
     pose_with_local_rpy_offset,
     pose_with_rpy_offset,
     position_only_goal_constraints,
-    quaternion_angular_distance,
     tcp_pose_goal_constraints,
-    tcp_position_is_valid,
-    trajectory_duration_seconds,
     tip_link_for_group,
     transform_xyz,
     validated_seam_speed_factor,
@@ -40,33 +36,28 @@ from construct_robot.io.hicomm_welder import (
     BIT_FORWARD,
     BIT_GAS,
     BIT_REVERSE,
-    BIT_STICK,
     DIAMETER_CODES,
     GAS_CODES,
     HiCommWelderClient,
     MATERIAL_CODES,
     MODE_CODES,
-    TxState,
-    build_request,
 )
-from construct_robot.core.weld_quality_metrics import format_quality_summary
 from construct_robot.core.sequence_model import (
     SequenceModel,
-    WELD_SCENARIO_STAGE_ORDER,
     next_sequential_slot,
     taught_wait_approach_steps,
     update_weld_scenario_motion_values,
     validate_managed_weld_sequence,
 )
-from construct_robot.core.work_cycle import assemble_work_cycle, load_work_cycle
+from construct_robot.core.work_cycle import assemble_work_cycle
+from construct_robot.gui.torch_cleaner_panel import CLEANER_KEY_POSES
+from construct_robot.gui.weld_parameter_forms import check, combo, entry, parameter_tables, spin
+from construct_robot.gui.weld_parameter_panel import WeldParameterPanel
+from construct_robot.core.weld_quality_metrics import calculate_weld_production_metrics
 from construct_robot.core.seam_geometry import (
     CORNER_TOUCH_NAMES,
-    CorrectedSeamGeometry,
-    _axis_unit_vector,
-    _pose_position_tuple,
-    _unit_vector,
-    _vector_dot,
-    compute_corrected_seam_endpoints,
+    WEAVE_REFERENCES,
+    touch_pair_weave_direction,
     compute_corrected_seam_geometry,
     compute_plane_intersection_line,
     compute_real_seam_direction,
@@ -81,9 +72,6 @@ from construct_robot.core.seam_geometry import (
     corner_seam_from_touches,
     corrected_corner_seam_from_four_touches,
     fixed_tilt_wait_reference_poses,
-    generalized_corner_endpoint_from_two_touches,
-    intersect_three_planes,
-    seam_xy_normal,
     seam_yaw,
     translated_wait_pose,
     two_touch_corner_seam,
@@ -98,12 +86,9 @@ from construct_robot.core.keyboard_jog import (
 )
 from construct_robot.core.multipass import (
     MultiPassState,
-    correct_four_pass_references,
     correct_remaining_passes,
-    correct_seam_from_measured_start,
 )
 from construct_robot.io.weld_logging import (
-    calculate_weld_production_metrics,
     format_weld_feedback_log,
     read_last_execution_settings,
     read_teaching_and_touch_snapshot,
@@ -120,18 +105,20 @@ from construct_robot.core.task_teaching_model import (
     TeachingState,
 )
 from construct_robot.io.teaching_yaml import (
-    ARM_JOINT_NAMES, _pose_from_yaml_dict,
+    _pose_from_yaml_dict,
     load_initial_state_yaml,
+    load_work_cycle,
     load_seam_teaching_reference_yaml,
     parse_teaching_snapshot_entry,
     read_pass_teaching_reference,
     save_initial_state_yaml,
     save_seam_teaching_reference_yaml,
     save_seam_touch_yaml,
+    teaching_config_dir,
 )
 from construct_robot.core.weld_config import (
     DEFAULT_DIGITAL_WELD_SETTINGS,
-    DIGITAL_WELD_RECIPE_KEYS, digital_weld_recipe,
+    digital_weld_recipe,
     validate_digital_weld_settings, weld_current_profile,
 )
 from construct_robot.application.weld_sequence_builder import (
@@ -163,23 +150,32 @@ from construct_robot.application.sequence_executor import (
     record_step_conditions,
 )
 # Helpers formerly defined in this module now live in core/, io/ and nodes/.
-# Unused-looking imports above and below are deliberate re-exports so existing
-# ``weld_action_gui.<name>`` imports keep working.
+# Supported compatibility imports are explicit in __all__ below. New callers
+# should import helpers from their owning module, not through the GUI.
 from construct_robot.nodes.weld_runtime_node import (
-    CONTROLLED_JOINT_NAMES,
-    CONTROLLER_NAMES,
     FASTECH_TOUCH_INPUT_PORT,
     FASTECH_TOUCH_OUTPUT_PORT,
-    HEAD_JOINT_NAME_ORDER,
-    HEAD_JOINT_NAMES,
-    KEYBOARD_TF_LOOKUP_TIMEOUT_S,
-    KEYBOARD_VELOCITY_CONTROLLER_NAMES,
     KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S,
-    KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
-    KEYBOARD_ZERO_BURST_COUNT,
-    LEGACY_RAINBOW_TOUCH_INPUT_PORT,
-    LEGACY_RAINBOW_TOUCH_OUTPUT_PORT,
     WeldGuiNode,
+)
+
+__all__ = (
+    "WeldActionGui", "WeldGuiNode", "main",
+    "JOINT_RECALL_TEACHING_POSES", "KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S",
+    "TCP_POSE_TEACHING_POSES", "aligned_wait_pose",
+    "calculate_weld_production_metrics", "compute_corrected_seam_geometry",
+    "compute_plane_intersection_line", "compute_real_seam_direction",
+    "compute_safe_weld_approach", "compute_seam_local_frame", "compute_surface_plane",
+    "corner_endpoint_from_two_touches", "correct_remaining_passes",
+    "corrected_corner_seam_from_four_touches", "digital_weld_recipe",
+    "format_weld_feedback_log", "keyboard_jog_velocity", "keyboard_velocity_vector",
+    "midpoint_pose", "named_tcp_linear_waypoints", "pose_with_local_rpy_offset",
+    "pose_with_rpy_offset", "position_only_goal_constraints", "project_point_to_line",
+    "read_pass_teaching_reference", "read_weld_pass_reference", "save_weld_feedback_log",
+    "taught_wait_approach_steps", "tcp_pose_goal_constraints", "transform_xyz",
+    "translated_wait_pose", "two_touch_corner_seam", "validated_seam_speed_factor",
+    "weave_path_speed_m_s", "weld_current_profile", "weld_weave_geometry",
+    "weld_weave_settings_text", "wide_sensing_path_poses", "yaw_corrected_seam_poses",
 )
 
 MANUAL_IO_CANDIDATES = frozenset((0, 4, 8, 9, 10, 12, 13))
@@ -192,11 +188,12 @@ FASTECH_GUI_CHANNELS = {
 # Retired test channels are hidden from manual control, but the all-off
 # safety operation still clears them if an earlier session left them ON.
 FASTECH_ALL_OFF_CHANNELS = (0, 3, 4, 5, 6, 7)
+TEACHING_KEY_TAG = "TeachingKeys"
 FASTECH_TOUCH_BACKEND = "fastech_ethernet"
 
 KEYBOARD_LINEAR_SPEEDS_MM_S = (5.0, 15.0, 45.0)
 KEYBOARD_ANGULAR_SPEEDS_DEG_S = (3.0, 7.0, 10.0)
-TCP_FEEDBACK_SAMPLE_PERIOD_S = 0.01  # 50 Hz logging poll; unique TF rate is measured separately.
+TCP_FEEDBACK_SAMPLE_PERIOD_S = 0.01  # 100 Hz logging poll; unique TF rate is measured separately.
 KEYBOARD_TEACHING_POSE_SHORTCUTS = {
     "o": "weld_start_wait",
     "k": "weld_goal_wait",
@@ -237,9 +234,13 @@ def _seam_correction_for(host):
 
 def _weld_feedback_for(host):
     """Weld feedback session operations bound to a GUI (or a test double)."""
-    return WeldFeedbackRecorder(
-        host, tcp_sample_period_s=TCP_FEEDBACK_SAMPLE_PERIOD_S
-    )
+    recorder = getattr(host, "_weld_feedback_recorder", None)
+    if recorder is None:
+        recorder = host.__dict__.setdefault(
+            "_weld_feedback_recorder",
+            WeldFeedbackRecorder(host, tcp_sample_period_s=TCP_FEEDBACK_SAMPLE_PERIOD_S),
+        )
+    return recorder
 
 
 class WeldActionGui:
@@ -391,6 +392,13 @@ class WeldActionGui:
             body.pack(fill=tk.X)
         self._refresh_motion_section_button(key)
         return body
+
+    @staticmethod
+    def _create_fixed_section(parent, title):
+        """Always-visible titled section (Connection page: no collapsing)."""
+        frame = ttk.LabelFrame(parent, text=title, padding=(8, 5))
+        frame.pack(fill=tk.X, pady=4)
+        return frame
 
     def _refresh_motion_section_button(self, key):
         section = self.motion_sections[key]
@@ -672,7 +680,8 @@ class WeldActionGui:
                 self.keyboard_jog_selection_key,
                 add="+",
             )
-        for key_name in ("v", "x", "i", "j", "o", "k", "p", "l", "m"):
+        # "u" is a Torch Cleaner tab shortcut only (CLEANER_KEY_POSES).
+        for key_name in ("v", "x", "u", "i", "j", "o", "k", "p", "l", "m"):
             self.root.bind(
                 f"<KeyPress-{key_name}>",
                 self.keyboard_teaching_shortcut_key,
@@ -704,8 +713,8 @@ class WeldActionGui:
         self.root.bind("<FocusOut>", self.keyboard_jog_focus_out, add="+")
 
     def _build_welder_controls(self, connection_page, welding_page):
-        welder = self._create_toggle_section(
-            connection_page, "welder", "Digital Welder · Hi-COMM TCP", expanded=False
+        welder = self._create_fixed_section(
+            connection_page, "Digital Welder · Hi-COMM TCP"
         )
         ttk.Label(
             welder,
@@ -753,12 +762,10 @@ class WeldActionGui:
             text="saves feedback PNG + complete trajectory_3d PNG beside the log",
         ).pack(side=tk.LEFT, padx=8)
 
-        weld_parameters = self._create_toggle_section(
-            welding_page, "weld_parameters",
-            "Weld Parameters / Welder Test · Recipe / Hot Start / Crater",
-            expanded=True,
-        )
-        welder_test = ttk.Frame(weld_parameters)
+        self._build_weld_arc_parameter_table(welding_page)
+        # Welder tests (wire/gas, ARC ON-OFF, Fake ARC) live with the welder
+        # connection on the Connection page.
+        welder_test = ttk.Frame(welder)
         welder_test.pack(fill=tk.X)
         ttk.Label(
             welder_test,
@@ -769,6 +776,7 @@ class WeldActionGui:
             foreground="#b3261e",
         ).pack(anchor=tk.W, padx=4, pady=2)
 
+        # Hardware check, not a task setting: lives with the welder connection.
         wire_test = ttk.LabelFrame(
             welder_test, text="Wire inching / gas test"
         )
@@ -815,7 +823,7 @@ class WeldActionGui:
         self.hicomm_test_status.pack(side=tk.LEFT, padx=8)
 
         digital_test = ttk.LabelFrame(
-            welder_test, text="ARC ON / ARC OFF · uses recipe below"
+            welder_test, text="ARC ON / ARC OFF · uses Task › Weld Arc Parameters"
         )
         digital_test.pack(fill=tk.X, pady=2)
         self.hicomm_arc_on_button = ttk.Button(
@@ -845,97 +853,6 @@ class WeldActionGui:
             row=0, column=9, padx=(12, 3), sticky=tk.W
         )
 
-        digital = ttk.Frame(weld_parameters)
-        digital.pack(fill=tk.X)
-        self._add_labeled_value(digital, 0, "current A", self.weld_current_raw)
-        self._add_labeled_value(digital, 1, "voltage ×0.1 V", self.weld_voltage_raw)
-        for column, (label, variable, values, width) in enumerate((
-            ("material", self.weld_material, tuple(MATERIAL_CODES), 11),
-            ("diameter", self.weld_diameter_mm, tuple(DIAMETER_CODES), 5),
-            ("mode", self.weld_mode, tuple(MODE_CODES), 5),
-            ("gas", self.weld_gas, tuple(GAS_CODES), 14),
-        )):
-            ttk.Label(digital, text=label).grid(
-                row=1, column=column * 2, padx=(3, 2), pady=3
-            )
-            ttk.Combobox(
-                digital,
-                textvariable=variable,
-                values=values,
-                state="readonly",
-                width=width,
-            ).grid(row=1, column=column * 2 + 1, padx=(0, 4), pady=3)
-        ttk.Checkbutton(
-            digital, text="synergic", variable=self.weld_synergic
-        ).grid(row=2, column=0, columnspan=2, padx=3, sticky=tk.W)
-        ttk.Label(digital, text="correction").grid(
-            row=2, column=2, padx=(3, 2), pady=3
-        )
-        ttk.Entry(digital, textvariable=self.weld_correction, width=7).grid(
-            row=2, column=3, padx=(0, 4), pady=3
-        )
-        ttk.Checkbutton(
-            digital, text="Hot start (native)", variable=self.weld_hot_start_enabled
-        ).grid(row=2, column=4, padx=(8, 2), pady=3, sticky=tk.W)
-        ttk.Label(digital, text="Hot current boost %").grid(row=2, column=5, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=0.0, to=100.0, increment=1.0,
-            textvariable=self.weld_hot_start_percent, width=5,
-        ).grid(row=2, column=6, padx=(1, 3))
-        ttk.Label(digital, text="hold adj").grid(row=2, column=7, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=-15, to=15, increment=1,
-            textvariable=self.weld_hot_start_hold_adjustment, width=5,
-        ).grid(row=2, column=8, padx=(1, 3))
-        ttk.Checkbutton(
-            digital, text="Custom Hot Start (Current boost + Hold)",
-            variable=self.weld_custom_hot_start_enabled,
-        ).grid(row=3, column=0, padx=(3, 2), pady=3, sticky=tk.W)
-        ttk.Label(digital, text="Hold Time s").grid(row=3, column=1, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=0.01, to=5.0, increment=0.05,
-            textvariable=self.weld_custom_hot_start_hold_s, width=5,
-        ).grid(row=3, column=2, padx=(1, 3))
-        ttk.Label(digital, text="Custom boost %").grid(row=3, column=3)
-        ttk.Spinbox(
-            digital, from_=0, to=100, increment=1,
-            textvariable=self.weld_custom_hot_start_percent, width=5,
-        ).grid(row=3, column=4)
-        ttk.Checkbutton(
-            digital, text="Observe panel native crater (RX only)", variable=self.weld_expect_native_crater
-        ).grid(row=4, column=0, padx=(3, 2), pady=3, sticky=tk.W)
-        ttk.Label(digital, text="Panel Current Ref A").grid(row=4, column=1, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=0.0, to=600.0, increment=5.0,
-            textvariable=self.weld_crater_panel_current_ref_a, width=5,
-        ).grid(row=4, column=2, padx=(1, 3))
-        ttk.Label(digital, text="Panel Voltage Ref V").grid(row=4, column=3, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=3.0, to=80.0, increment=0.1,
-            textvariable=self.weld_crater_panel_voltage_ref_v, width=5,
-        ).grid(row=4, column=4, padx=(1, 3))
-        ttk.Label(digital, text="Panel Time Ref s").grid(row=4, column=5, padx=(2, 1))
-        ttk.Spinbox(
-            digital, from_=0.0, to=30.0, increment=0.1,
-            textvariable=self.weld_crater_panel_time_ref_s, width=5,
-        ).grid(row=4, column=6, padx=(1, 3))
-        ttk.Checkbutton(digital, text="Software Crater Enabled",
-                        variable=self.weld_software_crater_enabled).grid(row=5, column=0, sticky=tk.W)
-        ttk.Label(digital, text="Current Ratio %").grid(row=5, column=1)
-        ttk.Spinbox(digital, from_=20.0, to=40.0, increment=1.0,
-                    textvariable=self.weld_software_crater_ratio_percent, width=5).grid(row=5, column=2)
-        ttk.Label(digital, text="Crater Voltage V").grid(row=5, column=3)
-        ttk.Spinbox(digital, from_=10.0, to=40.0, increment=0.1,
-                    textvariable=self.weld_software_crater_voltage_v, width=5).grid(row=5, column=4)
-        ttk.Label(digital, text="Hold s").grid(row=5, column=5)
-        ttk.Spinbox(digital, from_=0.1, to=5.0, increment=0.1,
-                    textvariable=self.weld_software_crater_hold_s, width=5).grid(row=5, column=6)
-        ttk.Label(digital, text="Wire alpha mm").grid(
-            row=6, column=0, padx=(8, 2), pady=3
-        )
-        ttk.Entry(
-            digital, textvariable=self.weld_wire_consumable_alpha_mm, width=7
-        ).grid(row=6, column=1, padx=(0, 4), pady=3)
         self.hicomm_rx_bit_status = ttk.Label(
             digital_test,
             text="RX Byte0 · b5 WCR=0 · b4 STICK=0 · "
@@ -945,6 +862,101 @@ class WeldActionGui:
         self.hicomm_rx_bit_status.grid(
             row=1, column=0, columnspan=9, padx=8, pady=3, sticky=tk.W
         )
+
+    def _build_weld_arc_parameter_table(self, welding_page):
+        """Recipe / hot start / crater inputs read by every ARC ON."""
+        section = self._create_toggle_section(
+            welding_page, "weld_arc_parameters",
+            "Weld Arc Parameters · 용접 전 설정 (ARC ON 시 이 값 사용)",
+            expanded=True,
+        )
+        voltage_text = tk.StringVar()
+
+        def update_voltage_text(*_args):
+            try:
+                voltage_text.set(f"= {self.weld_voltage_raw.get() * 0.1:.1f} V")
+            except (tk.TclError, TypeError, ValueError):
+                voltage_text.set("입력값 확인")
+
+        self.weld_voltage_raw.trace_add("write", update_voltage_text)
+        update_voltage_text()
+        parameter_tables(section, (
+            ("레시피", (
+                ("전류", entry(self.weld_current_raw), "A", "본용접 설정 전류"),
+                ("전압", entry(self.weld_voltage_raw), "×0.1 V", voltage_text),
+                ("재질", combo(self.weld_material, MATERIAL_CODES, 12), "", ""),
+                ("와이어 직경", combo(self.weld_diameter_mm, DIAMETER_CODES, 6), "mm", ""),
+                ("모드", combo(self.weld_mode, MODE_CODES, 6), "", ""),
+                ("가스", combo(self.weld_gas, GAS_CODES, 14), "", ""),
+                ("시너직", check(self.weld_synergic), "", ""),
+                ("보정", entry(self.weld_correction), "", "용접기 보정값"),
+                ("와이어 소모 보정 α", entry(self.weld_wire_consumable_alpha_mm), "mm",
+                 "와이어 소모량 계산에 더하는 값"),
+            )),
+            ("핫스타트", (
+                ("용접기 핫스타트 (native)", check(self.weld_hot_start_enabled), "", ""),
+                ("핫스타트 전류 부스트", spin(self.weld_hot_start_percent, 0.0, 100.0, 1.0), "%", ""),
+                ("핫스타트 hold 조정", spin(self.weld_hot_start_hold_adjustment, -15, 15, 1), "",
+                 "-15 … +15"),
+                ("Custom 핫스타트", check(self.weld_custom_hot_start_enabled), "",
+                 "아크 확립 후 전류 부스트 + 정지 유지"),
+                ("Custom 부스트", spin(self.weld_custom_hot_start_percent, 0, 100, 1), "%", ""),
+                ("Custom hold 시간", spin(self.weld_custom_hot_start_hold_s, 0.01, 5.0, 0.05), "s", ""),
+            )),
+            ("소프트웨어 크레이터", (
+                ("소프트웨어 크레이터", check(self.weld_software_crater_enabled), "",
+                 "용접 끝에서 전류를 낮춰 유지"),
+                ("전류 비율", spin(self.weld_software_crater_ratio_percent, 20.0, 40.0, 1.0), "%",
+                 "본용접 전류 대비"),
+                ("크레이터 전압", spin(self.weld_software_crater_voltage_v, 10.0, 40.0, 0.1), "V", ""),
+                ("크레이터 hold", spin(self.weld_software_crater_hold_s, 0.1, 5.0, 0.1), "s", ""),
+            )),
+            ("패널 네이티브 크레이터 (RX 관찰만)", (
+                ("패널 크레이터 관찰", check(self.weld_expect_native_crater), "", ""),
+                ("패널 전류 기준", spin(self.weld_crater_panel_current_ref_a, 0.0, 600.0, 5.0), "A", ""),
+                ("패널 전압 기준", spin(self.weld_crater_panel_voltage_ref_v, 3.0, 80.0, 0.1), "V", ""),
+                ("패널 시간 기준", spin(self.weld_crater_panel_time_ref_s, 0.0, 30.0, 0.1), "s", ""),
+            )),
+        ))
+
+    def _build_weld_motion_parameter_table(self, welding_page):
+        """Weld stroke / approach / weave inputs read by the weld scenario build."""
+        section = self._create_toggle_section(
+            welding_page, "weld_motion_parameters",
+            "Weld Motion Parameters · 용접 이동 / 접근 / 위빙",
+            expanded=True,
+        )
+        parameter_tables(section, (
+            ("용접 이동", (
+                ("용접 속도 (평균 이동)", spin(self.weld_tcp_speed_mm_s, 0.1, 100.0, 0.1), "mm/s",
+                 "용접 구간 TCP 속도"),
+                ("Lead-in", spin(self.weld_lead_in_mm, 0.0, 100.0, 1.0), "mm", "시작점 앞 연장"),
+                ("Lead-out", spin(self.weld_lead_out_mm, 0.0, 100.0, 1.0), "mm", "끝점 뒤 연장"),
+                ("ARC OFF lead", spin(self.weld_arc_off_delay_ms, 0.0, 2000.0, 10.0), "ms",
+                 "끝점 도달 전 ARC OFF 시점"),
+            )),
+            ("접근", (
+                ("접근 방식", combo(self.weld_approach_mode, ("taught_wait", "corner_geometry"), 16),
+                 "", "taught_wait: 티칭 대기점 / corner_geometry: 코너 형상 기준"),
+                ("안전 접근 거리", spin(self.weld_safe_approach_mm, 1.0, 200.0, 1.0), "mm", ""),
+                ("시작 전 리드 거리", spin(self.weld_pre_start_lead_mm, 0.0, 100.0, 1.0), "mm", ""),
+            )),
+            ("위빙", (
+                ("위빙 사용", check(self.weld_weave_enabled), "", ""),
+                ("패턴", combo(self.weave_pattern, ("sine", "crescent", "circle"), 9), "", ""),
+                ("진폭 A", spin(self.weave_amplitude_mm, 0.1, 50.0, 0.1), "mm",
+                 "sine: 중심선 ±A (전체 폭 2A) / circle: 반경 A"),
+                ("피치", spin(self.weave_pitch_mm, 0.1, 100.0, 0.1), "mm/cycle", ""),
+                ("위빙 기준 (터치 보정 시)", combo(self.weld_weave_reference, WEAVE_REFERENCES, 11), "",
+                 "touch_pair: 벽·바닥 두 터치점을 잇는 방향 / bisector: 필렛 45° / manual: 아래 축"),
+                ("횡방향 축 (manual·터치 없음)", combo(self.weave_axis, (
+                    "tool_x", "tool_y", "tool_z", "world_x", "world_y", "world_z"), 9), "",
+                 "용접선에 수직 성분만 사용"),
+                ("좌측 드웰", spin(self.weave_left_dwell_s, 0.0, 10.0, 0.1), "s",
+                 "sine 피크에서 이동 정지 (circle은 0)"),
+                ("우측 드웰", spin(self.weave_right_dwell_s, 0.0, 10.0, 0.1), "s", ""),
+            )),
+        ))
 
     def _build_seam_correction_controls(self, welding_page):
         touch_corner = self._create_toggle_section(
@@ -1037,156 +1049,11 @@ class WeldActionGui:
                 side=tk.LEFT, padx=(0, 14)
             )
 
-        safe_approach_controls = ttk.Frame(touch_corner)
-        safe_approach_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Label(safe_approach_controls, text="Approach mode").pack(side=tk.LEFT)
-        ttk.Combobox(
-            safe_approach_controls, textvariable=self.weld_approach_mode,
-            values=("taught_wait", "corner_geometry"), state="readonly", width=18,
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            safe_approach_controls, text="Safe approach distance mm"
-        ).pack(side=tk.LEFT)
-        ttk.Spinbox(
-            safe_approach_controls,
-            from_=1.0,
-            to=200.0,
-            increment=1.0,
-            textvariable=self.weld_safe_approach_mm,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(
-            safe_approach_controls, text="Pre-start lead distance mm"
-        ).pack(side=tk.LEFT)
-        ttk.Spinbox(
-            safe_approach_controls,
-            from_=0.0,
-            to=100.0,
-            increment=1.0,
-            textvariable=self.weld_pre_start_lead_mm,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(
-            safe_approach_controls,
-            text="taught_wait: taught clearance + weld attitude; corner_geometry: e_a clearance",
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
-        weld_lead_controls = ttk.Frame(touch_corner)
-        weld_lead_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Label(
-            weld_lead_controls,
-            text="weld lead-in mm",
-        ).pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_lead_controls,
-            from_=0.0,
-            to=100.0,
-            increment=1.0,
-            textvariable=self.weld_lead_in_mm,
-            width=6,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(
-            weld_lead_controls,
-            text="weld lead-out mm",
-        ).pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_lead_controls,
-            from_=0.0,
-            to=100.0,
-            increment=1.0,
-            textvariable=self.weld_lead_out_mm,
-            width=6,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(weld_lead_controls, text="avg seam travel mm/s").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_lead_controls,
-            from_=0.1,
-            to=100.0,
-            increment=0.1,
-            textvariable=self.weld_tcp_speed_mm_s,
-            width=6,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(weld_lead_controls, text="ARC OFF lead ms").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_lead_controls,
-            from_=0.0,
-            to=2000.0,
-            increment=10.0,
-            textvariable=self.weld_arc_off_delay_ms,
-            width=7,
-        ).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(
-            weld_lead_controls,
-            text=(
-                "weld stroke uses fixed TCP target; global scale remains for approach/return"
-            ),
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
-        weld_weave_controls = ttk.Frame(touch_corner)
-        weld_weave_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Checkbutton(
-            weld_weave_controls,
-            text="use weave in weld scenario",
-            variable=self.weld_weave_enabled,
-        ).pack(side=tk.LEFT)
-        ttk.Label(weld_weave_controls, text="pattern").pack(
-            side=tk.LEFT, padx=(10, 2)
-        )
-        ttk.Combobox(
-            weld_weave_controls,
-            textvariable=self.weave_pattern,
-            values=("sine", "crescent", "circle"),
-            state="readonly",
-            width=7,
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(weld_weave_controls, text="A mm").pack(
-            side=tk.LEFT
-        )
-        ttk.Spinbox(
-            weld_weave_controls, from_=0.1, to=50.0, increment=0.1,
-            textvariable=self.weave_amplitude_mm, width=6,
-        ).pack(side=tk.LEFT, padx=(3, 8))
-        ttk.Label(weld_weave_controls, text="pitch mm/cycle").pack(side=tk.LEFT)
-        ttk.Spinbox(
-            weld_weave_controls, from_=0.1, to=100.0, increment=0.1,
-            textvariable=self.weave_pitch_mm, width=6,
-        ).pack(side=tk.LEFT, padx=(3, 8))
-        ttk.Label(weld_weave_controls, text="radial/transverse axis").pack(
-            side=tk.LEFT
-        )
-        ttk.Combobox(
-            weld_weave_controls,
-            textvariable=self.weave_axis,
-            values=(
-                "tool_x", "tool_y", "tool_z",
-                "world_x", "world_y", "world_z",
-            ),
-            state="readonly",
-            width=10,
-        ).pack(side=tk.LEFT, padx=(3, 8))
         ttk.Label(
             touch_corner,
-            text=(
-                "A: sine = centerline ±A (full width 2A); "
-                "circle = orbit radius A (diameter 2A, ramped at ends)."
-            ),
+            text="용접 속도·Lead-in/out·접근·위빙 값은 'Weld Motion Parameters' 표에서 설정합니다.",
             foreground="#174ea6",
         ).pack(anchor=tk.W, pady=(0, 3))
-        dwell_controls = ttk.Frame(touch_corner)
-        dwell_controls.pack(fill=tk.X, pady=(0, 3))
-        ttk.Label(dwell_controls, text="Sine peak dwell (travel stops)").pack(side=tk.LEFT)
-        for label, variable in (
-            ("Left s", self.weave_left_dwell_s),
-            ("Right s", self.weave_right_dwell_s),
-        ):
-            ttk.Label(dwell_controls, text=label).pack(side=tk.LEFT, padx=(10, 2))
-            ttk.Spinbox(
-                dwell_controls, from_=0.0, to=10.0, increment=0.1,
-                textvariable=variable, width=5,
-            ).pack(side=tk.LEFT)
-        ttk.Label(dwell_controls, text="Circle requires both 0").pack(
-            side=tk.LEFT, padx=(12, 0)
-        )
 
         motion_controls = ttk.Frame(touch_corner)
         motion_controls.pack(fill=tk.X, pady=(0, 3))
@@ -1342,8 +1209,10 @@ class WeldActionGui:
         ttk.Label(sequence_buttons, text="Repeat").pack(side=tk.LEFT, padx=(8, 2))
         ttk.Spinbox(sequence_buttons, from_=1, to=20, width=3,
                     textvariable=self.work_cycle_repeats).pack(side=tk.LEFT)
+        sequence_table_frame = ttk.Frame(sequence)
+        sequence_table_frame.pack(fill=tk.X)
         self.sequence_table = ttk.Treeview(
-            sequence,
+            sequence_table_frame,
             columns=("order", "type", "detail"),
             show="headings",
             height=5,
@@ -1352,7 +1221,12 @@ class WeldActionGui:
         for name, width in (("order", 60), ("type", 130), ("detail", 850)):
             self.sequence_table.heading(name, text=name.upper())
             self.sequence_table.column(name, width=width, anchor=tk.W)
-        self.sequence_table.pack(fill=tk.X)
+        self.sequence_table.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        sequence_scrollbar = ttk.Scrollbar(
+            sequence_table_frame, orient=tk.VERTICAL, command=self.sequence_table.yview
+        )
+        sequence_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.sequence_table.configure(yscrollcommand=sequence_scrollbar.set)
         self.sequence_table.bind(
             "<<TreeviewSelect>>", self.load_selected_sequence_values
         )
@@ -1465,9 +1339,8 @@ class WeldActionGui:
         ).pack(anchor=tk.W, pady=(1, 2))
 
     def _build_fastech_controls(self, connection_page):
-        fastech_io = self._create_toggle_section(
+        fastech_io = self._create_fixed_section(
             connection_page,
-            "fastech_ethernet",
             "Fastech ROS I/O · 0 Touch · 5/6/7 Torch cleaner",
         )
         ttk.Label(fastech_io, text="IP").grid(
@@ -1963,6 +1836,15 @@ class WeldActionGui:
         ).pack(anchor=tk.W, pady=(3, 0))
 
         self._build_welder_controls(connection_page, welding_page)
+        self._build_weld_motion_parameter_table(welding_page)
+        parameter_table = self._create_toggle_section(
+            welding_page, "weld_parameter_table",
+            "Weld Parameter Check · 현재 설정 vs 직전 용접 설정 / 실측",
+            expanded=True,
+        )
+        self.weld_parameter_panel = WeldParameterPanel(
+            parameter_table, self, self._latest_weld_feedback_path()
+        )
 
         teaching = ttk.LabelFrame(welding_page, text="Teaching Detail · Welding poses / Plan / Execute / YAML")
         teaching.pack(fill=tk.X, pady=(7, 0))
@@ -2146,6 +2028,9 @@ class WeldActionGui:
         self.keyboard_ros_physical_key = None
         self.keyboard_ros_physical_mask = 0
         self.keyboard_ros_zero_seen = False
+        # A physical arrow press dropped only because keyboard focus was in
+        # an input field; started as soon as focus returns while still held.
+        self.keyboard_ros_pending_key = None
         self.keyboard_ros_dispatching = False
         self.keyboard_shortcut_active_keys = set()
         self.keyboard_shortcut_release_ids = {}
@@ -2208,6 +2093,12 @@ class WeldActionGui:
         )
         self.weave_axis = tk.StringVar(
             value=last_execution_motion.get("weld_weave_axis", "tool_y")
+        )
+        # Weave direction source once the seam is touch-corrected:
+        # touch_pair (wall→floor contact line), bisector (fillet e_w) or
+        # manual (weave_axis).  Without touches the manual axis always applies.
+        self.weld_weave_reference = tk.StringVar(
+            value=last_execution_motion.get("weld_weave_reference", "touch_pair")
         )
         self.weave_base = tk.StringVar(value="linear")
         self.weave_pattern = tk.StringVar(
@@ -2474,6 +2365,7 @@ class WeldActionGui:
         }
 
         self._build_operator_layout()
+        self._install_teaching_key_tag()
 
         self.node = WeldGuiNode(self)
         self.executor = MultiThreadedExecutor(num_threads=2)
@@ -2518,13 +2410,21 @@ class WeldActionGui:
                 callback, args = self._ui_queue.get_nowait()
             except queue.Empty:
                 break
-            callback(*args)
+            self._dispatch_ui_callback(callback, args)
             processed += 1
         with self._latest_ui_updates_lock:
             latest = tuple(self._latest_ui_updates.values())
             self._latest_ui_updates.clear()
         for callback, args in latest:
+            self._dispatch_ui_callback(callback, args)
+
+    def _dispatch_ui_callback(self, callback, args):
+        try:
             callback(*args)
+        except Exception as error:
+            # One stale widget callback must not discard the remaining
+            # updates or terminate the recurring ROS -> Tk bridge.
+            self.root.report_callback_exception(type(error), error, error.__traceback__)
 
     def _update_scroll_region(self, _event=None):
         self.content_canvas.configure(
@@ -3022,6 +2922,7 @@ class WeldActionGui:
                 self.weave_axis,
                 {"tool_x", "tool_y", "tool_z", "world_x", "world_y", "world_z"},
             ),
+            ("weld_weave_reference", self.weld_weave_reference, set(WEAVE_REFERENCES)),
         ):
             if key not in motion:
                 continue
@@ -3055,7 +2956,10 @@ class WeldActionGui:
         return applied, invalid
 
     def _finish_weld_feedback_record(self, result, final_status=None):
-        return _weld_feedback_for(self).finish(result, final_status)
+        return _weld_feedback_for(self).finish(
+            result, final_status,
+            background=threading.current_thread() is threading.main_thread(),
+        )
 
     def _hicomm_status_received(self, status):
         """Integrate RX wire-feed speed before forwarding status to Tk."""
@@ -3100,7 +3004,6 @@ class WeldActionGui:
             bool(status.get("db_unavailable")),
             bool(status.get("torch_collision")),
         )
-        state_changed = signature != self.hicomm_feedback_last_signature
         active_feedback = bool(
             command
             or int(status.get("raw0", 0))
@@ -3818,7 +3721,17 @@ class WeldActionGui:
         if not (self.endpoint_is_sensed("start")
                 or self.endpoint_is_sensed("goal")):
             return None
-        return self.corrected_seam_geometry.e_w
+        reference = self.weld_weave_reference.get()
+        geometry = self.corrected_seam_geometry
+        if reference == "manual":
+            return None
+        if reference == "touch_pair":
+            direction = touch_pair_weave_direction(
+                self.seam_probe_touches, geometry.d_real, geometry.e_w
+            )
+            if direction is not None:
+                return direction
+        return geometry.e_w
 
     def build_sensed_weld_sequence(
         self, *, teaching_poses=None, force_unsensed=False,
@@ -4049,7 +3962,7 @@ class WeldActionGui:
                 if has_lead_in and approach_mode != "taught_wait"
                 else ""
             )
-            + (f"[D-WELD ON/ARC established → "
+            + ("[D-WELD ON/ARC established → "
                + (f"custom hold {settings['custom_hot_start_hold_s']:.3f}s → "
                   if custom_hot_start_enabled else "")
                + f"weld motion → endpoint HOLD software_crater "
@@ -4398,226 +4311,6 @@ class WeldActionGui:
             "Generated 90° corner root seam from two floor/wall 1:1 midpoint pairs"
         )
 
-    def add_motion_sequence_step(self):
-        if not self.points:
-            self.error("Create or teach a motion path first")
-            return
-        try:
-            interpolation = float(self.interpolation_step_mm.get()) * 0.001
-            tcp_speed_m_s = self._selected_tcp_speed_m_s()
-        except (ValueError, tk.TclError) as error:
-            self.error(str(error))
-            return
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        self.sequence_model.add({
-            "type": "motion",
-            "planning_group": self.planning_group.get(),
-            "points": copy.deepcopy(self.points),
-            "velocity_scale": max(0.01, min(1.0, self.velocity_percent.get() / 100.0)),
-            "tcp_speed_m_s": tcp_speed_m_s,
-            "interpolation_step": interpolation,
-            "path_kind": self.path_kind,
-            "parallel_slot": slot,
-            "duration": duration,
-            "touch_guard": False,
-            "continue_after_touch": False,
-        })
-        self.refresh_sequence_table(select_last=True)
-
-    def add_latest_rviz_plan_step(self):
-        display, age = self.node.latest_rviz_plan()
-        if display is None:
-            self.error("Plan a path in RViz/MoveIt first")
-            return
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        trajectories = [
-            copy.deepcopy(trajectory)
-            for trajectory in display.trajectory
-            if trajectory.joint_trajectory.points
-        ]
-        joint_names = tuple(
-            dict.fromkeys(
-                name
-                for trajectory in trajectories
-                for name in trajectory.joint_trajectory.joint_names
-            )
-        )
-        arms = [
-            arm for arm, names in ARM_JOINT_NAMES.items()
-            if names.intersection(joint_names)
-        ]
-        planning_group = (
-            f"{arms[0]}_manipulator" if len(arms) == 1 else "unknown"
-        )
-        point_count = sum(
-            len(trajectory.joint_trajectory.points)
-            for trajectory in trajectories
-        )
-        self.sequence_model.add({
-            "type": "planned_trajectory",
-            "planning_group": planning_group,
-            "required_arms": tuple(arms),
-            "trajectory_start": copy.deepcopy(display.trajectory_start),
-            "trajectories": trajectories,
-            "model_id": display.model_id,
-            "joint_names": joint_names,
-            "point_count": point_count,
-            "captured_age": float(age),
-            "parallel_slot": slot,
-            "duration": duration,
-        })
-        self.refresh_sequence_table(select_last=True)
-        self.log(
-            f"Added latest RViz plan · {len(trajectories)} trajectory(s) · "
-            f"{point_count} points · received {age:.1f} s ago"
-        )
-
-    def add_named_pose_sequence_step(self):
-        pose_name = self._selected_teaching_pose_name()
-        stored = self.taught_robot_poses[pose_name]
-        if stored is None:
-            self.error(
-                f"Capture or load {TEACHING_POSES[pose_name]} first"
-            )
-            return
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-            tcp_speed_m_s = self._selected_tcp_speed_m_s()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        planning_group, joint_names, positions, tcp = stored
-        self.sequence_model.add({
-            "type": "named_pose",
-            "pose_name": pose_name,
-            "pose_label": TEACHING_POSES[pose_name],
-            "planning_group": planning_group,
-            "joint_names": tuple(joint_names),
-            "positions": tuple(positions),
-            "tcp_pose": copy.deepcopy(tcp),
-            "velocity_scale": max(
-                0.01,
-                min(1.0, self.velocity_percent.get() / 100.0),
-            ),
-            "tcp_speed_m_s": tcp_speed_m_s,
-            "parallel_slot": slot,
-            "duration": duration,
-            "touch_guard": pose_name in TOUCH_GUARDED_TEACHING_POSES,
-            "continue_after_touch": False,
-        })
-        self.refresh_sequence_table(select_last=True)
-
-    def add_sleep_sequence_step(self):
-        try:
-            seconds = float(self.sequence_sleep_seconds.get())
-        except (ValueError, tk.TclError):
-            self.error("Sleep duration is invalid")
-            return
-        if not math.isfinite(seconds) or not 0.0 <= seconds <= 3600.0:
-            self.error("Sleep duration must be in 0..3600 seconds")
-            return
-        self.sequence_model.add({
-            "type": "sleep",
-            "seconds": seconds,
-        })
-        self.refresh_sequence_table(select_last=True)
-
-    def add_head_motion_sequence_step(self):
-        try:
-            joint1_deg = float(self.sequence_head_joint1_deg.get())
-            joint2_deg = float(self.sequence_head_joint2_deg.get())
-        except (ValueError, tk.TclError):
-            self.error("Head target angle is invalid")
-            return
-        if not all(math.isfinite(v) and -180.0 <= v <= 180.0 for v in (joint1_deg, joint2_deg)):
-            self.error("Head joint targets must be in -180..180 degrees")
-            return
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        if duration <= 0.0:
-            self.error("Head move duration (Output duration s) must be > 0 seconds")
-            return
-        self.sequence_model.add({
-            "type": "head_motion",
-            "joint1_rad": math.radians(joint1_deg),
-            "joint2_rad": math.radians(joint2_deg),
-            "parallel_slot": slot,
-            "duration": duration,
-        })
-        self.refresh_sequence_table(select_last=True)
-        self.log(
-            f"Added HEAD MOVE J to sequence · slot {slot} · "
-            f"J1={joint1_deg:.1f}° J2={joint2_deg:.1f}° · {duration:.1f} s"
-        )
-
-    def add_digital_weld_step(self, command):
-        command = str(command).strip().lower()
-        if command not in ("on", "off", "set"):
-            self.error(f"Unknown D-WELD command: {command}")
-            return
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        # Snapshot the current recipe for every D-WELD row, including OFF.
-        # OFF does not transmit I/V, but keeping the snapshot prevents the
-        # sequence editor from showing stale 100 A / 10 V defaults and keeps
-        # ON/OFF metadata consistent.
-        try:
-            settings = copy.deepcopy(self._digital_weld_settings())
-        except ValueError as error:
-            if command == "off":
-                # Safety OFF must remain addable even if a recipe field is
-                # temporarily invalid. Use the current validated defaults only
-                # as metadata; execution still issues an unconditional ARC OFF.
-                settings = copy.deepcopy(DEFAULT_DIGITAL_WELD_SETTINGS)
-            else:
-                self.error(f"Cannot add D-WELD {command.upper()}: {error}")
-                return
-        self.sequence_model.add({
-            "type": "digital_weld",
-            "command": command,
-            "settings": settings,
-            "parallel_slot": slot,
-            "duration": duration,
-        })
-        self.refresh_sequence_table(select_last=True)
-        self.log(
-            f"Added D-WELD {command.upper()} to sequence · "
-            f"slot {slot} · {duration:.3f} s"
-        )
-
-    def add_gas_sequence_step(self, enabled):
-        try:
-            slot, duration = self._sequence_slot_and_duration()
-        except ValueError as error:
-            self.error(str(error))
-            return
-        enabled = bool(enabled)
-        self.sequence_model.add({
-            "type": "gas",
-            "enabled": enabled,
-            "parallel_slot": slot,
-            "duration": duration,
-        })
-        self.refresh_sequence_table(select_last=True)
-        self.log(
-            f"Added GAS {'ON' if enabled else 'OFF'} to sequence · "
-            f"slot {slot} · {duration:.3f} s"
-        )
-
     def _sequence_slot_and_duration(self):
         try:
             slot = int(self.sequence_parallel_slot.get())
@@ -4743,6 +4436,11 @@ class WeldActionGui:
                 kind = "CUSTOM HOT START"
                 detail = (f"motion hold after ARC established · "
                           f"{step['settings']['custom_hot_start_hold_s']:.3f} s · {timing}")
+            elif step["type"] == "wire_feed":
+                kind = "INCH FORWARD"
+                detail = (f"Hi-COMM timed wire feed · "
+                          f"slot {step.get('parallel_slot', index + 1)} · "
+                          f"{step.get('duration', 0.0):.2f} s")
             elif step["type"] == "gas":
                 kind = f"GAS {'ON' if step['enabled'] else 'OFF'}"
                 detail = f"Hi-COMM shielding gas · {timing}"
@@ -5421,7 +5119,6 @@ class WeldActionGui:
             self.error("Cannot build work cycle while a sequence is running")
             return False
         try:
-            from construct_robot.io.teaching_paths import teaching_config_dir
             config = load_work_cycle(teaching_config_dir() / "combined_work_cycle.yaml")
             repeats = int(self.work_cycle_repeats.get())
             if set(self.four_pass_references) != {1, 2, 3, 4}:
@@ -5488,17 +5185,6 @@ class WeldActionGui:
         self.refresh_sequence_table()
         self.sequence_status.configure(text="Sequence empty")
         self.log(f"Deleted all {count} Sequence Builder rows")
-
-    def move_sequence_step(self, offset):
-        index = self._selected_sequence_index()
-        if index is None:
-            self.error("Select a sequence step")
-            return
-        target = self.sequence_model.move(index, offset)
-        if target is None:
-            return
-        self.refresh_sequence_table()
-        self.sequence_table.selection_set(str(target))
 
     _pose_execution_conditions = staticmethod(pose_execution_conditions)
 
@@ -5607,6 +5293,7 @@ class WeldActionGui:
             "weld_weave_axis": str(effective_motion_value(
                 "weld_weave_axis", self.weave_axis.get()
             )),
+            "weld_weave_reference": self.weld_weave_reference.get(),
             # These are effective scenario values, not live Seam Correction
             # widgets.  The per-step snapshot below and this summary therefore
             # cannot disagree after a Builder edit.
@@ -5785,10 +5472,6 @@ class WeldActionGui:
         self.node.clear_touch_probe()
         if self.hicomm_client is not None:
             self.hicomm_client.inhibit_outputs()
-        self._finish_weld_feedback_record(
-            "operator stop",
-            self.hicomm_client.latest_status() if self.hicomm_client is not None else None,
-        )
         self.hicomm_inching_direction = None
         self.hicomm_gas_enabled.set(False)
         self.hicomm_arc_on_button.configure(state=tk.DISABLED)
@@ -5803,6 +5486,10 @@ class WeldActionGui:
             args=(devices,),
             daemon=True,
         ).start()
+        self._finish_weld_feedback_record(
+            "operator stop",
+            self.hicomm_client.latest_status() if self.hicomm_client is not None else None,
+        )
         self.sequence_status.configure(
             text="STOP NOW · Hi-COMM inhibited · canceling robot controllers"
         )
@@ -5899,10 +5586,85 @@ class WeldActionGui:
 
     @staticmethod
     def _keyboard_focus_accepts_arrows(widget):
+        """True only for widgets that take typed text (or arrow navigation).
+
+        Read-only comboboxes (axis/frame selectors) do not take text, so they
+        must not swallow teaching keys after the operator clicks them.
+        """
+        if isinstance(widget, ttk.Combobox):
+            try:
+                return str(widget.cget("state")) != "readonly"
+            except tk.TclError:
+                return True
         return isinstance(
             widget,
-            (tk.Entry, tk.Listbox, tk.Text, ttk.Entry, ttk.Spinbox, ttk.Combobox),
+            (tk.Entry, tk.Listbox, tk.Text, ttk.Entry, ttk.Spinbox),
         )
+
+    def _keyboard_focus_in_input_field(self):
+        """Focus is inside this GUI, in a text/arrow input (not another app)."""
+        try:
+            widget = self.root.focus_get()
+        except (KeyError, tk.TclError):
+            return False
+        return widget is not None and self._keyboard_focus_accepts_arrows(widget)
+
+    def _install_teaching_key_tag(self, widget=None):
+        """Give every widget a leading bindtag that claims arrows in teaching mode."""
+        widget = self.root if widget is None else widget
+        for child in widget.winfo_children():
+            tags = child.bindtags()
+            if TEACHING_KEY_TAG not in tags:
+                child.bindtags((TEACHING_KEY_TAG,) + tuple(tags))
+            self._install_teaching_key_tag(child)
+        if widget is self.root:
+            for key_name in ("Left", "Right", "Up", "Down"):
+                self.root.bind_class(
+                    TEACHING_KEY_TAG, f"<KeyPress-{key_name}>",
+                    self._teaching_arrow_in_widget,
+                )
+                self.root.bind_class(
+                    TEACHING_KEY_TAG, f"<KeyRelease-{key_name}>",
+                    self._teaching_arrow_release_in_widget,
+                )
+
+    def _teaching_arrow_in_widget(self, event):
+        """Keyboard teaching ON: an arrow in any widget jogs, never edits it."""
+        if not self.keyboard_jog_enabled.get():
+            return None  # normal widget behaviour (spinbox step, list move)
+        self.root.focus_set()
+        if not self._keyboard_ros_input_online():
+            self.keyboard_jog_key_press(event)
+        else:
+            # The X11 node may already have reported this press while focus
+            # was still in the widget; start it now that focus is back.
+            self.root.after_idle(self._retry_pending_keyboard_press)
+        return "break"
+
+    def _teaching_arrow_release_in_widget(self, event):
+        if not self.keyboard_jog_enabled.get():
+            return None
+        if not self._keyboard_ros_input_online():
+            self.keyboard_jog_key_release(event)
+        return "break"
+
+    def _retry_pending_keyboard_press(self):
+        key = self.keyboard_ros_pending_key
+        if (
+            key is None
+            or key != self.keyboard_ros_physical_key
+            or self.keyboard_velocity_active_key is not None
+            or not self.keyboard_jog_enabled.get()
+            or not self._keyboard_focus_allows_jog()
+        ):
+            return
+        self.keyboard_ros_pending_key = None
+        self.keyboard_ros_dispatching = True
+        try:
+            event = type("PhysicalKeyEvent", (), {"keysym": key})()
+            self.keyboard_jog_key_press(event)
+        finally:
+            self.keyboard_ros_dispatching = False
 
     def _keyboard_focus_allows_jog(self):
         """Return False for text widgets, external focus, and Tk modal windows."""
@@ -6329,6 +6091,8 @@ class WeldActionGui:
             0x08: "Down",
         }.get(mask)
         self.keyboard_ros_physical_key = key
+        if key != previous_key:
+            self.keyboard_ros_pending_key = None
 
         # Multiple arrows are treated as STOP. The selected teaching planes
         # already map one arrow to a deterministic Cartesian vector.
@@ -6341,10 +6105,25 @@ class WeldActionGui:
         if not usable:
             if self.keyboard_velocity_active_key is not None:
                 self._stop_keyboard_jog_command("STOPPED · keyboard input inactive")
+            elif (
+                key is not None
+                and key != previous_key
+                and self.keyboard_ros_zero_seen
+                and self.keyboard_jog_enabled.get()
+                and self._keyboard_focus_in_input_field()
+            ):
+                # Dropped only for focus: remember it instead of losing the
+                # whole hold (the old behaviour needed release + re-press).
+                self.keyboard_ros_pending_key = key
+                self.keyboard_jog_status.set(
+                    "키 입력 대기 · 입력칸 포커스 — 방향키를 누르면 메인으로 전환"
+                )
             return
         if key == previous_key:
             if key is not None and key == self.keyboard_velocity_active_key:
                 self.node.refresh_keyboard_velocity(self.keyboard_velocity_arm)
+            elif key is not None and key == self.keyboard_ros_pending_key:
+                self._retry_pending_keyboard_press()
             return
 
         # A physical release reaches this path directly; unlike Tk auto-repeat,
@@ -6369,11 +6148,17 @@ class WeldActionGui:
     def keyboard_teaching_shortcut_key(self, event):
         """Handle speed cycling and current-pose saves in teaching mode."""
         key = str(event.keysym).lower()
-        if key not in ("v", "x") and self._cleaner_task_selected():
+        cleaner = self._cleaner_task_selected()
+        if cleaner and key not in ("v", "x") and key not in CLEANER_KEY_POSES:
             self.keyboard_jog_status.set(
-                "Cleaner pose: select a Teaching index and use Save current right-arm pose"
+                "Cleaner keys: " + " · ".join(
+                    f"{shortcut.upper()}={name}"
+                    for shortcut, name in CLEANER_KEY_POSES.items()
+                )
             )
             return "break"
+        if key == "u" and not cleaner:
+            return None
         registration = self.multi_pass_registration
         if not self.keyboard_jog_enabled.get():
             if registration is not None and key in ("i", "j"):
@@ -6428,6 +6213,19 @@ class WeldActionGui:
             self.keyboard_jog_angular_speed.set(speed)
             self.keyboard_jog_status.set(f"Rotation speed {speed:g} deg/s")
             self.log(f"Keyboard rotation speed selected · {speed:g} deg/s")
+            return "break"
+
+        if cleaner:
+            if self.sequence_running or self.node.active_motion_goal is not None:
+                self.error("Cannot save a cleaner pose during another motion")
+                return "break"
+            if self.keyboard_velocity_arm != "right" or self.keyboard_velocity_switching:
+                self.error("Enable right-arm Keyboard Teaching to save cleaner poses")
+                return "break"
+            name = CLEANER_KEY_POSES[key]
+            self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving cleaner {name}...")
+            self.log(f"Keyboard cleaner capture · {key.upper()} → {name}")
+            self.torch_cleaner_panel.capture(name)
             return "break"
 
         if registration is not None and key in ("i", "j"):
@@ -7540,18 +7338,15 @@ class WeldActionGui:
         self._refresh_initial_position_controls()
 
     def _initial_state_yaml_path(self, planning_group=None, pose_name=None):
-        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         selected_pose = pose_name or self._selected_teaching_pose_name()
         return teaching_config_dir() / f"{group}_{selected_pose}_state.yaml"
 
     def _seam_reference_yaml_path(self, planning_group=None):
-        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         return teaching_config_dir() / f"{group}_seam_teaching_reference.yaml"
 
     def _seam_touch_yaml_path(self, planning_group=None):
-        from construct_robot.io.teaching_paths import teaching_config_dir
         group = planning_group or self.planning_group.get()
         return teaching_config_dir() / f"{group}_seam_touch_points.yaml"
 
@@ -8714,18 +8509,26 @@ class WeldActionGui:
             rclpy.shutdown()
         self.executor_thread.join(timeout=1.0)
         self.node.destroy_node()
+        recorder = getattr(self, "_weld_feedback_recorder", None)
+        if recorder is not None:
+            recorder.shutdown()
 
     def check_ros(self):
-        self._drain_ui_queue()
-        if not rclpy.ok():
-            self.root.destroy()
-            return
         # Physical keyboard edges arrive on the ROS executor.  A 50 ms Tk
         # bridge interval added directly to jog start latency (plus one
         # ros2_control cycle).  High-rate telemetry is already coalesced and
         # _drain_ui_queue() has a strict time/item budget, so a 10 ms bridge is
         # responsive without allowing ROS callbacks to starve Tk.
-        self.root.after(10, self.check_ros)
+        if getattr(self, "_closing", False):
+            return
+        try:
+            self._drain_ui_queue()
+        finally:
+            if not getattr(self, "_closing", False):
+                if rclpy.ok():
+                    self.root.after(10, self.check_ros)
+                else:
+                    self.root.destroy()
 
     def mainloop(self):
         self.root.mainloop()

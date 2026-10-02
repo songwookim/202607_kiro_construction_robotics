@@ -12,6 +12,11 @@ The JTC must start each streamed trajectory from its last command
 (``open_loop_control``); re-seeding from measured joints drifts against the
 command and snaps when the stream stops.  It is enabled only while keyboard
 teaching owns the arm and restored on exit.
+
+Keyboard teaching also switches RB Servo-J to a tighter filter profile: the
+welding default follows the command ~160 ms late (28 mm run-on after a 100 mm/s
+release); the keyboard profile ~75 ms with the same smoothness.  The welding
+default is restored on exit, so trajectories never run on the keyboard profile.
 """
 
 import threading
@@ -21,6 +26,7 @@ from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import TwistStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
+from rbpodo_msgs.srv import SetJointPositionControllerConfig
 from std_msgs.msg import Int8
 from std_srvs.srv import Trigger
 
@@ -28,6 +34,10 @@ from std_srvs.srv import Trigger
 KEYBOARD_SERVO_ARMS = ("left", "right")
 KEYBOARD_SERVO_SERVICE_TIMEOUT_S = 3.0
 KEYBOARD_SERVO_COMMAND_STILL_RAD = 1e-7
+# RB Servo-J (t1, t2, gain, alpha).  WELDING matches rbpodo_hardware's
+# JointPositionControllerConfig defaults used by every trajectory.
+SERVO_J_WELDING_PROFILE = (0.04, 0.10, 0.5, 0.2)
+SERVO_J_KEYBOARD_PROFILE = (0.02, 0.10, 0.8, 0.5)
 SERVO_STATUS_TEXT = {
     0: "OK",
     1: "slowing near singularity",
@@ -61,6 +71,7 @@ class KeyboardServoBridge:
         self.start_clients = {}
         self.stop_clients = {}
         self.parameter_clients = {}
+        self.servo_j_clients = {}
         for arm in KEYBOARD_SERVO_ARMS:
             prefix = keyboard_jog_prefix(arm)
             controller = self.controller_names[arm]
@@ -71,6 +82,10 @@ class KeyboardServoBridge:
             self.stop_clients[arm] = node.create_client(Trigger, f"{prefix}/stop")
             self.parameter_clients[arm] = node.create_client(
                 SetParameters, f"/{controller}/set_parameters"
+            )
+            self.servo_j_clients[arm] = node.create_client(
+                SetJointPositionControllerConfig,
+                f"/{arm}_rbpodo_hardware/set_joint_position_controller_config",
             )
             node.create_subscription(
                 JointTrajectoryControllerState,
@@ -134,16 +149,38 @@ class KeyboardServoBridge:
         if not ok:
             self.set_open_loop(arm, False)
             return False, message
+        # Lower RB lag is a comfort feature: keyboard teaching still works on
+        # the welding profile if the hardware service is unavailable.
+        _profile_ok, profile_message = self.set_servo_j_profile(
+            arm, SERVO_J_KEYBOARD_PROFILE
+        )
         return True, (
             f"{arm} keyboard jog started · "
-            f"{self.controller_names[arm]} stays active"
+            f"{self.controller_names[arm]} stays active · {profile_message}"
         )
 
     def disable(self, arm):
         """Stop the jog stream, then restore the JTC's closed-loop start state."""
         stop_ok, stop_message = self._trigger(self.stop_clients[arm], "jog stop")
         loop_ok, loop_message = self.set_open_loop(arm, False)
-        return stop_ok and loop_ok, f"{stop_message}; {loop_message}"
+        profile_ok, profile_message = self.set_servo_j_profile(
+            arm, SERVO_J_WELDING_PROFILE
+        )
+        return (
+            stop_ok and loop_ok and profile_ok,
+            f"{stop_message}; {loop_message}; {profile_message}",
+        )
+
+    def set_servo_j_profile(self, arm, profile):
+        t1, t2, gain, alpha = profile
+        name = "keyboard" if profile == SERVO_J_KEYBOARD_PROFILE else "welding"
+        response, error = self._call(
+            self.servo_j_clients[arm],
+            SetJointPositionControllerConfig.Request(t1=t1, t2=t2, gain=gain, alpha=alpha),
+        )
+        if error is not None or not response.success:
+            return False, f"Servo-J {name} profile NOT applied ({error or 'refused'})"
+        return True, f"Servo-J {name} profile"
 
     def restart(self, arm):
         """Stop and restart the jog: it holds the last command, RB stays in Servo-J."""

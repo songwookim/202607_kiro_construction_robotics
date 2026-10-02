@@ -400,6 +400,7 @@ def test_multi_pass_automatic_move_uses_explicit_touch_guard():
     gui = object.__new__(WeldActionGui)
     gui.node = SimpleNamespace(
         _current_tcp_pose=Mock(return_value=pose(0, 0, 0)),
+        _path_start_tcp_pose=Mock(return_value=pose(0, 0, 0)),
         run_sequence_cartesian_motion=Mock(return_value=(False, "touch stop")),
     )
     assert gui._run_multi_pass_tcp_move(pose(0.1, 0, 0), "WAIT transfer", 0.05) == (

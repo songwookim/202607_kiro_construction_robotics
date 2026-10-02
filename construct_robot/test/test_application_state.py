@@ -3,8 +3,7 @@ from pathlib import Path
 import pytest
 
 from construct_robot.core.multipass import MultiPassState
-from construct_robot.core.task_teaching_model import TaskOrderState, TeachingState
-from construct_robot.core.torch_cleaner_teaching import CleanerTeachingState
+from construct_robot.core.task_teaching_model import CleanerTeachingState, TeachingState
 from construct_robot.gui.weld_action_gui import TEACHING_POSES, WeldActionGui
 
 
@@ -36,12 +35,7 @@ def test_multipass_working_set_and_selection_are_tk_independent():
         gui.multipass_state.select(5)
 
 
-def test_task_and_cleaner_order_models():
-    task = TaskOrderState(["a", "b"])
-    task.add("c")
-    assert task.move(2, -1) == 1
-    assert task.names == ["a", "c", "b"]
-    assert task.remove(1) == "c"
+def test_cleaner_order_model():
     cleaner = CleanerTeachingState(Path("/tmp/cleaner"))
     cleaner.set_order(["start", "DO7:ON", "DO7:OFF"])
     assert cleaner.tokens == ["start", "DO7:ON", "DO7:OFF"]

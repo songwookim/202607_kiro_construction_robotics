@@ -1,4 +1,5 @@
 """Shared YAML parsing and persistence for TCP teaching, touch and pass references."""
+from contextlib import contextmanager
 import copy
 import hashlib
 import math
@@ -11,6 +12,7 @@ from geometry_msgs.msg import Pose
 
 from construct_robot.core.cartesian_path_common import pose_is_valid
 from construct_robot.core.seam_geometry import CORNER_TOUCH_NAMES, _pose_position_tuple
+from construct_robot.core.work_cycle import validate_work_cycle
 
 ARM_JOINT_NAMES = {
     arm: frozenset(
@@ -139,29 +141,12 @@ def save_initial_state_yaml(path, planning_group, joint_names, positions, tcp, p
     }
     if provenance:
         document["capture_provenance"] = copy.deepcopy(provenance)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary_path = Path(stream.name)
-            yaml.safe_dump(document, stream, sort_keys=False)
-        temporary_path.replace(path)
-        # Do not report a successful teaching update unless the final target
-        # file can be read back and contains exactly what was requested.
-        with path.open("r", encoding="utf-8") as stream:
-            persisted = yaml.load(stream, Loader=yaml.CSafeLoader)
-        if persisted != document:
-            raise OSError(f"YAML read-back verification failed: {path}")
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
+    atomic_yaml(path, document)
+    # Do not report success until the final target matches the captured state.
+    with path.open("r", encoding="utf-8") as stream:
+        persisted = yaml.load(stream, Loader=yaml.CSafeLoader)
+    if persisted != document:
+        raise OSError(f"YAML read-back verification failed: {path}")
 
 
 def read_pass_teaching_reference(path, expected_pass):
@@ -283,23 +268,7 @@ def save_seam_touch_yaml(
         ),
         "touches": records,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary_path = Path(stream.name)
-            yaml.safe_dump(document, stream, sort_keys=False)
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
+    atomic_yaml(path, document)
 
 
 def parse_teaching_snapshot_entry(pose_name, entry):
@@ -361,19 +330,7 @@ def save_seam_teaching_reference_yaml(path, planning_group, references):
                 for axis in ("x", "y", "z", "w")
             },
         }
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as stream:
-        temporary_path = Path(stream.name)
-        yaml.safe_dump(document, stream, sort_keys=False)
-    temporary_path.replace(path)
+    atomic_yaml(path, document)
 
 
 def load_seam_teaching_reference_yaml(path):
@@ -394,3 +351,91 @@ def load_seam_teaching_reference_yaml(path):
             raise ValueError(f"invalid seam teaching reference: {name}")
         poses[name] = pose
     return document.get("planning_group"), poses
+
+
+@contextmanager
+def atomic_text_writer(path):
+    """Keep the old target on failure and always remove the temporary file.
+
+    Close the UTF-8 stream before replacing the target on the same filesystem.
+    This provides atomic visibility, not an fsync/power-loss durability claim.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            yield stream
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def atomic_yaml(path, document, *, sort_keys=False, allow_unicode=False):
+    """Write safe YAML without changing existing callers' serialization format."""
+    with atomic_text_writer(path) as stream:
+        yaml.safe_dump(document, stream, sort_keys=sort_keys, allow_unicode=allow_unicode)
+
+
+def teaching_config_dir():
+    source = Path(__file__).resolve().parents[3] / "construct_description" / "config"
+    if source.is_dir():
+        return source
+    from ament_index_python.packages import get_package_share_directory
+
+    return Path(get_package_share_directory("construct_description")) / "config"
+
+
+def load_work_cycle(path):
+    document = yaml.load(Path(path).read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+    return validate_work_cycle(document)
+
+
+def cleaner_pose_path(folder, name):
+    if (not name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in name)
+            or name == "sequence"):
+        raise ValueError("Use a position name containing letters, digits, _ or -")
+    return Path(folder).expanduser().resolve() / f"{name}.yaml"
+
+
+def load_cleaner_order(folder):
+    """Read the operator's cleaner order, including the v1 DO5/DO7 rename."""
+    path = Path(folder) / "sequence.yaml"
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+    if (not isinstance(document, dict)
+            or document.get("schema") not in ("torch_cleaner_sequence_v1", "torch_cleaner_sequence_v2")
+            or not isinstance(document.get("positions"), list)
+            or not all(isinstance(value, str) for value in document["positions"])):
+        raise ValueError(f"Invalid cleaner sequence YAML: {path}")
+    tokens = document["positions"]
+    if document["schema"] == "torch_cleaner_sequence_v1":
+        tokens = ["DO7:" + value[4:] if value.startswith("DO5:") else
+                  "DO5:" + value[4:] if value.startswith("DO7:") else value
+                  for value in tokens]
+    return tokens
+
+
+def load_cleaner_pose(path, load_pose=load_initial_state_yaml):
+    """Read legacy joint-only and current TCP teaching with the same joint checks."""
+    path = Path(path)
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader)
+    if not isinstance(document, dict):
+        raise ValueError(f"Invalid cleaner pose: {path}")
+    if document.get("schema") == "torch_cleaner_joints_v1":
+        group = document.get("planning_group")
+        joint_state = document.get("joint_state", {})
+        names = tuple(joint_state.get("names", ()))
+        positions = tuple(float(value) for value in joint_state.get("positions_rad", ()))
+        tcp = None
+    else:
+        group, names, positions, tcp = load_pose(path)
+    expected = {f"right_manipulator_joint{i}" for i in range(1, 7)}
+    if (group != "right_manipulator" or len(names) != 6 or set(names) != expected
+            or len(positions) != 6 or not all(math.isfinite(value) for value in positions)):
+        raise ValueError(f"Cleaner pose must contain six right-arm joints: {path}")
+    return group, names, positions, tcp

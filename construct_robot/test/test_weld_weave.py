@@ -241,13 +241,33 @@ def _sensed_fillet_geometry():
                                            wall, floor)
 
 
-def _gui_with(geometry, touches):
+def _gui_with(geometry, touches, reference="bisector"):
+    from types import SimpleNamespace
     from construct_robot.gui.weld_action_gui import WeldActionGui
 
     gui = object.__new__(WeldActionGui)
     gui.corrected_seam_geometry = geometry
     gui.seam_probe_touches = touches
+    gui.weld_weave_reference = SimpleNamespace(get=lambda: reference)
     return gui
+
+
+def test_weave_reference_modes_pick_their_direction():
+    from geometry_msgs.msg import Pose
+    from construct_robot.core.seam_geometry import touch_pair_weave_direction
+
+    def pose(x, y, z):
+        p = Pose(); p.position.x, p.position.y, p.position.z = x, y, z; p.orientation.w = 1.0
+        return p
+
+    geometry = _sensed_fillet_geometry()
+    # Touch pair offset along the bisector-perpendicular plane: any two points.
+    touches = {"start_wall": pose(0.0, 0.0, 0.0), "start_floor": pose(0.0, 0.003, -0.001),
+               "goal_wall": None, "goal_floor": None}
+    assert _gui_with(geometry, touches, "manual").sensed_weave_transverse_vector() is None
+    assert _gui_with(geometry, touches, "bisector").sensed_weave_transverse_vector() == geometry.e_w
+    expected = touch_pair_weave_direction(touches, geometry.d_real, geometry.e_w)
+    assert _gui_with(geometry, touches, "touch_pair").sensed_weave_transverse_vector() == expected
 
 
 def test_sensed_weave_direction_is_the_geometry_axis_not_a_tool_axis():

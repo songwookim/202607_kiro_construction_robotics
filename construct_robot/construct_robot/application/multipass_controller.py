@@ -23,7 +23,6 @@ import copy
 import hashlib
 import math
 from pathlib import Path
-import tempfile
 import threading
 import time
 
@@ -39,6 +38,7 @@ from construct_robot.core.seam_geometry import _pose_position_tuple
 from construct_robot.core.task_teaching_model import TEACHING_POSES
 from construct_robot.io.teaching_yaml import (
     _pose_from_yaml_dict,
+    atomic_yaml,
     parse_teaching_snapshot_entry,
     read_pass_teaching_reference,
     save_initial_state_yaml,
@@ -409,7 +409,7 @@ class MultipassController:
     ):
         host = self.host
         try:
-            current = host.node._current_tcp_pose("right_manipulator")
+            current = host.node._path_start_tcp_pose("right_manipulator")
             points = named_tcp_linear_waypoints(current, target)
         except (TransformException, ValueError) as error:
             return False, f"{label} path failed: {error}"
@@ -749,21 +749,6 @@ class MultipassController:
             "passes": [],
         }
 
-        def atomic_yaml(path, document):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
-                ) as stream:
-                    temporary_path = Path(stream.name)
-                    yaml.safe_dump(document, stream, sort_keys=False)
-                temporary_path.replace(path)
-            finally:
-                if temporary_path is not None and temporary_path.exists():
-                    temporary_path.unlink()
-
         for pass_number in range(1, 5):
             reference = host.four_pass_references[pass_number]
             record = {
@@ -1082,19 +1067,7 @@ class MultipassController:
                     "source_log_sha256": reference["sha256"],
                 })
             path = host._selected_pass_teaching_path(number)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
-                ) as stream:
-                    temporary_path = Path(stream.name)
-                    yaml.safe_dump(document, stream, sort_keys=False)
-                temporary_path.replace(path)
-            finally:
-                if temporary_path is not None and temporary_path.exists():
-                    temporary_path.unlink()
+            atomic_yaml(path, document)
             persisted = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.CSafeLoader) or {}
             if persisted != document:
                 raise OSError(f"Pass teaching YAML read-back failed: {path}")

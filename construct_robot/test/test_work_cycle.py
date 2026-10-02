@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from construct_robot.core.work_cycle import assemble_work_cycle, load_work_cycle
+from construct_robot.core.work_cycle import assemble_work_cycle
+from construct_robot.io.teaching_yaml import load_work_cycle
 
 
 CONFIG = Path(__file__).resolve().parents[2] / "construct_description/config/combined_work_cycle.yaml"

@@ -34,7 +34,7 @@ def fake_client(response, name="srv"):
     )
 
 
-def bridge_with(start_ok=True, parameter_ok=True):
+def bridge_with(start_ok=True, parameter_ok=True, profile_ok=True):
     bridge = object.__new__(KeyboardServoBridge)
     bridge.node = SimpleNamespace(
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=Time)),
@@ -51,7 +51,15 @@ def bridge_with(start_ok=True, parameter_ok=True):
     bridge.stop_clients = {"right": fake_client(SimpleNamespace(success=True, message=""))}
     bridge.parameter_clients = {"right": fake_client(SimpleNamespace(
         results=[SimpleNamespace(successful=parameter_ok, reason="read-only")]))}
+    bridge.servo_j_clients = {"right": fake_client(SimpleNamespace(success=profile_ok))}
     return bridge
+
+
+def servo_j_profiles(bridge):
+    return [
+        (call.args[0].t1, call.args[0].t2, call.args[0].gain, call.args[0].alpha)
+        for call in bridge.servo_j_clients["right"].call_async.call_args_list
+    ]
 
 
 def open_loop_values(bridge):
@@ -103,6 +111,30 @@ def test_disable_stops_the_jog_before_restoring_closed_loop():
     bridge.set_open_loop = lambda arm, on: (order.append(("loop", on)), original(arm, on))[1]
     assert bridge.disable("right")[0]
     assert order == ["stop", ("loop", False)]
+
+
+def test_keyboard_profile_on_enable_and_welding_profile_on_disable():
+    from construct_robot.nodes.keyboard_servo import (
+        SERVO_J_KEYBOARD_PROFILE, SERVO_J_WELDING_PROFILE)
+    bridge = bridge_with()
+    assert bridge.enable("right")[0]
+    assert bridge.disable("right")[0]
+    assert servo_j_profiles(bridge) == [SERVO_J_KEYBOARD_PROFILE, SERVO_J_WELDING_PROFILE]
+    assert SERVO_J_WELDING_PROFILE == (0.04, 0.10, 0.5, 0.2)  # rbpodo_hardware defaults
+
+
+def test_profile_failure_does_not_block_keyboard_teaching_but_is_reported():
+    bridge = bridge_with(profile_ok=False)
+    success, message = bridge.enable("right")
+    assert success and "NOT applied" in message
+    success, message = bridge.disable("right")
+    assert not success and "welding profile NOT applied" in message
+
+
+def test_failed_start_never_applies_the_keyboard_profile():
+    bridge = bridge_with(start_ok=False)
+    assert not bridge.enable("right")[0]
+    assert servo_j_profiles(bridge) == []
 
 
 def test_restart_stops_then_starts_without_touching_open_loop():

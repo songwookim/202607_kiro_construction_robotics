@@ -39,7 +39,10 @@ from construct_robot.core.sequence_model import (
     taught_wait_approach_steps,
     validate_managed_weld_sequence,
 )
-from construct_robot.core.task_teaching_model import TEACHING_POSES
+from construct_robot.core.task_teaching_model import TEACHING_POSES, cleaner_output_step
+from construct_robot.io.teaching_yaml import (
+    cleaner_pose_path, load_cleaner_pose,
+)
 
 
 @dataclass(frozen=True)
@@ -813,3 +816,59 @@ def build_weld_scenario(inp, motion, *, base_slot=1, scenario_id=None):
         scenario_id = new_weld_scenario_id()
     steps = build_weld_scenario_steps(inp, approach, path, slots, motion, scenario_id)
     return WeldScenarioBuild(approach=approach, path=path, slots=slots, steps=steps)
+
+
+def build_cleaner_sequence_steps(folder, tokens, velocity_percent, load_pose):
+    """Build existing cleaner rows from YAML without Tk or robot commands."""
+    tokens = [name.strip() for name in tokens if name.strip()]
+    if not tokens:
+        raise ValueError("Cleaner sequence is empty")
+    pulse_reference = {}
+    for token in tokens:
+        if token.startswith("WIRE_FORWARD:"):
+            duration = float(token.split(":", 1)[1])
+            if not math.isfinite(duration) or not 0 < duration <= 30:
+                raise ValueError("Wire feed duration must be 0..30 seconds")
+            continue
+        if ":" in token:
+            port, value = cleaner_output_step(token)
+            if value not in ("ON", "OFF"):
+                pulse_reference[port] = float(value)
+    steps = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        common = {"parallel_slot": len(steps) + 1, "duration": 0.0,
+                  "torch_clean_scenario": True}
+        if token.startswith("WIRE_FORWARD:"):
+            steps.append(dict(common, type="wire_feed",
+                              duration=float(token.split(":", 1)[1])))
+            index += 1
+            continue
+        if ":" in token:
+            port, value = cleaner_output_step(token)
+            if value == "ON":
+                if index + 1 >= len(tokens) or tokens[index + 1] != f"DO{port}:OFF":
+                    raise ValueError(f"DO{port}:ON needs an adjacent DO{port}:OFF for automatic execution")
+                duration = pulse_reference.get(port, 1.0)
+                index += 2
+            else:
+                duration = float(value) if value != "OFF" else 0.0
+                index += 1
+            steps.append(dict(common, type="digital_output", port=port,
+                              value=value != "OFF", io_backend="fastech_ethernet",
+                              task_cleaner_output=True, duration=duration))
+            continue
+        path = cleaner_pose_path(folder, token)
+        group, names, positions, tcp = load_cleaner_pose(path, load_pose)
+        joint_approach = token in ("start", "end")
+        steps.append(dict(common, type="named_pose", pose_name=(
+            "cleaner_joint" if joint_approach else "weld_start"),
+            pose_label=f"Cleaner {token}", planning_group=group,
+            joint_names=names, positions=positions, tcp_pose=tcp,
+            resolve_tcp_from_joints=tcp is None, use_joint_planning=joint_approach,
+            velocity_scale=max(0.01, min(1.0, float(velocity_percent) / 100.0)),
+            touch_guard=False, continue_after_touch=False))
+        steps[-1]["cleaner_source_index"] = index
+        index += 1
+    return steps
