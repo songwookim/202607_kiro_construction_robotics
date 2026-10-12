@@ -177,6 +177,10 @@ def generate_launch_description():
     )
     # Avoid stale Fast DDS shared-memory locks by keeping the complete launch
     # on localhost UDP. These actions must precede all included nodes.
+
+    # export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    # export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+    # export ROS_LOCALHOST_ONLY=1
     force_udp_transport = SetEnvironmentVariable(
         "FASTDDS_BUILTIN_TRANSPORTS",
         "UDPv4",

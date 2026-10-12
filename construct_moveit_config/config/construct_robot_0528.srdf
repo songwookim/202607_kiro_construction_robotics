@@ -15,18 +15,16 @@
     <group name="right_manipulator">
         <chain base_link="right_manipulator_base_link" tip_link="right_manipulator_ee_point"/>
     </group>
-    <group name="left_tool">
+    <!-- <group name="left_tool">
         <link name="left_manipulator_ee_point"/>
     </group>
     <group name="right_tool">
         <link name="right_manipulator_ee_point"/>
-    </group>
-    <group name="head_tool">
-        <link name="robot_head_rev_link2"/>
-    </group>
+    </group> -->
     <group name="robot_head">
         <joint name="robot_head_rev_joint1"/>
         <joint name="robot_head_rev_joint2"/>
+
     </group>
     <group name="dual_arm">
         <!-- Subgroups let MoveIt associate both arm end effectors with this
