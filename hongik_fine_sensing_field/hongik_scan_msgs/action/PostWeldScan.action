@@ -1,0 +1,33 @@
+# Post-weld data acquisition (hongik fine sensing; action /hongik_fine_sensing/post_weld_scan): after the welding - or after any pass
+# of it (the caller decides when) - ONE straight scan of the whole weld along the measured seam of a finished 1G run, from 20 mm beyond
+# its measured S end to 20 mm beyond its measured E end, at the run's pass standoff and sensor orientation, at the measurement speed.
+# Raw data only: no estimation, no profile checks, no decision, no change to the weld plan; the sensor runs with the
+# run's own settings. The scan moves like a sensing pass of that run: its world (MoveIt scene, envelope), its standoff, the standard
+# checks of every scan move; positioning through MoveIt at the platform limits from wherever the arm is. Only on an explicit call.
+# Output: <run_dir>/post_weld_scan_p<k>_<YYYYmmdd-HHMMSS>/ (after pass k) or post_weld_scan_final_<...>/ = raw.npz (sensor
+# profiles + robot poses / stamps + the scan definition, the format of the pass legs' raw.npz) + run_log.json. One goal at a time
+# over all actions of the server.
+
+# ===================== goal =====================
+string run_dir                         # the finished 1G run's output folder (sections.json + weld_plan.json + verification/run_log.json):
+                                       # an absolute path or a folder name under the server's out_root; '' = the latest such run
+float64 measure_speed_mps              # measurement speed of the scan line [m/s]; 0 = the run's measurement speed (its passes);
+                                       # > 0 must lie inside the calibration's noise-prior speed range (REFUSED otherwise, nothing sent)
+string confirm_mode                    # 'each' | 'large' | 'scan' | 'auto' | 'none' ('' = server parameter confirm_mode); ~/confirm_move
+bool dry_run                           # plan the line and the moves only: nothing is sent, the sensor is not opened, no folder written
+uint32 after_pass                      # the pass just completed (1..n of the run's weld plan); 0 = final / unspecified (after every pass)
+string direction                       # the scan direction: 'S->E' | 'E->S' (the run's S / E); '' = the nearer end (the torch tip's
+                                       # distance from the current pose, with the tool orientation below)
+string tool_orientation                # 'pass' ('' = default): the sensor / torch orientation of the run's sensing passes (the same
+                                       # view as the passes); 'least_rotation': of the two torch sides the one nearer the current pose
+---
+# ===================== result =====================
+string status                          # OK | DRY_RUN | REFUSED | ABORTED | ERROR
+string message                         # one English line: what was scanned / planned, or why not
+string out_dir                         # <run_dir>/post_weld_scan_<YYYYmmdd-HHMMSS> ('' when nothing was written: dry run, refused early)
+string run_dir                         # the input run that was used
+---
+# ===================== feedback =====================
+string phase                           # setup | plan | move | confirm | scan | save
+string progress_text                   # last operator line (CONFIRM prompts ask for ~/confirm_move)
+bool awaiting_confirmation             # true while a CONFIRM prompt waits for ~/confirm_move

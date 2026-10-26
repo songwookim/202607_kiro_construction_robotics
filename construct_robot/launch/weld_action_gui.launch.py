@@ -1,12 +1,14 @@
 """User-facing welding application with the complete motion stack."""
 
 import os
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -29,6 +31,7 @@ LAUNCH_ARGUMENTS = (
     ("use_fake_left_hardware", "false", "Use mock left-arm hardware"),
     ("use_fake_right_hardware", "false", "Use mock right-arm hardware"),
     ("use_fake_head_hardware", "false", "Use mock head hardware"),
+    ("robot_model", "hongik_v4", "Robot model: hongik_v4 (default) or kiro_legacy"),
     (
         "keyboard_teaching_backend",
         "servo",
@@ -72,6 +75,7 @@ MOVEIT_ARGUMENTS = (
     "use_fake_left_hardware",
     "use_fake_right_hardware",
     "use_fake_head_hardware",
+    "robot_model",
 )
 
 
@@ -97,6 +101,24 @@ def _launch_parameters(*specifications):
         parameter: ParameterValue(LaunchConfiguration(argument), value_type=value_type)
         for parameter, argument, value_type in specifications
     }
+
+
+def _check_existing_controller_manager(context, proc_root="/proc"):
+    """Reject duplicate local hardware stacks before launching any nodes."""
+    for process in Path(proc_root).iterdir():
+        if not process.name.isdigit():
+            continue
+        try:
+            executable = (process / "cmdline").read_bytes().split(b"\0", 1)[0]
+        except (OSError, PermissionError):
+            continue  # Processes can exit while /proc is being inspected.
+        if os.path.basename(os.fsdecode(executable)) == "ros2_control_node":
+            raise RuntimeError(
+                f"ros2_control_node is already running (PID {process.name}). "
+                "Stop the previous robot launch with Ctrl+C before starting "
+                "weld_action_gui.launch.py again."
+            )
+    return []
 
 
 def generate_launch_description():
@@ -153,7 +175,9 @@ def generate_launch_description():
         package="construct_robot",
         executable="keyboard_teaching_node",
         output="screen",
-        parameters=[{"poll_period_s": 0.01}],
+        # Arrow edges are published on change: the poll period is the only
+        # press/release latency added before ROS.
+        parameters=[{"poll_period_s": 0.002}],
     )
     gui = Node(
         package="construct_robot",
@@ -190,7 +214,8 @@ def generate_launch_description():
         "1",
     )
     return LaunchDescription(
-        [force_udp_transport, local_ros_graph]
+        [OpaqueFunction(function=_check_existing_controller_manager),
+         force_udp_transport, local_ros_graph]
         + declarations
         + [
             moveit,

@@ -1,0 +1,150 @@
+# EOAT 캘리브레이션 파일 (연구실 EOAT #01, RB20-1900ES-U 장착)
+#
+# 저장 규약(설계서 §6.2 #3): laser_link → profiler_optical_frame (eoat_yaw 하류) 변환을 저장한다.
+#   → 다른 플랫폼(KIRO 우측 팔)으로 옮길 때는 eoat_yaw 만 그 플랫폼 실측값으로 바꾸면 된다.
+#   → 플랜지 기준 T_flange<-opt 를 직접 공유하려면 Rz(eoat_yaw) 선회전이 필요하다:
+#      T_laser<-opt = (Rz(eoat_yaw) * T_eoat<-laser)^-1 * T_tcp<-opt
+#
+# 주입 경로: hongik_scan_ros/launch/hongik_lab_rb20_moveit.launch.py (OpaqueFunction) 가 이 파일을 읽어
+#   xacro arg eoat_yaw / opt_xyz / opt_rpy 로 robot_description 에 넣는다.
+#   scan_ros 노드들도 calib_file 파라미터로 같은 파일을 읽어 dt_s / x_sign 을 사용한다.
+#
+# 상태 표기: [I] = 추정 초기값(실측 전), [V] = 실측/캘리브 확정.
+
+eoat_serial: lab_01
+platform: lab_rb20                  # 이 파일의 eoat_yaw 가 유효한 플랫폼
+
+parent_frame: laser_link
+child_frame: profiler_optical_frame
+
+# laser_link → profiler_optical_frame [m], [rad]  (P3 핸드아이 캘리브 후 갱신)
+#   [I] xyz: eoat_base_link 기준 창면 추정 (12, 0, 147) mm 의 역변환.
+#   [I] xyz.  [V] rpy yaw = +pi/2 → (X,Y,Z)_opt = (+y, -x, +z)_eoat (센서 +X 부호 실측, 2026-10-02, 사용자 승인).
+#       근거: 실기 자세 스냅샷 17개 (scan_data/2026-10-01/orient_study, 로봇이 옆으로·위아래·기울여 이동) 에서 그루브의 base 횡위치가
+#       yaw −pi/2 로는 −38…+87 mm 로 흩어지고 +pi/2 로는 36.4 ± 1.3 mm 로 일정. 10-01 E 국소화의 판 기울기 14.26° → 0.6° 와도 일치.
+#       이전 초기값 rpy [pi, 0, -pi/2] = 이 프레임을 광축 둘레 180° 돌린 것 (X·Y 부호 반대, Z·원점 동일).
+#   [!] (10-02) 남은 오차: 거리 352→495 mm 에서 같은 모서리가 3.3–3.8 mm 이동 → 레이저 평면 안 광축 각도 ~1.4° 오차 의심.
+#   [V] 2026-10-04 (사용자 승인) 레이저 평면 안 회전·레이저 선 방향 평행 보정 — 광학 프레임에서 C = [Ry(+1.305°) | (+1.33, 0, 0) mm],
+#       T_laser<-opt(새) = T_laser<-opt(이전) · C. 근거: 툴을 수직축 둘레로 180° 뒤집은 스캔 (진행 부호 +1: at14·at15·at16 / −1: at17) 의 같은 S
+#       에서 판 옆 기울기가 +1 −1.32…−1.40° / −1 +1.30° 로 부호가 뒤집히고 (판은 거의 수평 +0.02°), 그루브 옆 위치가 21.7 mm 달랐다
+#       (= 2 × 400 mm·tan 1.3° + 2 × 1.33 mm). S 영역 국소화 20 개 최소제곱: 판 기울기 불일치 rms 1.31° → 0.15°, 그루브 옆 위치 ±0.7 mm.
+#       충돌 (10-03) 전후 같은 방향은 0.7 mm 안 — 재조립 영향이 아니라 처음부터의 오차. 이전 값: xyz [0.045, 0.0, -0.124] rpy [3.14159265, 0.0, 1.57079633].
+#   [V] 2026-10-05 (사용자 승인) 심 (진행) 방향 평행 보정 — 레이저 평면이 광학 프레임 +Y 로 11.09 mm (laser_link +x): xyz x 0.045 → 0.05609.
+#       근거: 같은 시편을 툴 180° 뒤집어 스캔 (진행 부호 +1 at18 / −1 at19b, 두 실행 모두 PASS) 하니 최종 용접선이 측면 ±0.1·높이 ≤0.3 mm·길이
+#       380.03/380.15 로 맞는데 양끝이 진행 방향으로 −22.15/−22.04 mm (= 2 × 11.09 mm × |Y_O·u| 0.996) 달랐다. 원자료 오프라인 재처리
+#       (run_refine_offline + 캘리브 변형): 평행 이동 가설 → 양끝 차 −0.05/+0.11 mm·측면·롤·길이 그대로; X_O 둘레 −1.86° 회전 가설은 0.2–0.3 mm·길이 +0.4 mm.
+#       브라켓이 플랜지 중심 밖에 달려 물리 모델 대신 센싱으로 정한다 (사용자). 이 보정으로 패스 높이가 두 방향 모두 ~+1 mm (패스 피치 −5°).
+#   [V] 2026-10-05 (사용자 승인) 두 방향 캘리브 도구 (scan_l0.flip_calib) 의 미세 성분 — 새 캘리브로 다시 뒤집은 쌍 at21b (+1) / at20 (−1):
+#       광학 프레임 보정 dx +0.58 mm, dy −0.28 mm, ey −0.098° (첫 쌍 at18/at19b 에서도 dx +0.53·ey −0.090° 로 같게 나옴). 보정 후 두 방향 차:
+#       진행 −0.22/+0.21 mm, 측면 +0.04/−0.11 mm, 판 롤 −0.001° (전 −0.196°). 높이 두 방향 차 ~1 mm 는 손-눈 오차로 생길 수 없다 (로봇 자세 의존).
+#   [V] 2026-10-06 (사용자 승인) 광축 방향 원점 −25 mm (플랜지면에서 147 → 122 mm): 창면 147 mm 는 CAD 추정 ([I]) 이었다.
+#       근거 1 — 박스 모서리 다자세 캘리브 두 번 (scan_data/box_calib_20261006-185139 quick 10 시점, -191844 20 시점; 시점별 RANSAC 면·평면
+#       자유·한 시점 빼기 검증): 센서 프레임 보정 하나로 시점 사이 어긋남 4.8 → 0.8 mm (빼 둔 시점 0.76/0.90 mm), 광축 방향 −25.3 mm (두 번
+#       같음); 로봇 관절 영점만으로는 2.7–3.5 mm. 박스의 회전 성분 (레이저 선 축 −1.4°, roll −2.2°) 은 3G 와 반대라 쓰지 않음 (흰 종이 속 산란).
+#       근거 2 — g3_17 원자료 재처리 (run_refine_offline): 3G 끝 패스 (토치 위 40°) ↔ 주 패스 (토치 아래 15°) 오프셋 진행 −13.1·법선 −4.25 mm
+#       → −3.4·+0.9 mm. 근거 3 — 줄자: 플랜지면 → 레이저 창 ~115 mm (사용자), 센서 거리 0 점은 창 앞 ~2–12 mm (g3_20: 보고 488.5 vs 줄자
+#       490–500 mm) → 광학 원점 ~117–127 mm. 이전 값: xyz [0.055810, 0.001907, -0.123987].
+#   [V] 2026-10-12 (사용자 승인) 레이저 평면의 레이저 선 축 (광학 X) 둘레 기울기 w_x = −1.432° — 광학 프레임에서
+#       C = [Rx(w_x) | (0, D·sin w_x, D·(1 − cos w_x))], D = 334.0 mm, T_laser<-opt(새) = T_laser<-opt(이전) · C. 곧 range D 를 지나는 광학 X
+#       평행선 둘레의 회전: 프로파일 점 (x, 0, z) 는 이전 프레임에서 (x, −(z − D)·sin w_x, D + (z − D)·cos w_x) — D (1G 패스의 판 위 range
+#       = 끝 판독 거리, 333.7–334.1 mm) 에서는 그대로, 다른 거리에서는 진행 방향 (광학 +Y) 으로 −(z − D)·sin w_x (트랜싯·드웰 ~441 mm +2.7,
+#       453 mm +3.0 mm). 평행 이동 몫 −8.35 mm (광학 Y) = 10-05 두 방향 보정 +11.09 mm 가 그 거리에서 흡수했던 기울기 몫, 광축 +0.104 mm.
+#       부호 규약 = 끝 모형 (scan_core.end_faces: 참 광학 프레임 = 캘리브 · Rx(w_x)). 10-02 [!] 의 352 → 495 mm 모서리 3.3–3.8 mm (143 mm ×
+#       tan 1.43° = 3.6 mm)·10-06 박스 모서리의 레이저 선 축 −1.4° 성분과 같은 크기·부호.
+#       근거 1 — 실험 3 (실행 x34_1): 판 거리 D 333.8 / 394.0 / 453.3 mm 의 전체 패스 (두 방향, 같은 피치·자세) 끝 판독 36 개가 D 에 선형,
+#       기울기 −0.0250 ± 0.0005 mm/mm → w_x −1.432 ± 0.026°. 체계 불확도 ~±0.1° (S 만 −1.32·E 만 −1.54°: 잰 길이가 D 에 −3.8 µm/mm 로 줄어드는
+#       거리 의존 — 회전이 아니라 이 보정 뒤에도 남는다). 근거 2 — 판 위 질감 정합 (끝 모형과 독립): 실험 3 패스 −1.461°, 트랜싯 (D ~441)
+#       − 패스 −2.44 … −2.80 mm (8 실행; fsv1_work/endsig 15 실행 −2.65).
+#       검증 — 원자료 오프라인 재처리 (raw.npz → 이 캘리브로 재구성 → 재추정, 13 실행, fsv1_work/wx): 실험 3 기울기 +0.0004 ± 0.0004 (w_x 잔차
+#       +0.03 ± 0.03°, 질감 −0.03°), 트랜싯 − 패스 질감 −0.12 … +0.20 mm; 패스 끝 E (판 끝면 안 보임) −0.05 … +0.10 mm, S (끝면이 레이저에
+#       비침) +0.07 … −0.48 mm — 끝면이 이제 직각으로 보여 끝 모형 맞춤이 13/13 실행에서 좋아진다 (S:R 판독 산포 x34_1 0.22 → 0.05 mm); 길이
+#       +0.18 ± 0.18 mm (실행 사이 산포 0.26 → 0.16 mm, 12 실행); 보정된 끝 응답·잡음 사전 (아래 g1:) 으로는 S −0.28 … +0.03·E −0.45 … +0.17 mm,
+#       길이 +0.08 ± 0.25 mm (산포 0.21 → 0.14 mm); 루트 측면 0.000·법선 +0.024 mm, 깊이 −0.025 mm·베벨각 +0.05° (−5° 패스의 레이저 평면은
+#       판 법선에 실제 6.5°). 10-05 두 방향 쌍 (옛 정련, 끝 판독 range ~345–352 mm): 진행 방향 차 −3.6 → −2.7·−3.1 mm (at21b/at20; 10-06 광축
+#       원점 뒤 이미 어긋난 값), 측면·높이 그대로. 광학 원점의 진행 방향 위치는 CAD 추정 (x 0.045) 에서 +10.8 → +2.5 mm.
+#       이전 값: xyz [0.055810, 0.001380, -0.098993] rpy [3.14159265, -0.02107031, 1.57079633].
+xyz: [0.047463, 0.001382, -0.099097]
+rpy: [3.11659954, -0.02107031, 1.57079633]
+
+# tcp(플랜지면) → eoat_base_link yaw [rad].  [I] 핀 정렬 장착 시 rbpodo -90 deg (KIRO: the same -90 deg, identified 2026-10-13).
+#   실물 브래킷 핀/볼트 방향을 실측해 확정할 것. 60 deg 대칭 장착 오류·핀홀 유격 ~0.7 deg 주의.
+eoat_yaw: -1.5707963
+
+# 센서 취득시각 → 로봇 자세 시각 오프셋 [s] (P3 히스테리시스/S자 캘리브로 추정; 0.0 = 미보정)
+dt_s: 0.0
+
+# 1G core 전용 (새 1G 경로 scan_l0.teach_1g 만 읽는다; 3G·legacy 경로는 위 dt_s 그대로) — 사용자 승인 2026-10-09, 새 1G 경로 전용; K1 미적용.
+#   dt_s 3.7 ms ± 1.0 ms: E 보고 (정·역 36 실행). he_sigma_m 2 mm: 자세 의존 핸드아이 잔차 (P7 3차 보고 P7_REPORT_r3.md, K1 dy 1.95 mm) —
+#   거친 자세 부류 오프셋이 아직 측정되지 않았을 때의 계획 오버스캔에만 쓴다 (G1_CORE_SPEC §5.2, §7 #27/#28).
+#   edge_response (사용자 승인 2026-10-11, 1G 끝 모형 r4 의 센서 상수): 깊이 계단 (판 위 모서리) 에서의 센서 응답 (Curless & Levoy 1995) —
+#   레이저 띠의 진행 방향 퍼짐 σ_L (띠 두께 ⊗ 카메라 흐림) 과 삼각측량 각 θ, 그 σ. 끝 모형은 이 값을 고정해 쓰고 (실행마다 다시 추정하지
+#   않는다) σ 는 공통 항으로 끝 σ 에 들어간다. 값: −5° 패스 실행 4 개 (g1c_02, g1c_03, g1c_04, g1d_m5_01; 2026-10-10/11) 의 직각 판 끝
+#   위 모서리 자료를 모은 결합 최빈값 (θ 는 반사엽 맞춤 C5 의 26 ± 2° 를 독립 사전으로); σ 는 레그 13 개 반복 (레그마다 다시 추정)
+#   의 표준오차 s/√n 를 Student-t 예측 분산 (ν = 12) 으로 넓힌 것 — 레그별 σ_L 산포 (log) 0.152, θ 3.44°; 실행 사이 차이 없음
+#   (분산분석 F 0.62 / 0.40, p 0.62 / 0.75). 줄자 길이 등 측정 기준값은 쓰지 않았다. 재계산: python3 -m scan_l0.calib_edge_response.
+#   −5° 패스 자세에서 잰 값 (다른 피치에서는 검증 안 됨). 이전 값 (2026-10-11): σ_L 0.000417 m (log sd 0.0465), θ 25.06 ± 1.06°.
+#   [V] 다시 맞춤 2026-10-12 (사용자 승인, w_x 변경 뒤 — g1-lab3): 위 4 실행 + 같은 −5° 피치의 그 뒤 실행 23 개 = 27 실행 (10-10/11:
+#       g1c_02, g1c_03, g1c_04, g1d_m5_01, kv_first_20261011-210957, kv_rep1..5_a, kv_offA/B_a, kv_fps100a/b_a, ks_v30_01, ks_v15_01;
+#       10-12 아침: k20/k40/k60_1..3_a, x34_first, x34_1 — 15/20/30/40/60 mm/s, 100/150 fps), 레그 118 개. 모든 실행을 원자료 (raw.npz)
+#       에서 새 캘리브 (위 xyz/rpy, w_x) 로 재구성 (fsv1_work/wx/reproc.py, fsv1_work/lab3/mirror/new) 한 뒤 같은 방법 (python3 -m
+#       scan_l0.calib_edge_response, 각 실행 자신의 run_log 사전, edge_response 없이 다시 추정한 위 모서리 자료의 결합 최빈값; σ 는 레그
+#       반복의 s/√n 를 Student-t 로). 레그별 σ_L 산포 (log) 0.292, θ 1.15° (옛 기하 같은 27 실행: 0.308, 2.00°); 실행 사이 차이 없음
+#       (F 0.71 / 0.88, p 0.84 / 0.63), 속도 사이 차이 없음 (log σ_L p 0.78, θ p 0.29 — 옛 기하에서는 θ 가 속도 묶음마다 달랐다 p 1e-4:
+#       끝면이 기울어 보였기 때문). 기하 효과만 (같은 코드·같은 27 실행, 옛 → 새 기하): σ_L 0.441 → 0.474 mm (+7.5 %), θ 24.96 → 24.35°;
+#       같은 4 실행만: 0.445 → 0.504 mm, 24.99 → 24.45°. 자료: fsv1_work/lab3/calib/edge_response_27*.json.
+g1:
+  dt_s: 0.0037
+  # dt_sigma_s: 2026-10-11 (사용자 승인) 1G core 는 더 이상 쓰지 않는다 — 시간 오프셋 잔차 δ 는 실행마다 추정하고 그 사전 폭은 실행의
+  #   프레임 주기·자세 표본 주기에서 (seam_estimate.timing_prior: σ² = (T_f² + T_r²)/12). 기록으로만 남긴다.
+  dt_sigma_s: 0.0010
+  he_sigma_m: 0.002
+  edge_response:
+    sigma_l_m: 0.000474
+    sigma_l_log_sd: 0.0271
+    theta_tri_deg: 24.345
+    theta_tri_sigma_deg: 0.107
+    source: 'pooled 27 runs at -5 deg pass pitch, 118 legs, reconstructed with the w_x calibration; scan_l0.calib_edge_response'
+    runs: [g1c_02, g1c_03, g1c_04, g1d_m5_01, kv_first_20261011-210957, kv_rep1_a, kv_rep2_a, kv_rep3_a, kv_rep4_a, kv_rep5_a, kv_offA_a, kv_offB_a, kv_fps100a_a, kv_fps100b_a, ks_v30_01, ks_v15_01, k20_1_a, k20_2_a, k20_3_a, k40_1_a, k40_2_a, k40_3_a, k60_1_a, k60_2_a, k60_3_a, x34_first, x34_1]
+    date: '2026-10-12'
+    method: 'joint mode of the top-edge data of all plate ends crossed (estimator re-run without an edge response, each run its own prior), sigma = Student-t predictive of the leg replication (s/sqrt(n)); runs reconstructed from raw with the w_x geometry; user approved after the w_x change'
+  # noise_priors (2026-10-12, g1-3pass; 다시 맞춤 2026-10-12 g1-3pass-fix, g1-lab3): 추정기 분산 성분의 모집단 사전 (scan_core.noise_priors) — 끝 판독의
+  #   크로싱 산포 σ_ζ·판독 산포 τ, 패스 오프셋 산포 σ_η (측면·법선). 실행마다 σ² = λ·(a + b·v² + c·v⁴), λ ~ Scaled-Inv-χ²(ν0, 1); 실행 자신의
+  #   자료가 갱신 (ν = ν0 + ν_실행). 아래 실행들의 추정기 제한 우도 (사전 없이) 에서 2형 최대우도 (python3 -m scan_l0.calib_noise_priors).
+  #   끝 판독은 끝면·지지면 성분이 들어간 끝 모형 (4970865) 과 위 edge_response 로. 10-10/11 실행 14 개 (15 mm/s 1·~19 mm/s 2·30 mm/s 1·
+  #   60 mm/s 10) + 10-12 아침 속도 계열 11 개 (20 mm/s 5 — k20 3·x34 2, 40 mm/s 3, 60 mm/s 3; 3 패스, 150 fps). 10-12 아침 실행들은 실기에서
+  #   이 블록 없이 돌았다 (MoveIt 어댑터 캘리브 경로가 g1 블록을 빠뜨림 — g1-3pass-fix 1b86142); 증거는 저장된 레그에서 오프라인으로.
+  #   [V] 다시 맞춤 2026-10-12 (사용자 승인, w_x 변경 뒤 — g1-lab3): 같은 25 실행을 원자료에서 새 캘리브 (w_x) 로 재구성
+  #   (fsv1_work/lab3/mirror/new) 하고 위의 27 실행 edge_response 로 끝을 읽어 증거를 다시 냈다. 맞춤 방법 고침 (calib_noise_priors
+  #   64a2127): 실행 주변우도 = 실행 우도 (ln σ 3차 보간) × 사전의 정확한 칸 확률 — 이전의 격자 밀도 합은 ν0 가 수천일 때 (폭이 격자
+  #   간격 0.115 보다 좁다) 격자점마다 뾰족해져 최적화가 그 뾰족점에서 멈췄다 (이전 블록: σ_η,n 이 최적보다 8 log-단위 아래). 이전 값
+  #   (g1-3pass-fix, 옛 기하·옛 edge_response·옛 방법) σ 15/20/30/40/60 mm/s: end_crossing 0.0576/0.0636/0.0878/0.1291/0.2590,
+  #   end_reading 0.0520/0.0565/0.0678/0.0815/0.1134 (ν0 151), leg_offset_w 0.0126, leg_offset_n 0.0124/0.0125/0.0130/0.0139/0.0181 mm.
+  #   자료: fsv1_work/lab3/calib/noise_priors_25_exact.{txt,json}, ev_25.pkl.
+  noise_priors:
+    end_crossing: {static_var_m2: 2.9872e-09, timing_var_s2: 1.0000e-14, dynamic_var_s4_m2: 5.4476e-03, nu0: 144.98}   # sigma at 15/20/30/40/60 mm/s: 0.0571/0.0621/0.0860/0.1301/0.2713 mm
+    end_reading: {static_var_m2: 1.2193e-09, timing_var_s2: 9.7976e-08, dynamic_var_s4_m2: 8.4589e-05, nu0: 12.13}   # sigma at 15/20/30/40/60 mm/s: 0.0353/0.0357/0.0371/0.0399/0.0517 mm
+    leg_offset_w: {static_var_m2: 1.7385e-10, timing_var_s2: 5.7470e-10, dynamic_var_s4_m2: 5.1137e-08, nu0: 60.75}   # sigma at 15/20/30/40/60 mm/s: 0.0132/0.0132/0.0132/0.0132/0.0133 mm
+    leg_offset_n: {static_var_m2: 2.1474e-10, timing_var_s2: 2.5554e-08, dynamic_var_s4_m2: 2.2964e-06, nu0: 47.83}   # sigma at 15/20/30/40/60 mm/s: 0.0149/0.0150/0.0155/0.0162/0.0183 mm
+    # calibrated speed range (2026-10-13, g1-params): the measurement speeds s0^2(v) was fitted over = the commanded measurement speeds
+    # of the 25 runs below (their verification/run_log.json job_rough.speed_mps; scan_l0.calib_noise_priors.speed_range) - a run-time
+    # measurement speed (client --measure-speed, goal measure_speed_mps, --set job.speed_mps) must lie in it (check_measure_speed)
+    speed_range_mps: [0.015, 0.06]
+    speed_range_source: 'the commanded measurement speeds of the 25 calibration runs (run_log measure_speed / job_rough speed_mps): lowest 15 mm/s (1 run(s), e.g. ks_v15_01), highest 60 mm/s (13 run(s), e.g. kv_rep5_a)'
+    source: 'scan_l0.calib_noise_priors, 25 runs'
+    runs: [kv_first_20261011-210957, kv_rep1_a, kv_rep2_a, kv_rep3_a, kv_rep4_a, kv_rep5_a, kv_offA_a, kv_offB_a, kv_fps100a_a, kv_fps100b_a, ks_v30_01, ks_v15_01, g1d_m5_01, g1c_04, k20_1_a, k20_2_a, k20_3_a, k40_1_a, k40_2_a, k40_3_a, k60_1_a, k60_2_a, k60_3_a, x34_first, x34_1]
+    date: '2026-10-12'
+    method: 'type-II maximum likelihood of a scaled-inverse-chi2 population over runs (restricted likelihoods of the estimator without priors; each run marginal with the prior exact per ln-sigma bin), s0^2(v) = static_var + timing_var*v^2 + dynamic_var*v^4, nu0 = 1/(1/nu_between + 1/sum nu_runs); runs reconstructed from raw with the w_x geometry, read with the 27-run edge response; user approved after the w_x change'
+
+# 센서 +X 방향 부호 (eoat_base_link -y 방향 기준). 0 = 미확정, +1 / -1 = P1 블록 실측 후 확정.
+#   -1 (2026-10-02): +X_opt = +y_eoat. rpy yaw +pi/2 와 같은 사실의 기록 (코드는 rpy 로 변환하고 x_sign 은 메타데이터).
+x_sign: -1
+
+# 캘리브 당시 센서 파라미터(ID 44 판독 문자열)의 해시. 센서 설정이 바뀌면 캘리브를 재검토한다.
+sensor_param_hash: ''
+
+date: '2026-10-12'                  # 마지막 갱신일 (10-04 레이저 평면 회전 +1.305°·x +1.33 mm, 10-05 진행 방향 +11.09 mm·미세 성분; 두 방향 스캔; 10-06 광축 원점 −25 mm; 10-12 레이저 선 축 w_x −1.432°, 실험 3)
+
+# 캘리브 잔차 기록 (예: plane_rms_mm, sphere_center_rms_mm, hysteresis_mm, dt_spread_ms)
+residuals: {flip_scan_plate_tilt_rms_deg: 0.147, flip_scan_groove_lateral_rms_mm: 0.32, n_localizations: 20,
+            flip_pass_end_along_mm: [-0.22, 0.21], flip_pass_lateral_mm: [0.04, -0.11], flip_pass_roll_deg: -0.001,
+            flip_pass_runs: [at21b, at20]}

@@ -1,0 +1,13 @@
+{
+  "patch_sha256": "0fe771a4a02d4fff6e2168bb6d8b0da955e6383f32d5a757b7bd410f1d71c7a5",
+  "relay_sha256": "7d887c5ea1bed2c9a4b07d6fe34d8617b7d73e6bc77950dbfc6e2018b3553381",
+  "source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field",
+  "files_after": {
+    "CHANGES_2026-10-14_kiro-1g-field.md": "5d7478f8ef4c0de0c3786217e2c2522905be8dcd35e57a9d76ebdc7700ab0644",
+    "scan_l0/scan_l0/autoteach.py": "5e647e0ec02da2cc094335b13e2e12aec3c13e1acd5cdce24d912644257f140b",
+    "scan_l0/scan_l0/teach_1g.py": "d21c4d707131a6194d9d4860d64464c2e497d4c0ac819a7e82a7b7e718028783",
+    "scan_l0/tests/test_sim_teach1g.py": "0c0153a1b6a5f68156631fe0a21aa6afa26a112cc4b1e23c30849d411fd3dd2e"
+  },
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/docs/artifacts/hongik_tcp_motion_update/before_tcp_motion.tar.gz",
+  "apply_command": "git apply -p2 --directory=hongik_fine_sensing_field (from construct_robot_ros2 repo root)"
+}

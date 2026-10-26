@@ -95,6 +95,8 @@ class WeldScenarioInput:
     weave_transverse_vector: tuple = None
     # Corrected START WAIT TCP, used by the non-sensed lead-in retract.
     start_wait_tcp_override: object = None
+    # Weld wait pose (approach before START WAIT) or None: when taught, the scenario starts with a joint move to it.
+    weld_wait: tuple = None
 
 
 @dataclass(frozen=True)
@@ -798,6 +800,17 @@ def build_weld_scenario_steps(inp, approach, path, slots, motion, scenario_id):
             )
             if step.get("weld_scenario_stage") != "weld_motion":
                 step["tcp_speed_m_s"] = 0.0
+    if inp.weld_wait is not None:
+        if inp.weld_wait[0] != "right_manipulator":
+            raise ValueError("Weld wait pose must belong to the right arm")
+        # Both ends pass a wait: WELD WAIT -> START WAIT ... GOAL WAIT -> WELD END (finish).
+        first_slot = min(int(step["parallel_slot"]) for step in steps)
+        for step in steps:
+            step["parallel_slot"] = int(step["parallel_slot"]) + 1
+        wait = named_step("weld_wait", inp.weld_wait, first_slot, "weld_wait")
+        wait.update(use_joint_planning=True, weld_approach_mode=approach_mode,
+                    velocity_scale=max(0.01, min(1.0, float(motion.velocity_percent) / 100.0)), tcp_speed_m_s=0.0)
+        steps.insert(0, wait)
     validate_managed_weld_sequence(steps, require_complete=True)
     return steps
 
@@ -816,6 +829,31 @@ def build_weld_scenario(inp, motion, *, base_slot=1, scenario_id=None):
         scenario_id = new_weld_scenario_id()
     steps = build_weld_scenario_steps(inp, approach, path, slots, motion, scenario_id)
     return WeldScenarioBuild(approach=approach, path=path, slots=slots, steps=steps)
+
+
+CUTTER = ("clear1", 7)          # Cleaner 1 = the wire cutter (wire forward, DO7 cut)
+
+
+def cleaner_cut_only_tokens(tokens, cleaner=CUTTER[0], port=CUTTER[1]):
+    """The cutter part of a cleaner order, from start and back to start: the first to the last <cleaner>_* pose
+    around its DO<port> commands (clear1_top ... clear1_top, or clear1_1 ... clear1_5)."""
+    tokens = [t.strip() for t in tokens if t.strip()]
+    pose, prefix = f"{cleaner}_", f"DO{port}:"
+
+    def part_of_cutter(token):                 # its poses and the commands between them (DO7 / WIRE_FORWARD)
+        return token.startswith(pose) or ":" in token
+    outputs = [i for i, t in enumerate(tokens) if t.upper().startswith(prefix)]
+    if not outputs:
+        raise ValueError(f"the cleaner order has no {pose}* ... DO{port} ... {pose}* cutting part")
+    begin, end = outputs[0], outputs[-1]
+    while begin > 0 and part_of_cutter(tokens[begin - 1]):
+        begin -= 1
+    while end + 1 < len(tokens) and part_of_cutter(tokens[end + 1]):
+        end += 1
+    if not tokens[begin].startswith(pose):
+        raise ValueError(f"the cleaner order has no {pose}* ... DO{port} ... {pose}* cutting part")
+    home = tokens[0] if tokens and tokens[0] == "start" else "start"
+    return [home] + tokens[begin:end + 1] + [home]
 
 
 def build_cleaner_sequence_steps(folder, tokens, velocity_percent, load_pose):
@@ -847,11 +885,18 @@ def build_cleaner_sequence_steps(folder, tokens, velocity_percent, load_pose):
             continue
         if ":" in token:
             port, value = cleaner_output_step(token)
-            if value == "ON":
-                if index + 1 >= len(tokens) or tokens[index + 1] != f"DO{port}:OFF":
-                    raise ValueError(f"DO{port}:ON needs an adjacent DO{port}:OFF for automatic execution")
-                duration = pulse_reference.get(port, 1.0)
+            if value == "ON" and index + 1 < len(tokens) and tokens[index + 1] == f"DO{port}:OFF":
+                duration = pulse_reference.get(port, 1.0)       # adjacent ON, OFF: one timed pulse
                 index += 2
+            elif value == "ON":
+                # held ON across the following robot motion(s); its own DO<port>:OFF later switches it off
+                if f"DO{port}:OFF" not in tokens[index + 1:]:
+                    raise ValueError(f"DO{port}:ON needs a later DO{port}:OFF for automatic execution")
+                held = next(t for t in tokens[index + 1:] if t.startswith(f"DO{port}:"))
+                if held != f"DO{port}:OFF":
+                    raise ValueError(f"DO{port}:ON is followed by {held} before its DO{port}:OFF")
+                duration = 0.0
+                index += 1
             else:
                 duration = float(value) if value != "OFF" else 0.0
                 index += 1

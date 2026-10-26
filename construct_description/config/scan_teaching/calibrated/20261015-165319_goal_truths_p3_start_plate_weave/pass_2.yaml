@@ -1,0 +1,385 @@
+schema: construct_robot_pass_teaching_v1
+status: scan_estimate_generated
+timestamp: '2026-10-15T16:53:21+09:00'
+pass: 2
+requires_ik: true
+poses:
+  weld_start_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.012590500628934145
+        y: -1.726707559130809
+        z: 0.5841634538475028
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_start:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.009590500628934146
+        y: -1.726707559130809
+        z: 0.5811634538475028
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_goal_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.003214932508336617
+        y: -1.5286504261854972
+        z: 0.5831500478937406
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_end:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.00021493250833661687
+        y: -1.5286504261854972
+        z: 0.5801500478937406
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.012590500628934145
+        y: -1.726707559130809
+        z: 0.6441634538475027
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_finish:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: -0.003214932508336617
+        y: -1.5286504261854972
+        z: 0.6431500478937406
+      orientation_xyzw:
+        x: -0.6614912109671243
+        y: 0.6828406231471064
+        z: -0.256169819003496
+        w: -0.17474291122971214
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+source_reference: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan
+source_reference_kind: scan_estimate
+generated_from:
+  scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan
+  relative_model: measured_layout
+  endpoint_adjustments_world_m:
+    '2':
+      start:
+      - 0
+      - 0
+      - -0.002
+    '3':
+      start:
+      - 0
+      - 0
+      - -0.002
+  correction_computed: '2026-10-15T16:53:20'
+  position_anchor_pass: 1
+  reference_set_id: 20261015-161231-818284_22cb4992
+  calibration_truth_checks:
+  - pass: 1
+    end: goal
+    error_mm: 3.469446951953614e-15
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - -0.0005023211030192355
+    - -1.5287578519885894
+    - 0.5847155802973127
+    reference_tcp_world_m:
+    - -0.0005023211030192355
+    - -1.5287578519885894
+    - 0.5847155802973127
+    target_tcp_world_m:
+    - -0.000502321103019232
+    - -1.5287578519885894
+    - 0.5847155802973127
+  - pass: 1
+    end: start
+    error_mm: 1.734723475976807e-15
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - -0.0036486691055347686
+    - -1.7267368104431282
+    - 0.5860772996186825
+    reference_tcp_world_m:
+    - -0.0036486691055347686
+    - -1.7267368104431282
+    - 0.5860772996186825
+    target_tcp_world_m:
+    - -0.003648669105534767
+    - -1.7267368104431282
+    - 0.5860772996186825
+  - pass: 2
+    end: goal
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - 0.004322089495999135
+    - -1.528758553457835
+    - 0.5842515294475672
+    reference_tcp_world_m:
+    - 0.004322089495999135
+    - -1.528758553457835
+    - 0.5842515294475672
+    target_tcp_world_m:
+    - 0.004322089495999135
+    - -1.528758553457835
+    - 0.5842515294475672
+  - pass: 2
+    end: start
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - -0.002
+    expected_tcp_world_m:
+    - 0.0003417903846854031
+    - -1.7267498604999478
+    - 0.5882381552481115
+    reference_tcp_world_m:
+    - 0.0003417903846854031
+    - -1.7267498604999478
+    - 0.5902381552481115
+    target_tcp_world_m:
+    - 0.0003417903846854031
+    - -1.7267498604999478
+    - 0.5882381552481115
+  - pass: 3
+    end: goal
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - -0.0033700284053381838
+    - -1.528752078205895
+    - 0.5901573475146038
+    reference_tcp_world_m:
+    - -0.0033700284053381838
+    - -1.528752078205895
+    - 0.5901573475146038
+    target_tcp_world_m:
+    - -0.0033700284053381838
+    - -1.528752078205895
+    - 0.5901573475146038
+  - pass: 3
+    end: start
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - -0.002
+    expected_tcp_world_m:
+    - -0.010429975308719863
+    - -1.7270066133866684
+    - 0.5852907509893166
+    reference_tcp_world_m:
+    - -0.010429975308719863
+    - -1.7270066133866684
+    - 0.5872907509893166
+    target_tcp_world_m:
+    - -0.010429975308719863
+    - -1.7270066133866684
+    - 0.5852907509893166
+  - pass: 4
+    end: goal
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - -0.0005047620119154259
+    - -1.528725837194316
+    - 0.5949214601121859
+    reference_tcp_world_m:
+    - -0.0005047620119154259
+    - -1.528725837194316
+    - 0.5949214601121859
+    target_tcp_world_m:
+    - -0.0005047620119154259
+    - -1.528725837194316
+    - 0.5949214601121859
+  - pass: 4
+    end: start
+    error_mm: 0.0
+    operator_adjustment_world_m:
+    - 0.0
+    - 0.0
+    - 0.0
+    expected_tcp_world_m:
+    - -0.002864071287473638
+    - -1.7267419345985824
+    - 0.5948769001135013
+    reference_tcp_world_m:
+    - -0.002864071287473638
+    - -1.7267419345985824
+    - 0.5948769001135013
+    target_tcp_world_m:
+    - -0.002864071287473638
+    - -1.7267419345985824
+    - 0.5948769001135013
+  inferred_ends:
+    '1': []
+    '2': []
+    '3': []
+    '4': []
+  anchor_design_m: null
+  design_layout_m:
+    '2':
+    - 0.0
+    - 0.002
+    - 0.005
+    '3':
+    - 0.0
+    - -0.004
+    - 0.006500000000000001
+    '4':
+    - 0.0
+    - 0.0
+    - 0.01
+  calib: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+  orientation: "keyboard O capture 2026-10-14T23:08:41 (Scan tab, saved as P2 start\
+    \ reference; joints = earlier seed) \xB7 IK seed = P2 goal correct capture joints\
+    \ (ts 1791996666)"
+  orientation_captured_for:
+  - 2
+  wait: pass-4 wire tip of the end + 10 mm World Z
+  weld_wait / weld_finish: start / goal wait + 60 mm World Z, this pass's orientation

@@ -1,0 +1,97 @@
+format_version: 1
+frame: World
+tcp_frame: right_manipulator_ee_point
+note: only the orientation is used; joint_state = IK seed
+passes:
+  1: &id001
+    orientation_xyzw:
+      x: 0.7004563040920254
+      y: -0.6310484564483534
+      z: 0.11195333758789938
+      w: 0.31401474786197614
+    captured_at_m:
+      x: -0.014879470473895456
+      y: -1.7268323478614878
+      z: 0.5874312401913009
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.95076373586772
+      - 1.2503196438560857
+      - 1.3729659352213959
+      - 5.1153779839032625
+      - 0.10720778840093108
+      - -0.24635200485701064
+    captured_for:
+    - 1
+    - 3
+    source: keyboard I capture 2026-10-14T23:07:34 (restored 2026-10-15 02:2x; overwritten
+      01:56:35)
+    saved: '2026-10-15T02:16:37'
+  2:
+    orientation_xyzw:
+      x: -0.6614912109671243
+      y: 0.6828406231471064
+      z: -0.256169819003496
+      w: -0.17474291122971214
+    captured_at_m:
+      x: -0.021108025429487157
+      y: -1.726679459118119
+      z: 0.5841617297439481
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.95076373586772
+      - 1.2503196438560857
+      - 1.3729659352213959
+      - 5.1153779839032625
+      - 0.10720778840093108
+      - -0.24635200485701064
+    captured_for:
+    - 2
+    source: keyboard O capture 2026-10-14T23:08:41 (Scan tab, saved as P2 start reference;
+      joints = earlier seed)
+    saved: '2026-10-14T23:59:09'
+  3: *id001
+  4:
+    orientation_xyzw:
+      x: 0.6846478582838523
+      y: -0.6608529498879148
+      z: 0.18559911136728824
+      w: 0.2451196822604179
+    captured_at_m:
+      x: -0.02111986343997551
+      y: -1.7265648613562647
+      z: 0.6129986090129316
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    captured_for:
+    - 4
+    source: keyboard P capture 2026-10-14T23:10:06 (Scan tab, saved as P3 start reference;
+      joints = earlier seed)
+    saved: '2026-10-14T23:59:09'

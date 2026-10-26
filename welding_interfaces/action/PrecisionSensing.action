@@ -1,0 +1,31 @@
+# ===================== goal =====================
+uint8 POSITION_1G = 1
+# uint8 POSITION_2G = 2
+uint8 POSITION_3G = 3
+# uint8 POSITION_4G = 4
+# uint8 POSITION_5G = 5
+# uint8 POSITION_6G = 6
+# uint8 POSITION_1F = 11
+# uint8 POSITION_2F = 12
+# uint8 POSITION_3F = 13
+# uint8 POSITION_4F = 14
+
+uint8 welding_position          # 현재 1만 사용
+geometry_msgs/Pose pose_a       
+geometry_msgs/Pose pose_b       
+---
+# ===================== result =====================
+uint8 SUCCESS = 0
+uint8 ERROR_MOTION_FAILED = 1               # planning 실패
+uint8 ERROR_SENSOR_FAILED = 2               # 레이저 프로파일 연결 실패
+uint8 ERROR_SENSING_FAILED = 3              # 센싱 인식 실패
+uint8 ERROR_WAYPOINT_GENERATION_FAILED = 4  # 용접선 생성 로직실패
+uint8 ERROR_INTERNAL = 255                  # 그 외
+
+uint8 error_code
+string error_message            
+WeldingPath[] paths             # one per pass on success (1G: 4): pass_number + start / goal wire-tip pose (= the run's kiro/pass_<k>.yaml ends)
+string data_file_path           # 절대 경로값으로 반환 및 저장하도록 함
+---
+# ===================== feedback =====================
+float64 elapsed_time            

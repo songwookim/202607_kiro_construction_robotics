@@ -1,0 +1,896 @@
+format_version: 2
+anchor_pass: 1
+source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan
+calib:
+  file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+  xyz:
+  - 0.039454
+  - 0.024934
+  - -0.100543
+  rpy:
+  - 3.11659954
+  - -0.02107031
+  - 1.57079633
+computed: '2026-10-15T16:53:20'
+compare_at: wire tip (aim point) = TCP + rotated TCP-frame wire-tip vector (or L *
+  torch axis); root position from the selected anchor; pass remainders compared at
+  TCP
+wire_tip_model_m:
+- 0.0023230090626219723
+- -0.01883220873074798
+- 0.028879786983482533
+seam_frame:
+  u:
+  - -0.03964169914921388
+  - -0.9991062154233563
+  - -0.014673308794581305
+  w:
+  - 0.9992009302805337
+  - -0.039711897823065945
+  - 0.004523947148948638
+  n:
+  - -0.0051026086543380636
+  - -0.014482246845993611
+  - 0.9998821070062273
+plate_normal_world:
+- -0.0051026086543380636
+- -0.014482246845993611
+- 0.9998821070062273
+offsets_seam_m:
+  start:
+  - 0.006269203917124
+  - 0.014791215067457472
+  - -0.0030549403223664247
+  goal:
+  - 0.0069224828600903615
+  - 0.015464311402009873
+  - -0.004344630290852921
+offsets_world_m:
+  start:
+  - 0.014546462124722642
+  - -0.006806745420944615
+  - -0.0030796554560442724
+  goal:
+  - 0.015199704304252841
+  - -0.007467492797651909
+  - -0.004375734090534822
+angle_convention: travel + push / - drag along the plan's travel; work + toward the
+  bevel face (Hongik / AWS A3.0)
+reference_torch_angles_deg:
+  start:
+    travel: 37.04688983983673
+    work: 15.952136682480276
+  goal:
+    travel: 36.44223941545234
+    work: 3.595231399727841
+hongik_root_torch_angles_deg:
+  travel: 41.93922067330196
+  work: 8.812975467318044
+reference_orientation_xyzw:
+- 0.7006687038930904
+- -0.6305855897307476
+- 0.11226010841516047
+- 0.31436101772853425
+reference_orientations_xyzw:
+  start:
+  - 0.7006687038930904
+  - -0.6305855897307476
+  - 0.11226010841516047
+  - 0.31436101772853425
+  goal:
+  - 0.6848207722317666
+  - -0.6609703447432914
+  - 0.18514156569085288
+  - 0.24466571877433552
+matches:
+- pass: 1
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.0005023211030192355
+  - -1.5287578519885894
+  - 0.5847155802973127
+  orientation_xyzw:
+  - 0.6848207722317666
+  - -0.6609703447432914
+  - 0.18514156569085288
+  - 0.24466571877433552
+  source: 'Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint
+    FK: weld_start; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml'
+  saved: '2026-10-15T16:42:20.581+09:00'
+- pass: 1
+  end: start
+  saved_as: start
+  position_m:
+  - -0.0036486691055347686
+  - -1.7267368104431282
+  - 0.5860772996186825
+  orientation_xyzw:
+  - 0.7006687038930904
+  - -0.6305855897307476
+  - 0.11226010841516047
+  - 0.31436101772853425
+  source: Welding keyboard I captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml
+    (sha256 aaf8066d572d7a95bd6f8456f7b57ce3475618b1d1f25d75bdaf826941fc0e5a)
+  saved: '2026-10-15T15:51:41+09:00'
+- pass: 2
+  end: goal
+  saved_as: goal
+  position_m:
+  - 0.004322089495999135
+  - -1.528758553457835
+  - 0.5842515294475672
+  orientation_xyzw:
+  - 0.6848335105233126
+  - -0.660961855028734
+  - 0.18513472481565485
+  - 0.24465817527465494
+  source: 'Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint
+    FK: weld_start_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml'
+  saved: '2026-10-15T16:42:36.413+09:00'
+- pass: 2
+  end: start
+  saved_as: start
+  position_m:
+  - 0.0003417903846854031
+  - -1.7267498604999478
+  - 0.5902381552481115
+  orientation_xyzw:
+  - 0.7006450114501187
+  - -0.630603545026744
+  - 0.11228488569611796
+  - 0.31436895739556947
+  source: Welding keyboard O captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml
+    (sha256 ddc34d5c07417e532a4898e1f72a98f56b4b0f5f368e85fd1b4375b35597c6f7)
+  saved: '2026-10-15T15:51:58+09:00'
+- pass: 3
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.0033700284053381838
+  - -1.528752078205895
+  - 0.5901573475146038
+  orientation_xyzw:
+  - 0.6848309180957507
+  - -0.6609649737910946
+  - 0.18512975413649937
+  - 0.24466076754320323
+  source: 'Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint
+    FK: weld_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_wait_state.yaml'
+  saved: '2026-10-15T16:42:59.045+09:00'
+- pass: 3
+  end: start
+  saved_as: start
+  position_m:
+  - -0.010429975308719863
+  - -1.7270066133866684
+  - 0.5872907509893166
+  orientation_xyzw:
+  - 0.6848438587174001
+  - -0.6609296611671845
+  - 0.18514358303252118
+  - 0.24470947228984274
+  source: 'Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint
+    FK: weld_goal_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml'
+  saved: '2026-10-15T16:43:44.645+09:00'
+- pass: 4
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.0005047620119154259
+  - -1.528725837194316
+  - 0.5949214601121859
+  orientation_xyzw:
+  - 0.6848240201578808
+  - -0.660981111591417
+  - 0.18512586585352406
+  - 0.24463941899489064
+  source: 'Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint
+    FK: weld_end; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml'
+  saved: '2026-10-15T16:43:07.709+09:00'
+- pass: 4
+  end: start
+  saved_as: start
+  position_m:
+  - -0.002864071287473638
+  - -1.7267419345985824
+  - 0.5948769001135013
+  orientation_xyzw:
+  - 0.7006470420141544
+  - -0.6306106907010626
+  - 0.11227915565446801
+  - 0.31435214409299905
+  source: Welding keyboard J captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml
+    (sha256 b6ff9dedba3ea3c37f9268e6376bdc1e3d38c626245f6252d1fccb9fbb15e57e)
+  saved: '2026-10-15T15:52:13+09:00'
+notes:
+- 'Position-only truth correction: measurement attitudes are used for wire-tip conversion;
+  the existing per-pass welding attitudes and IK seeds are retained.'
+- 'Operator confirmed: extra World X -2 mm at all P1-P4 START/GOAL after recognition
+  and truth fitting; retain P2/P3 START World Z -2 mm. Keep the existing fit and raw
+  truth. Manual position trim; no new tool-angle or wire-tip calibration.'
+- 'Operator confirmed final World trims: P1/P3 START+GOAL X -2mm; P2/P4 START+GOAL
+  X -1mm (replaces -2mm); P4 START+GOAL Z -1.5mm. Retain P2/P3 START Z -2mm. Post-fit
+  position trims only; preserve original truth, fit, relative layout, tool attitudes
+  and wire-tip model.'
+- 'Operator update: P2 START World X trim -0.5mm replaces -1mm. P2 GOAL X -1mm, P2
+  START Z -2mm and every other endpoint trim retained. Post-fit position trim only;
+  original truth, fit, relative layout, attitudes and wire-tip model preserved.'
+- 'Operator 2026-10-19 15:12: new P1/P3/P4 attitude (travel 7 / work 1 deg, root truth
+  capture); P2 attitude unchanged. World offset [6.79, 4.09, -0.82] mm added to P1/P3/P4
+  START+GOAL trims = root truth - computed P1 START at the new attitude (scan 20261019-145639);
+  the same constant wire-tip error applies to every pass with this attitude.'
+report:
+- 'start: world (+14.5, -6.8, -3.1) mm = along +6.3 / lateral +14.8 / normal -3.1
+  mm, |16.4| mm'
+- 'goal: world (+15.2, -7.5, -4.4) mm = along +6.9 / lateral +15.5 / normal -4.3 mm,
+  |17.5| mm'
+- 'goal - start: along +0.7 / lateral +0.7 / normal -1.3 mm (lateral / normal: seam
+  direction error; along: end position / length difference)'
+- 'P1 goal: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P1 start: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P2 goal: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P2 start: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P3 goal: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P3 start: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P4 goal: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'P4 start: measured truth vs corrected target 0.000000 mm (measured_layout)'
+- 'pass 2 goal: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+- 'pass 2 start: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+- 'pass 3 goal: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+- 'pass 3 start: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+- 'pass 4 goal: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+- 'pass 4 start: measured - predicted = along +0.0 / lateral +0.0 / normal +0.0 mm
+  (measured_layout)'
+reference_set:
+  id: 20261015-161231-818284_22cb4992
+  source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan
+  relative_model: measured_layout
+  baseline_relative_model: design_layout
+  created: '2026-10-15T16:12:31'
+  backup: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-161231-818284_22cb4992_before_four_pass_references
+  source_sha256:
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/estimate.json: 1c933eb6aedf6425441b5f996cfd36c7926333da3038a90731ff710c9bca6056
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1.yaml: 15bb729777b32ce192b2321088a5f859f8999362a338fddfa3b3cc90c46478ff
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1_info.yaml: c62257e07ddcecc5e3f2c41c43cc2a69f1f976200bafcc2d6f5ac53e6ec80d09
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2.yaml: e756fa33404438a5cfb9c403aa9765329fdb7ad7ada60e4aada5324ed5cb7fb2
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2_info.yaml: 2ae7855d0c741038391178a963606da100be38866657b55c834f9b6d3a36f2f0
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3.yaml: c9bddd62242d9f7925c782c5294d1ea987f62d940cb28a5feb134c7e190fa606
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3_info.yaml: cf782c9d031fb262f719c2d4fd379f78814a8f66727ecf0b4a26cb3059802348
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4.yaml: 3398aafb497161e459885ba02981e053e1a84004b88230ff1867d613ab6c3fc1
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4_info.yaml: ebeb292c921ec155d15f984474fe0f487bd9fe7d48586845b18c4706e7ab93e2
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/calib_used.json: 39f8b81373f9da4429bfe446e352ccbfe79c9b07c90e8bbee043c2fa1b537f36
+  capture_snapshot: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth
+  p3_p4_coincident_confirmed_by_user: true
+  endpoint_adjustments_world_m:
+    '2':
+      start:
+      - -0.0005
+      - 0
+      - -0.002
+      goal:
+      - -0.001
+      - 0.0
+      - 0.0
+    '3':
+      start:
+      - -0.002
+      - 0
+      - -0.002
+      goal:
+      - -0.002
+      - 0.0
+      - 0.0
+    '1':
+      start:
+      - -0.002
+      - 0.0
+      - 0.0
+      goal:
+      - -0.002
+      - 0.0
+      - 0.0
+    '4':
+      start:
+      - -0.001
+      - 0.0
+      - -0.0015
+      goal:
+      - -0.001
+      - 0.0
+      - -0.0015
+  endpoint_adjustment_note: 'Operator update: P2 START World X trim -0.5mm replaces
+    -1mm. P2 GOAL X -1mm, P2 START Z -2mm and every other endpoint trim retained.
+    Post-fit position trim only; original truth, fit, relative layout, attitudes and
+    wire-tip model preserved.'
+  updated: '2026-10-15T21:03:22.061544+09:00'
+  latest_truth_backup: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-165319_before_goal_truths_p3_start
+  truth_update_note: 'Same specimen placement per operator: added all four GOAL truths
+    and replaced P3 START; original P1/P2/P4 START retained; preserve welding attitudes.'
+  reference_sha256: a4a6356b453e38a00ce5f175382cf478cee404e64592560a4cb14b999b2e1285
+  baseline_correction:
+    format_version: 2
+    anchor_pass: 1
+    source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan
+    calib:
+      file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+      xyz:
+      - 0.039454
+      - 0.024934
+      - -0.100543
+      rpy:
+      - 3.11659954
+      - -0.02107031
+      - 1.57079633
+    computed: '2026-10-15T15:27:00'
+    compare_at: wire tip (aim point) = TCP + rotated TCP-frame wire-tip vector (or
+      L * torch axis); root position from the selected anchor; pass remainders compared
+      at TCP
+    wire_tip_model_m:
+    - 0.0023230090626219723
+    - -0.01883220873074798
+    - 0.028879786983482533
+    seam_frame:
+      u:
+      - -0.035960320692313405
+      - -0.9992762041494526
+      - -0.012406577141482125
+      w:
+      - 0.9993415450859962
+      - -0.03601713425099027
+      - 0.004386605234124237
+      n:
+      - -0.004830279581957818
+      - -0.01224066423882766
+      - 0.999913413520467
+    offsets_seam_m:
+      start:
+      - 0.0065096341628435046
+      - 0.011560149216404718
+      - -0.0013540857229933504
+      goal:
+      - 0.00801990014196366
+      - 0.01349731578444608
+      - -0.0016902626659177258
+    offsets_world_m:
+      start:
+      - 0.011324989459881063
+      - -0.006904711054250834
+      - -0.0013840209448218177
+      goal:
+      - 0.013208194670759935
+      - -0.008479540068386582
+      - -0.0017304084257355745
+    angle_convention: travel + push / - drag along the plan's travel; work + toward
+      the bevel face (Hongik / AWS A3.0)
+    reference_torch_angles_deg:
+      start:
+        travel: 36.255437774830824
+        work: 15.795085566333704
+      goal:
+        travel: 36.81218453534134
+        work: 16.094845535731928
+    hongik_root_torch_angles_deg:
+      travel: 41.77909858272883
+      work: 8.97179534778576
+    reference_orientation_xyzw:
+    - 0.707032925165845
+    - -0.6262515313734835
+    - 0.10745244648351737
+    - 0.310431045368377
+    reference_orientations_xyzw:
+      start:
+      - 0.707032925165845
+      - -0.6262515313734835
+      - 0.10745244648351737
+      - 0.310431045368377
+      goal:
+      - 0.7
+      - -0.631
+      - 0.112
+      - 0.314
+    matches:
+    - pass: 1
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.013
+      - -1.53
+      - 0.59
+      orientation_xyzw:
+      - 0.7
+      - -0.631
+      - 0.112
+      - 0.314
+      source: tf2_echo World right_manipulator_ee_point 2026-10-15 01:2x (mm)
+      saved: '2026-10-15T01:41:39'
+    - pass: 1
+      end: start
+      saved_as: start
+      position_m:
+      - -0.022127043701487548
+      - -1.7282129578592875
+      - 0.5882043948908755
+      orientation_xyzw:
+      - 0.707032925165845
+      - -0.6262515313734835
+      - 0.10745244648351737
+      - 0.310431045368377
+      source: 'keyboard I capture 2026-10-15 00:5x on the Welding tab (file weld_start):
+        root corner end'
+      saved: '2026-10-15T00:54:36'
+    - pass: 2
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.017198304052081788
+      - -1.53012014378398
+      - 0.579768577674274
+      orientation_xyzw:
+      - -0.6614963746929083
+      - 0.6828362829972952
+      - -0.25616907869016253
+      - -0.17474140898370885
+      source: P2 goal correct TCP (ts 1791996666) + 4 mm World Z (operator 2026-10-15
+        03:0x)
+      saved: '2026-10-15T01:55:12'
+    - pass: 2
+      end: start
+      saved_as: start
+      position_m:
+      - -0.02846129311177906
+      - -1.7278097371159558
+      - 0.5777540041342483
+      orientation_xyzw:
+      - -0.6614912109671243
+      - 0.6828406231471064
+      - -0.256169819003496
+      - -0.17474291122971214
+      source: 'operator 2026-10-15: P2 start = generated 113658 (hongik_aim) + World
+        X -2.5 mm (fits the specimen)'
+      saved: '2026-10-15T14:43:43'
+    - pass: 4
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.01720155709047074
+      - -1.529679763307345
+      - 0.5926291112659666
+      orientation_xyzw:
+      - 0.6846448742532973
+      - -0.6608634851011342
+      - 0.1855939829145968
+      - 0.2451034959452174
+      source: weld_end_state 01:53:29 = P4 goal correct TCP (P4 orientation)
+      saved: '2026-10-15T01:55:12'
+    notes: []
+    report:
+    - 'start: world (+11.3, -6.9, -1.4) mm = along +6.5 / lateral +11.6 / normal -1.4
+      mm, |13.3| mm'
+    - 'goal: world (+13.2, -8.5, -1.7) mm = along +8.0 / lateral +13.5 / normal -1.7
+      mm, |15.8| mm'
+    - 'goal - start: along +1.5 / lateral +1.9 / normal -0.3 mm (lateral / normal:
+      seam direction error; along: end position / length difference)'
+    - 'pass 2 goal: measured - predicted = along +0.1 / lateral +1.3 / normal -7.8
+      mm (measured_layout)'
+    - 'pass 2 start: measured - predicted = along +0.5 / lateral -0.0 / normal -7.9
+      mm (measured_layout)'
+    - 'pass 4 goal: measured - predicted = along -0.1 / lateral +1.7 / normal -3.7
+      mm (measured_layout)'
+    pass_deltas_seam_m:
+      design_layout:
+        '2':
+          goal:
+          - -6.860802760871069e-05
+          - 0.0037674611172492318
+          - -0.008216367092611369
+          start:
+          - 2.1322573925685524e-05
+          - 0.0015602572385943763
+          - -0.008092568691295227
+        '4':
+          goal:
+          - -0.0004558043077844585
+          - 0.0012157469452136365
+          - -0.004368610095299436
+      hongik_aim:
+        '2':
+          goal:
+          - -6.853790839958092e-05
+          - 0.0011224209312171237
+          - -0.007254765229925515
+          start:
+          - 2.1358353478006015e-05
+          - -0.0013759898313034577
+          - -0.0072425411354151235
+        '4':
+          goal:
+          - -0.00044682819857907275
+          - 0.0016152117822646685
+          - -0.005553431726592532
+      measured_layout:
+        '2':
+          goal:
+          - 0.00011812069447152582
+          - 0.0012640197760672954
+          - -0.007807054246827653
+          start:
+          - 0.0004680047482522825
+          - -4.583416380063756e-05
+          - -0.007902648840920807
+        '4':
+          goal:
+          - -5.06911548185196e-05
+          - 0.001706047503290422
+          - -0.0036579704106756315
+      hongik_tcp:
+        '2':
+          goal:
+          - -0.0002629523185552867
+          - 0.009056570540512844
+          - -0.006654946833137381
+          start:
+          - -0.00017305605667769982
+          - 0.0065581597779922635
+          - -0.0066427227386269905
+        '4':
+          goal:
+          - 0.00010150988216396309
+          - 0.0022117445079669618
+          - -0.005124727557430422
+  latest_trim_backup: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-210321-764047_before_p2_start_x_minus_0p5mm
+inferred_ends:
+  '1': []
+  '2': []
+  '3': []
+  '4': []
+design_layout_m:
+  '2':
+  - 0.0
+  - 0.002
+  - 0.005
+  '3':
+  - 0.0
+  - -0.004
+  - 0.006500000000000001
+  '4':
+  - 0.0
+  - 0.0
+  - 0.01
+measured_layout_m:
+  '2':
+    start:
+    - -0.00020434074792718626
+    - 0.00400703523625918
+    - 0.004141680813102547
+    goal:
+    - -0.00018474714746322173
+    - 0.004818761360953778
+    - -0.0004891746392116882
+  '3':
+    start:
+    - 0.00021283301719340677
+    - -0.0013627988813509065
+    - 0.0042067500007872075
+    goal:
+    - 2.7190102478482554e-05
+    - -0.002841135180778583
+    - 0.005454922431103887
+  '4':
+    start:
+    - -0.00015406368206362378
+    - 0.0008246971573356895
+    - 0.00879568127751166
+    goal:
+    - -0.00018298233165779884
+    - 4.2660150208106676e-05
+    - 0.0102033426925141
+pass_deltas_seam_m:
+  design_layout:
+    '2':
+      goal:
+      - -0.0001847471474632674
+      - 0.0028187613609537746
+      - -0.005489174639211721
+      start:
+      - -0.00020434074792723193
+      - 0.002007035236259177
+      - -0.0008583191868974861
+    '3':
+      goal:
+      - 2.719010247840269e-05
+      - 0.0011588648192214154
+      - -0.0010450775688961443
+      start:
+      - 0.00021283301719332687
+      - 0.0026372011186490923
+      - -0.0022932499992128234
+    '4':
+      goal:
+      - -0.00018298233165778982
+      - 4.266015020810589e-05
+      - 0.00020334269251414704
+      start:
+      - -0.0001540636820636148
+      - 0.0008246971573356905
+      - -0.0012043187224882927
+  hongik_aim:
+    '2':
+      goal:
+      - -0.000184677028254005
+      - 0.00017372117492167418
+      - -0.0045275727765259855
+      start:
+      - -0.00020430496837506678
+      - -0.0009292118336386637
+      - -8.291631017302667e-06
+    '3':
+      goal:
+      - 3.355624740362727e-05
+      - -0.0031174086521113874
+      - -0.0029533716715384466
+      start:
+      - 0.0002065496766085292
+      - -0.001803986961485117
+      - -0.004234408056433867
+    '4':
+      goal:
+      - -0.00017400622245254598
+      - 0.00044212498725913497
+      - -0.0009814789387789702
+      start:
+      - -0.00016304184037789553
+      - 0.0011877959888954683
+      - -0.0024212475491529814
+  measured_layout:
+    '2':
+      goal:
+      - 0.0
+      - 0.0
+      - 0.0
+      start:
+      - 0.0
+      - 0.0
+      - 0.0
+    '3':
+      goal:
+      - 0.0
+      - 0.0
+      - 0.0
+      start:
+      - 0.0
+      - 0.0
+      - 0.0
+    '4':
+      goal:
+      - 0.0
+      - 0.0
+      - 0.0
+      start:
+      - 0.0
+      - 0.0
+      - 0.0
+  hongik_tcp:
+    '2':
+      goal:
+      - -0.0004097565534898889
+      - 0.008107207936224098
+      - -0.003929713169052875
+      start:
+      - -0.00042938449361095083
+      - 0.007004274927663764
+      - 0.0005895679764558086
+    '3':
+      goal:
+      - 0.0005787200534132196
+      - -0.002518775104253186
+      - -0.0025235490240667524
+      start:
+      - 0.0007517134826181215
+      - -0.0012053534136269137
+      - -0.0038045854089621737
+    '4':
+      goal:
+      - 0.00037115758355704627
+      - 0.0010407585351173375
+      - -0.0005516562913072761
+      start:
+      - 0.0003821219656316967
+      - 0.0017864295367536716
+      - -0.0019914249016812877
+endpoint_adjustments_world_m:
+  '2':
+    start:
+    - -0.0005
+    - 0
+    - -0.002
+    goal:
+    - -0.001
+    - 0.0
+    - 0.0
+  '3':
+    start:
+    - 0.004793975254615385
+    - 0.004087747402107711
+    - -0.0028159643312952714
+    goal:
+    - 0.004793975254615385
+    - 0.004087747402107711
+    - -0.0008159643312952714
+  '1':
+    start:
+    - 0.004793975254615385
+    - 0.004087747402107711
+    - -0.0008159643312952714
+    goal:
+    - 0.004793975254615385
+    - 0.004087747402107711
+    - -0.0008159643312952714
+  '4':
+    start:
+    - 0.005793975254615385
+    - 0.004087747402107711
+    - -0.0023159643312952714
+    goal:
+    - 0.005793975254615385
+    - 0.004087747402107711
+    - -0.0023159643312952714
+truth_checks:
+- pass: 1
+  end: goal
+  error_mm: 3.469446951953614e-15
+  operator_adjustment_world_m:
+  - -0.002
+  - 0.0
+  - 0.0
+  expected_tcp_world_m:
+  - -0.0025023211030192356
+  - -1.5287578519885894
+  - 0.5847155802973127
+  reference_tcp_world_m:
+  - -0.0005023211030192355
+  - -1.5287578519885894
+  - 0.5847155802973127
+  target_tcp_world_m:
+  - -0.002502321103019232
+  - -1.5287578519885894
+  - 0.5847155802973127
+- pass: 1
+  end: start
+  error_mm: 1.734723475976807e-15
+  operator_adjustment_world_m:
+  - -0.002
+  - 0.0
+  - 0.0
+  expected_tcp_world_m:
+  - -0.005648669105534769
+  - -1.7267368104431282
+  - 0.5860772996186825
+  reference_tcp_world_m:
+  - -0.0036486691055347686
+  - -1.7267368104431282
+  - 0.5860772996186825
+  target_tcp_world_m:
+  - -0.005648669105534767
+  - -1.7267368104431282
+  - 0.5860772996186825
+- pass: 2
+  end: goal
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.001
+  - 0.0
+  - 0.0
+  expected_tcp_world_m:
+  - 0.0033220894959991353
+  - -1.528758553457835
+  - 0.5842515294475672
+  reference_tcp_world_m:
+  - 0.004322089495999135
+  - -1.528758553457835
+  - 0.5842515294475672
+  target_tcp_world_m:
+  - 0.0033220894959991353
+  - -1.528758553457835
+  - 0.5842515294475672
+- pass: 2
+  end: start
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.0005
+  - 0.0
+  - -0.002
+  expected_tcp_world_m:
+  - -0.00015820961531459688
+  - -1.7267498604999478
+  - 0.5882381552481115
+  reference_tcp_world_m:
+  - 0.0003417903846854031
+  - -1.7267498604999478
+  - 0.5902381552481115
+  target_tcp_world_m:
+  - -0.00015820961531459688
+  - -1.7267498604999478
+  - 0.5882381552481115
+- pass: 3
+  end: goal
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.002
+  - 0.0
+  - 0.0
+  expected_tcp_world_m:
+  - -0.005370028405338184
+  - -1.528752078205895
+  - 0.5901573475146038
+  reference_tcp_world_m:
+  - -0.0033700284053381838
+  - -1.528752078205895
+  - 0.5901573475146038
+  target_tcp_world_m:
+  - -0.005370028405338184
+  - -1.528752078205895
+  - 0.5901573475146038
+- pass: 3
+  end: start
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.002
+  - 0.0
+  - -0.002
+  expected_tcp_world_m:
+  - -0.012429975308719863
+  - -1.7270066133866684
+  - 0.5852907509893166
+  reference_tcp_world_m:
+  - -0.010429975308719863
+  - -1.7270066133866684
+  - 0.5872907509893166
+  target_tcp_world_m:
+  - -0.012429975308719863
+  - -1.7270066133866684
+  - 0.5852907509893166
+- pass: 4
+  end: goal
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.001
+  - 0.0
+  - -0.0015
+  expected_tcp_world_m:
+  - -0.0015047620119154259
+  - -1.528725837194316
+  - 0.593421460112186
+  reference_tcp_world_m:
+  - -0.0005047620119154259
+  - -1.528725837194316
+  - 0.5949214601121859
+  target_tcp_world_m:
+  - -0.0015047620119154259
+  - -1.528725837194316
+  - 0.593421460112186
+- pass: 4
+  end: start
+  error_mm: 0.0
+  operator_adjustment_world_m:
+  - -0.001
+  - 0.0
+  - -0.0015
+  expected_tcp_world_m:
+  - -0.003864071287473638
+  - -1.7267419345985824
+  - 0.5933769001135013
+  reference_tcp_world_m:
+  - -0.002864071287473638
+  - -1.7267419345985824
+  - 0.5948769001135013
+  target_tcp_world_m:
+  - -0.003864071287473638
+  - -1.7267419345985824
+  - 0.5933769001135013
+operator_trim_updated: '2026-10-19T15:15:41.119148+09:00'

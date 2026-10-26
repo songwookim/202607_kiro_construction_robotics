@@ -1,0 +1,51 @@
+# scan_l0 예제 작업: 3G (시편 세움, 수직 판 y = 0.7, 법선 -Y = 로봇 쪽). base_frame(link0) 기준, m / s / deg.
+# 규칙(R4): 진행방향 ∥ 중력. vertical_direction=down: 위 점(z 0.6) → 아래 점(z 0.3), 리드인은 위 점 위쪽에만, 리드아웃 없음
+# (아래 점에서 정확히 정지; 감속 구간 프레임은 valid 이지만 in_cruise=False). 광학 원점은 어떤 순간에도 floor(=0.3) 아래로
+# 내려가지 않는다 (접근/후퇴는 판 법선의 수평 성분 방향). 3G 는 specimen_top_z_m 이 필수다.
+job:
+  job_id: example_3G
+  start: [0.5, 0.7, 0.6]            # 위 점
+  end: [0.5, 0.7, 0.3]              # 아래 점 (floor = 0.3 m, 광학 원점 기준)
+  surface_normal: [0.0, -1.0, 0.0]  # 판 법선, 로봇 베이스 쪽
+  position: 3G                      # 용접 자세 (단일 출처 → orientation vertical_3G): 3G = 진행 ∥ 중력 (플랫폼 gravity_axis_base 와 일관성 검사)
+  standoff_m: 0.32
+  speed_mps: 0.03
+  accel_mps2: 0.2
+  lead_in_m: 0.04
+  lead_out_m: 0.04
+  pitch_deg: -5.0
+  profile_fps: 100.0
+  progression_sign: 1
+  safe_clearance_m: 0.10
+  table_z_m: 0.0
+  specimen_top_z_m: 0.7             # 세운 판의 상단 높이 (필수)
+  bidirectional: false
+  max_laser_tilt_deg: 40.0          # 3G 입사 ≤ 35° (테이블 높이 있으면 자동 선택) + 패스 피치 5° (2026-10-05)
+  torch_protrusion_m: 0.1924                # 토치 팁 = CAD 와이어 끝 (토치의 가장 먼 점) − 캘리브 광학 원점 (+z_eoat; 플랫폼 safety 값이 덮어쓴다)
+  torch_lateral_m: [-0.2479, -0.0005]   # 토치 팁 (x, y)_eoat = 우리 토치의 CAD 와이어 끝 (torch_tcp + 20 mm 노즐 축) - the torch turned 180 deg in
+                                        # its clamp (2026-10-13, the lab robot model; fallback - the MoveIt adapter takes it from the model)
+  standoff_min_m: 0.245
+  mode: standard
+  base_frame: link0
+  gravity_axis_base: [0.0, 0.0, -1.0]
+  vertical_direction: down          # down (기본) | up (아래→위, 리드인 없음)
+  reference_point: optical
+  direction_tol_deg: 20.0
+  check_torch_tip: true
+# ---- 용접 절차 (WPS) — 3G 는 KIRO 데이터셋 전의 가정값 그대로 (KIRO 데이터셋은 1G 만: 2026-10-12 기본값이 KIRO 1G WPS 로 바뀌어도 3G 계획은
+# 바뀌지 않게 명시). 3G 용접 자료가 생기면 그 값으로 바꾼다. 역할별 [root, fill, cap].
+weld_plan:
+  source: assumed (before the KIRO dataset)
+  wfs_mpm: [6.0, 6.6, 4.5]
+  speed_mps: [0.005, 0.005, 0.0035]
+  travel_angle_deg: [10.0, 10.0, 10.0]
+  work_angle_deg: [0.0, 0.0, 0.0]
+  stick_out_mm: 20.0                    # 와이어 돌출 (TCP = 토치 팁 끝 → 와이어 끝): KIRO 로그에 없다 — 잠정 = 토치 CAD 와이어 토막; KIRO 값으로
+  cap_reinforcement_mm: 1.5
+  speed_limits: [0.6, 1.6]
+  weave_amplitude_mm: null              # 캡 띠 모형 (진폭 = 띠 반폭 - weave_edge_margin_mm)
+  weave_pitch_mm: 2.5
+  weave_dwell_s: 0.1
+teach: {}
+meta:
+  note: example (not taught)

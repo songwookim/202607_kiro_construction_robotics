@@ -1,4 +1,6 @@
 <?xml version="1.0"?>
+<!-- LEGACY (robot_model:=kiro_legacy): original 0528 right-arm tool. The default model is
+     construct_robot_0528_hongik_v4 (urdf.xacro / srdf). -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="construct_robot_0528">
     <xacro:arg name="right_robot_ip" default="192.168.1.12" />
     <xacro:arg name="left_robot_ip" default="192.168.1.11" />

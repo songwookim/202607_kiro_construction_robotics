@@ -154,3 +154,50 @@ def test_disconnected_poll_and_connect_attempt_do_not_republish_old_state():
     node._manager.read_io.assert_not_called()
     node._manager.connect.assert_not_called()
     node._publish_snapshot.assert_not_called()
+
+
+def publishing_node():
+    from construct_robot.nodes import fastech_io_node as module
+
+    node = object.__new__(FastechIONode)
+    node.touch_input_channel = 0
+    node.ip_address, node.board_id, node.poll_period_s = "192.168.0.3", 0, 0.01
+    node._manager = SimpleNamespace(device_detail="fake I8O8", connected=True)
+    node._last_raw_contact = None
+    node._published_state = None
+    node._published_contact = None
+    node._published_at = 0.0
+    node._state_publisher = Mock()
+    node._contact_publisher = Mock()
+    node.get_logger = lambda: Mock()
+    return node, module
+
+
+def snapshot(contact):
+    return FastechIoSnapshot(inputs=(contact,) + (False,) * 7, outputs=(False,) * 8,
+                             raw_input=int(contact), raw_output=0, latch=0, trigger_status=0)
+
+
+def test_unchanged_polls_are_not_republished_but_edges_are_immediate(monkeypatch):
+    node, module = publishing_node()
+    clock = [100.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    for _ in range(10):  # 100 ms of unchanged 100 Hz polls
+        node._publish_snapshot(snapshot(False))
+        clock[0] += 0.01
+    assert node._contact_publisher.publish.call_count == 1
+    assert node._state_publisher.publish.call_count == 1
+    node._publish_snapshot(snapshot(True))  # touch edge: same poll
+    assert node._contact_publisher.publish.call_args.args[0].data is True
+    assert node._state_publisher.publish.call_count == 2
+    clock[0] += module.STATE_HEARTBEAT_S
+    node._publish_snapshot(snapshot(True))  # heartbeat keeps the stream alive
+    assert node._contact_publisher.publish.call_count == 3
+
+
+def test_reconnect_republishes_the_contact_even_if_unchanged():
+    node, _module = publishing_node()
+    node._publish_snapshot(snapshot(False))
+    node._publish_disconnected("cable")
+    node._publish_snapshot(snapshot(False))
+    assert node._contact_publisher.publish.call_count == 2

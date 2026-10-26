@@ -1,0 +1,115 @@
+entries:
+- position_m:
+    x: -0.012379289459603987
+    y: -1.5503253805314279
+    z: 0.5917126732590808
+  orientation_xyzw:
+    x: 0.7249252667238958
+    y: -0.6881186516357156
+    z: -0.027510553099016906
+    w: -0.014807039019349438
+  pass: 1
+  label: goal
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_goal_wait / K)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.02325467750166331
+    y: -1.7473469067705503
+    z: 0.5879063754708206
+  orientation_xyzw:
+    x: 0.7250959427715351
+    y: -0.6883421383103157
+    z: -0.018795042873820576
+    w: -0.008229262786742925
+  pass: 1
+  label: start
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_start / I)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.007936686853446555
+    y: -1.550432595649356
+    z: 0.5963659911281756
+  orientation_xyzw:
+    x: 0.7248908732989126
+    y: -0.6881587938939125
+    z: -0.027462171515141746
+    w: -0.014714799695867128
+  pass: 2
+  label: goal
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_finish / L)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.019698921987545442
+    y: -1.7471474607685655
+    z: 0.592770333877084
+  orientation_xyzw:
+    x: 0.7250979498643341
+    y: -0.6883439913066118
+    z: -0.018690034170979464
+    w: -0.008136052931947448
+  pass: 2
+  label: start
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_start_wait / O)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.015266389499684448
+    y: -1.5503389803829206
+    z: 0.5968466053154463
+  orientation_xyzw:
+    x: 0.7249104012161731
+    y: -0.6881348184000008
+    z: -0.027498650215725583
+    w: -0.01480561212916001
+  pass: 3
+  label: goal
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file robot_start / M)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.026263141879024968
+    y: -1.747241544066541
+    z: 0.5933400276792875
+  orientation_xyzw:
+    x: 0.7251140627425694
+    y: -0.6883272002546649
+    z: -0.018674558998726748
+    w: -0.008156117259065022
+  pass: 3
+  label: start
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_wait / P)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.013
+    y: -1.55
+    z: 0.601
+  orientation_xyzw:
+    x: 0.725
+    y: -0.688
+    z: -0.027
+    w: -0.015
+  pass: 4
+  label: goal
+  source: tf2_echo world right_manipulator_ee_point 2026-10-14 22:12 (mm)
+  saved: '2026-10-14T22:15:39'
+- position_m:
+    x: -0.02388326041601531
+    y: -1.7470627160189391
+    z: 0.5971005814736973
+  orientation_xyzw:
+    x: 0.7251055244918921
+    y: -0.6883381243451158
+    z: -0.018649611244069247
+    w: -0.008049653708827093
+  pass: 4
+  label: start
+  source: GUI keyboard capture 2026-10-14 22:1x on the Welding tab (measured joints
+    FK, file weld_end / J)
+  saved: '2026-10-14T22:15:39'
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point

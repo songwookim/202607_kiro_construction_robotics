@@ -1,0 +1,10 @@
+# Bead layout of the 4 passes (design_layout relative model): wire tip of pass k from the root (pass 1) wire tip, mm.
+# along = seam travel, lateral + toward the 90 deg face / - up the 30 deg bevel, normal + up from the groove bottom.
+# Operator 2026-10-15: P2 (lateral, along, up) = (2, 0, 5) mm from the pass-1 root wire tip.
+# With P2 as position anchor, its measured wire tip defines the root; other old reference XYZ are ignored.
+# P3 / P4 retain their existing design positions.
+format_version: 1
+passes_mm:
+  2: [0.0, 2.0, 5.0]
+  3: [0.0, -4.0, 6.5]
+  4: [0.0, 0.0, 10.0]

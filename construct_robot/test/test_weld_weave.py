@@ -1,5 +1,7 @@
 import math
 import pytest
+from types import SimpleNamespace
+from unittest.mock import Mock
 from geometry_msgs.msg import Pose
 from construct_robot.core.cartesian_path_common import weave_cycles_for_pitch
 from construct_robot.gui.weld_action_gui import (
@@ -115,7 +117,7 @@ def test_hold_plan_is_continuous_and_stationary_during_dwell():
     request = CartesianPath.Goal()
     request.waypoints = [start, goal, goal]
     request.waypoint_hold_s = [0.0, 0.2, 0.3]
-    server = SimpleNamespace(plan_with_moveit=plan)
+    server = SimpleNamespace(plan_with_moveit=plan, get_logger=lambda: Mock())
     result = CartesianPathActionServer.plan_with_holds(server, request, publish=False)
     points = result.solution.joint_trajectory.points
     times = [p.time_from_start.sec + p.time_from_start.nanosec*1e-9 for p in points]
@@ -212,7 +214,7 @@ def test_pass_through_lead_is_not_planned_as_a_tiny_separate_leg():
     request = CartesianPath.Goal()
     request.waypoints = [start, start, goal, goal, goal]
     request.waypoint_hold_s = [0.0, 0.0, 0.2, 0.0, 0.0]
-    server = SimpleNamespace(plan_with_moveit=plan)
+    server = SimpleNamespace(plan_with_moveit=plan, get_logger=lambda: Mock())
     response = CartesianPathActionServer.plan_with_holds(server, request, publish=False)
     assert len(calls) == 2
     assert len(response.solution.joint_trajectory.points) == 4
@@ -350,3 +352,108 @@ def test_sensed_and_generic_weaves_actually_differ():
     )
     # Nearly twice the amplitude itself -- not a rounding difference.
     assert worst * 1000 > 3.0
+
+
+
+def test_hold_legs_copy_only_their_own_waypoints_and_keep_the_request():
+    """Deep-copying the whole request per leg cost ~25 ms each for a 600-pose weave (seconds at the weld start)."""
+    import copy as copy_module
+    from geometry_msgs.msg import Pose
+    from construct_msgs.action import CartesianPath
+    from moveit_msgs.srv import GetCartesianPath
+    from trajectory_msgs.msg import JointTrajectoryPoint
+    from construct_robot.nodes.cartesian_path_server import CartesianPathActionServer
+    legs = []
+
+    def plan(leg, start_state=None, publish=True):
+        legs.append(list(leg.waypoints))
+        response = GetCartesianPath.Response()
+        response.fraction = 1.0
+        response.start_state.joint_state.name = ["joint"]
+        response.start_state.joint_state.position = [0.0]
+        response.solution.joint_trajectory.joint_names = ["joint"]
+        for second in (0, 1):
+            point = JointTrajectoryPoint()
+            point.positions, point.velocities, point.accelerations = [float(second)], [0.0], [0.0]
+            point.time_from_start.sec = second
+            response.solution.joint_trajectory.points.append(point)
+        return response
+    request = CartesianPath.Goal()
+    for i in range(61):
+        p = Pose()
+        p.position.y, p.orientation.w = 0.001 * i, 1.0
+        request.waypoints.append(p)
+    request.waypoint_hold_s = [0.0] + [0.1 if i % 6 == 0 else 0.0 for i in range(1, 61)]
+    request.waypoint_hold_s[-1] = 0.1
+    before = copy_module.deepcopy(request)
+    CartesianPathActionServer.plan_with_holds(
+        SimpleNamespace(plan_with_moveit=plan, get_logger=lambda: Mock()), request, publish=False)
+    assert len(legs) == 10 and all(len(leg) == 7 for leg in legs)
+    assert request == before                                   # the goal itself is untouched
+
+
+def _seam_pose(x, y, z, orientation=(0.0, 0.0, 0.0, 1.0)):
+    from geometry_msgs.msg import Pose
+
+    pose = Pose()
+    pose.position.x, pose.position.y, pose.position.z = x, y, z
+    (pose.orientation.x, pose.orientation.y,
+     pose.orientation.z, pose.orientation.w) = orientation
+    return pose
+
+
+def _offsets(points, start, goal):
+    import numpy as np
+
+    a = np.array([start.position.x, start.position.y, start.position.z])
+    b = np.array([goal.position.x, goal.position.y, goal.position.z])
+    d = (b - a) / np.linalg.norm(b - a)
+    out = []
+    for p in points:
+        r = np.array([p.position.x, p.position.y, p.position.z]) - a
+        out.append(r - (r @ d) * d)
+    return np.array(out), d
+
+
+def test_world_y_along_a_seam_taught_along_world_y_weaves_horizontally_across_it():
+    import math
+    import numpy as np
+    from construct_robot.core.cartesian_path_common import weaving_from_path
+
+    # I/J taught 2.6 deg off World Y (the 2026-10-23 seam); tool Y = World +X.
+    tool = (0.0, 0.0, math.sin(-math.pi / 4), math.cos(-math.pi / 4))
+    start = _seam_pose(-0.0255, -1.7265, 0.589, tool)
+    goal = _seam_pose(-0.0169, -1.5340, 0.5885, tool)
+    points = weaving_from_path([start, goal], 0.005, 8, 12, transverse_axis="world_y")
+    offsets, seam = _offsets(points, start, goal)
+    peak = offsets[np.argmax(np.linalg.norm(offsets, axis=1))]
+    direction = peak / np.linalg.norm(peak)
+    assert abs(direction @ seam) < 1e-9                    # across the actual I->J seam
+    assert abs(direction[2]) < 1e-3                         # in the World horizontal plane
+    assert abs(abs(direction[0]) - math.cos(math.atan2(0.0086, 0.1925))) < 1e-3
+    assert np.max(np.linalg.norm(offsets, axis=1)) == pytest.approx(0.005, rel=1e-3)
+    # Every sample weaves along the same line, +A on the torch tool-Y (+X) side.
+    signed = offsets @ direction
+    assert np.allclose(np.abs(signed), np.linalg.norm(offsets, axis=1), atol=1e-9)
+    assert direction[0] > 0.0 and signed[3] > 0.0  # first +A peak toward tool Y
+
+
+def test_world_axis_across_the_seam_keeps_the_projection_behaviour():
+    import numpy as np
+    from construct_robot.core.cartesian_path_common import weaving_from_path
+
+    start, goal = _seam_pose(0.0, -1.7, 0.6), _seam_pose(0.0, -1.5, 0.6)
+    points = weaving_from_path([start, goal], 0.004, 4, 12, transverse_axis="world_z")
+    offsets, _seam = _offsets(points, start, goal)
+    assert np.allclose(offsets[:, :2], 0.0, atol=1e-12) and np.max(offsets[:, 2]) > 0.0039
+
+
+def test_circle_weave_uses_the_same_world_axis_rule():
+    import numpy as np
+    from construct_robot.core.cartesian_path_common import circular_weaving_from_path
+
+    start, goal = _seam_pose(0.0, -1.7, 0.6), _seam_pose(0.0, -1.5, 0.6)
+    points = circular_weaving_from_path([start, goal], 0.003, 4, 12, radial_axis="world_y")
+    offsets, seam = _offsets(points, start, goal)
+    assert np.max(np.linalg.norm(offsets, axis=1)) == pytest.approx(0.003, rel=1e-3)
+    assert np.allclose(offsets @ seam, 0.0, atol=1e-9)

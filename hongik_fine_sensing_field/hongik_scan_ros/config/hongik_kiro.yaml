@@ -1,0 +1,268 @@
+# Platform config of the Hongik 1G precision-sensing package on KIRO's robot (MoveIt adapter 'moveit_jtc').
+# KIRO edits THIS FILE ONLY (copy it, fill the [T1]-[T9] fields, pass it as platform_config:=).
+#
+# Rules
+#   - Platform-dependent values have no code defaults: missing frame / group / action names or moveit_jtc.limits refuse the start.
+#   - Gravity is never written by hand for the base frame: gravity.axis given in gravity.frame (a ground frame in TF) is rotated
+#     into the base frame through TF.
+#   - The sensor optical frame hongik_profiler_optical_frame is the static TF of our launch (laser_frame -> optical, xyz / rpy of the
+#     EOAT calibration file).
+#   - This package does not talk to or configure the robot controller: it plans with KIRO's move_group and sends joint trajectories
+#     to KIRO's JointTrajectoryController. Tools, payload, collision sensitivity and the robot's own safety stay on KIRO's side.
+#   - Safety of this package = planning only: MoveIt collision checking + our motion envelope, before anything is sent. There is no
+#     runtime motion monitor; the only stop is the action cancel (decelerating stop of our trajectory, result ABORTED).
+#   - Site-level job parameters (precision targets, WPS values such as weld_plan.stick_out_mm / travel_angle_deg, the weld line insets,
+#     the measurement speed job.speed_mps, ...) are NOT in this file: the job file (launch argument / server parameter job_file) holds
+#     them and the server parameter job_overrides adjusts them per site for every goal (KIRO's PrecisionSensing goal has no field for
+#     it), e.g.
+#       ros2 launch hongik_scan_ros hongik_moveit.launch.py ... job_overrides:='{weld_plan.stick_out_mm: 17.5, precision.end_position_mm: 0.2}'
+#     (a YAML / JSON mapping of dotted job paths, passed as a string; checked against the job file at server start - a wrong path or
+#     value refuses the start; recorded per run in verification/run_log.json job_overrides, verification/job_effective.yaml and the
+#     precision_sensing.npz meta inputs; scan_l0.job_overrides). A run-time measurement speed must lie inside the calibration's
+#     g1.noise_priors.speed_range_mps.
+#
+# ==== [T1]-[T9]: fields to confirm / fill on KIRO's PC with the real robot ====
+# Frames, group and controller names: KIRO's robot model construct_robot_0528 with our EOAT = construct_robot_0528_hongik_v2.urdf r4
+# (Hongik 2026-10-13: our 1st bracket + torch + VC nano 3D-Z on right_manipulator_link6 at eoat_yaw -90 deg, the torch turned 180 deg
+# in its clamp - KIRO's identified setup; frames hongik_*; the TCP right_manipulator_ee_point = our torch's contact-tip end, nominal
+# CAD) and KIRO's ros2_control names. Limits and speeds: placeholders.
+#   [T1] use_sim_time: true only with Isaac Sim /clock; false on the real robot.
+#   [T2] frames base / flange / eoat / laser / torch: names in KIRO's TF with the v2 robot model; confirm every name in TF
+#        (ros2 run tf2_ros tf2_echo World hongik_laser_link). The base is MoveIt's planning frame (World in the v2 model).
+#   [T3] gravity.frame / axis: a ground frame published in TF (World: z up), or gravity.frame: <base frame> with the axis measured
+#        on the real mount.
+#   [T4] MoveIt planning group / eef link (planning_group, move_group_name, flange_frame) and the move_group service names; we
+#        add only our objects 'hongik/specimen' and 'hongik/floor' to the planning scene (/apply_planning_scene).
+#   [T5] trajectory controller and topic names (jtc_action, controller_name, controller_state_topic, joint_states_topic,
+#        trajectory_execution_event_topic, robot_description_topic).
+#   [T6] tool geometry of the envelope: read from the robot model at run time - the body = the collision geometry mounted on
+#        flange_frame in robot_description (the same geometry MoveIt checks) + safety.tool_body_boxes (parts the model does not hold),
+#        the torch tip = the wire end = TF flange_frame <- weld_torch.tcp_frame + (the gas nozzle end from the URDF collision geometry
+#        + the job's stick-out weld_plan.stick_out_mm) along the torch axis. safety.tool_body_mesh / torch_protrusion_m are used only
+#        when the robot model has no such geometry / the weld torch is not on this arm (keep).
+#   [T7] moveit_jtc.limits (TCP / joint speed and acceleration) and the stop deceleration of an action cancel (stop_decel_tcp_mps2,
+#        stop_decel_joint_rad_s2): from KIRO's robot / controller specification. The envelope margin
+#        L = safety.clearance_m + v * reaction + v^2 / (2 a) uses max_tcp_speed_mps and stop_decel_tcp_mps2.
+#   [T8] auto_teach.wrist2_branch_1g: the arm configuration of KIRO's arm to use in 1G - set it to the configuration the hand-eye
+#        calibration was made with on KIRO's robot ('any' = no restriction; the Hongik lab RB20 uses 'neg', which is specific to
+#        that arm's joint layout).
+#   [T9] sensor.ip / port: the sensor LAN of KIRO's PC (factory IP 192.168.3.15, TCP 1096; a 192.168.3.x interface on the PC).
+
+/**:
+  ros__parameters:
+    platform: hongik_kiro
+    pose_source: ros_tf                    # /joint_states + robot_description FK (TF: static transforms only; 2026-10-13)
+    motion_backend: moveit_jtc             # move_group (straight-line / joint-space planning, collision checks) + JTC
+    # [T1]
+    use_sim_time: false                    # true = Isaac Sim /clock, false = the real robot
+
+    # ---- frames (names in KIRO's TF tree) ----
+    # [T2]
+    base_frame: World                      # MoveIt planning frame (v2 model root) = the frame of the goal points and of every output
+    flange_frame: hongik_flange            # the flange (rbpodo tcp convention: right_manipulator_link6 + 60.5 mm, Rz -120 deg): the link of
+                                           # the straight-line moves (rigidly on the group's tip link); T_base<-flange from TF
+    eoat_frame: hongik_eoat_base_link      # tool pose reference (z_eoat = -plate normal); flange -> eoat = the mounting yaw (-90 deg)
+    laser_frame: hongik_laser_link         # EOAT profiler CAD frame = parent of the optical frame static TF (calibration file)
+    tool_frame: hongik_profiler_optical_frame   # sensor optical frame (static TF child, published by our launch; not in the URDF)
+    torch_frame: right_manipulator_ee_point   # the torch TCP (= weld_torch.tcp_frame; information - the weld torch section is used)
+    world_frame: World                     # information only
+    # [T3]
+    gravity:
+      frame: World                         # ground frame in TF (z up, gravity -z)
+      axis: [0.0, 0.0, -1.0]               # gravity direction in gravity.frame
+
+    joint_names: []                        # empty: joint names come from MoveIt / /joint_states
+    # [T4]
+    planning_group: right_manipulator
+    progression_sign: 1                    # x_eoat = +travel (decided again from the calibration axes after mounting)
+
+    # ---- MoveIt adapter: KIRO's move_group + JointTrajectoryController (hongik_scan_ros.moveit_adapter) ----
+    moveit_jtc:
+      move_group_name: right_manipulator         # [T4] MoveIt planning group (eef = flange_frame)
+      cartesian_path_service: /compute_cartesian_path
+      fk_service: /compute_fk
+      # [T5]
+      jtc_action: /right_manipulator_controller/follow_joint_trajectory
+      controller_name: right_manipulator_controller
+      controller_state_topic: /right_manipulator_controller/controller_state   # commanded state (decelerating stop of an action cancel)
+      joint_states_topic: /joint_states
+      trajectory_execution_event_topic: /trajectory_execution_event   # "stop" on a stop of our run
+      robot_description_topic: /robot_description   # URDF: the base -> flange chain for the dense straight-line IK
+      cartesian_step_m: 0.002              # straight-line interpolation step (MoveIt max_step)
+      jump_threshold: 0.0                  # MoveIt relative jump check off; max_joint_step_rad is the absolute check
+      max_joint_step_rad: 0.05             # joint change limit between neighbouring waypoints (no configuration flip)
+      min_fraction: 0.999                  # Cartesian path fraction below this = refused (no partial straight line)
+      avoid_collisions: true               # MoveIt planning-scene collision checking
+      rotation_radius_m: 0.2               # equivalent length radius of a pure rotation (speed = v / r rad/s)
+      path_check_tol_m: 0.0005             # two sources of one frame: session-start FK vs TF (same stamp), static TF vs URDF, plan
+                                           # start FK vs pose
+      path_on_moveit_tol_rad: 0.02         # dense IK path vs move_group's checked path points (same IK branch)
+      goal_pose_tol_m: 0.001               # end point / arrival tolerance (position)
+      goal_pose_tol_deg: 0.2               # end point / arrival tolerance (orientation)
+      prepared_start_tol_mm: 0.1           # a plan made before the sensor starts is sent as it is when the arm moved less than this
+      prepared_start_tol_deg: 0.05
+      # [T7]
+      limits:                              # required (the time parameterisation uses them)
+        max_tcp_speed_mps: 0.06            # the Hongik lab values on the same RB20 arm (lab config, 2026-10-11/12): every motion's speed
+        max_tcp_accel_mps2: 0.1            # limit (positioning 60 mm/s; the measurement speed job.speed_mps is capped by it)
+        max_joint_velocity_rad_s: 0.24
+        max_joint_accel_rad_s2: 1.0
+      stop_decel_tcp_mps2: 0.2             # action cancel: decelerate our trajectory from the commanded position / velocity at this rate
+      stop_decel_joint_rad_s2: 2.0         # (the slower of TCP and joint)
+      goal_time_margin_s: 5.0              # trajectory time + this margin (timeout = 1.5 x trajectory + margin)
+      tf_timeout_s: 0.5                    # data wait: a static TF read the first time, the session's FK vs TF cross-check, and a
+                                           # /joint_states published after the request before a plan is made / sent (none = nothing sent);
+                                           # pose samples never read TF (FK of /joint_states)
+      history_s: 600.0                     # pose history kept (reconstruction)
+
+    # ---- scan defaults (platform independent; gravity from TF) ----
+    scan_defaults:
+      standoff_m: 0.32
+      speed_mps: 0.030                     # measurement speed 30 mm/s at 150 fps -> 0.2 mm profile spacing (passes and the precise dwell
+                                           # corrections only; every other move uses the positioning limits of moveit_jtc.limits; end
+                                           # precision target 0.10 mm 1 sigma for KIRO, 2026-10-13). The PrecisionSensing goal has no speed: a KIRO run
+                                           # measures at the job file's job.speed_mps (server job_file, written by --setup from the template
+                                           # groove_10T_1G.yaml, 30 mm/s) - keep both values equal
+      accel_mps2: 0.2
+      profile_fps: 150.0
+      lead_in_m: 0.04
+      lead_out_m: 0.04
+      pitch_deg: -5.0                      # pitch about the laser line axis (specular reflection avoided; 1G keeps -5)
+      incidence_tilt_deg: 0.0
+      bidirectional: false
+      table_z_m: null                      # filled by the run (support below the specimen from the cell world)
+      specimen_top_z_m: null
+      gravity_axis_base: null              # from gravity.frame / axis through TF (per goal)
+      vertical_direction: down
+      reference_point: optical             # height / transit rules refer to the optical origin
+      direction_tol_deg: 20.0              # 1G: travel direction perpendicular to gravity within this
+      check_torch_tip: true                # the torch tip is an envelope key point
+
+    # ---- KIRO-format weld plan (scan_core.kiro_plan): out_dir/kiro/pass_<k>.yaml = KIRO's xy_endpoint_review_v1 straight line per
+    #      pass + pass_<k>_info.yaml (assumptions and derived values for sharing - not commands). The frame chain is set here only.
+    #      The TCP and tip frame of the written poses = weld_torch below.
+    kiro_output:
+      enabled: true
+      world_frame: World                   # KIRO's world frame (its logs: tcp_tracking.parent_frame = World) = frame_id of pass_<k>.yaml
+      world_from_tf: false                 # true = at run time a TF World <- base (when present) replaces the fixed value below
+      world_from_base:                     # World <- the planning frame read from MoveIt at run time (the arm base; its name is not
+                                           # configured). Identity (this value unused) when the planning frame is World itself (the v2
+                                           # model's root). Fixed: KIRO's torso and base do not move (user 2026-10-12)
+        xyz_m: [-0.24982842514061013, -0.49970893784963016, 1.330424871627074]   # fit of KIRO's logs (-249.83, -499.71, 1330.42) mm
+        quat_xyzw: [-6.094245571196422e-05, 3.808556282163003e-07, 0.00012641046925126396, 0.9999999901531326]   # fitted rotation 0.016 deg
+        source: "FK fit World <- link0 of KIRO's 26 logged poses (1.log-4.log), our RB20-1900ES-U chain: position rms 0.048 mm (max 0.089), rotation rms 0.004 deg; KIRO's torso and base do not move (user 2026-10-12)"
+        status: fixed (KIRO torso and base do not move)
+
+    # ---- torch model of the weld plan (scan_core.weld_torch): every pass's TCP position and torch orientation (weld_plan.* TCP poses,
+    #      kiro/pass_<k>.yaml and info, precision_sensing.npz) is given for this torch's TCP = the torch tip end centre (the CAD
+    #      contact-tip end, nominal). The written TCP pose = the bead aim point (wire end) - (the torch's nozzle end + the process
+    #      stick-out job weld_plan.stick_out_mm) x z_TCP: the stick-out is measured from the gas nozzle end (user 2026-10-13), the nozzle
+    #      end is derived from this robot's URDF collision geometry (scan_core.weld_clearance.nozzle_end_mm; CAD 1.2 mm - not a config
+    #      value). The action result paths are the aim-point (wire end) lines (KIRO's WeldingPath definition). The TCP roll (0 / 180 deg)
+    #      is chosen by the plan with D14. D14 (weld-plan reachability, no motion) runs only when this torch is on this arm
+    #      (on_this_arm), with the arm's own TF flange <- TCP. The torch = our 1st-bracket torch (the same bracket, torch and sensor as
+    #      the Hongik lab EOAT), in the v2 model.
+    weld_torch:
+      tcp_frame: right_manipulator_ee_point   # KIRO's TCP name = the torch tip end = the contact-tip end (KIRO 2026-10-12: the TCP is
+                                           # the torch tip end, not the wire end); in the v2 model under right_manipulator_link_ee
+      tip_in_tcp:                          # TCP axes <- the plan's tip frame [x travel, y = z x x, z torch axis (toward the work)], axes only
+        axes:                              # (identity: +z_TCP = nozzle axis, x = in the bend plane = travel - TCP roll 0; the plan picks
+          x: [1.0, 0.0, 0.0]               # 0 / 180 deg with D14). The tip (bead aim point = wire end) lies along the torch axis at the
+          y: [0.0, 1.0, 0.0]               # nozzle end + the process stick-out (job weld_plan.stick_out_mm, from the nozzle end; KIRO's
+          z: [0.0, 0.0, 1.0]               # executor does not apply a stick-out) -> the written TCP pose = aim point - (nozzle end +
+                                           # stick-out) x z_TCP. The CAD wire stub (20 mm) is not a plan value
+        source: "our torch's TCP frame (eoat.xacro torch_tcp): +z = the nozzle axis toward the work, x in the bend plane = the plan's travel x (roll 0); the tip offset along +z = the torch's nozzle end (derived from the robot's URDF collision geometry) + the process stick-out measured from the nozzle end (job weld_plan.stick_out_mm)"
+        status: axes of our torch's TCP (CAD); the stick-out (nozzle end -> wire end) is a process input
+      flange_frame: hongik_flange          # the flange of flange_from_tcp (rbpodo tcp convention)
+      flange_from_tcp:                     # flange <- TCP (-0.45, +237.86, +297.17) mm, rpy (0, -30, -90) deg = right_ee_point_joint of
+                                           # the v2 model r4 (D14 reads the same transform from KIRO's TF at run time; this is the record).
+                                           # TCP axes in the flange frame: x (0, -0.866, 0.5), y (1, 0, 0), z (0, 0.5, 0.866)
+        xyz_m: [-0.0004521202956022176, 0.23785686706473458, 0.2971720033278718]
+        quat_xyzw: [-0.1830124832423317, -0.18301239077290102, -0.6830127434898018, 0.6830128022457533]
+        source: "construct_robot_0528_hongik_v2.urdf r4 (2026-10-13, KIRO's setup identified from its September weld logs): our torch CAD contact-tip end (eoat.xacro torch_tcp, 30.0 deg from the flange axis) turned 180 deg in its clamp about the straight torch body axis (eoat_description/scripts/make_torch_turned_mesh.py), EOAT mounted at eoat_yaw -90 deg (eoat_kiro_01.yaml)"
+        status: nominal CAD; KIRO re-calibrates the TCP on site
+      on_this_arm: true                    # the torch is on KIRO's arm -> D14 with KIRO's TF flange_frame <- tcp_frame (that robot's own
+                                           # model) . TCP <- tip (a plan that is not verified is not delivered)
+      source: "our 1st-bracket torch (user + KIRO agreement 2026-10-12: the bracket at KIRO is our 1st bracket - same bracket, torch, VC nano 3D-Z and RB20 arm as the lab EOAT; KIRO's URDF 2nd bracket and chiseling gun were never manufactured)"
+      status: nominal TCP = the CAD contact-tip end of our torch (KIRO's TCP = the torch tip end, KIRO 2026-10-12); the plan's tip (bead aim point) = the wire end, the nozzle end (the contact-tip end is recessed inside the gas nozzle) + the process stick-out (job weld_plan.stick_out_mm, from the nozzle end) further along the torch axis; KIRO re-calibrates the TCP on site
+
+    specimen:
+      source: job_file                     # the groove design comes from the job file (job_file:=, hongik_auto_teach_client --setup)
+      default_job: groove_10T_1G
+      qc_targets_source: job_file
+
+    # ---- statistics and motion envelope ----
+    judgement:
+      k: 3.0                               # the one statistical multiplier: a judgement is k x the sigma measured in the data
+    safety:                                # motion envelope (planning) - the tool's distance to the specimen and its support
+      clearance_m: 0.05                    # margin C of every tool point to every surface (plate, support, MoveIt objects); the envelope
+                                           # limit adds the stopping distance v * reaction + v^2 / (2 a) (scan_l0.safety)
+      max_laser_tilt_deg: 30.0
+      # [T6] the tool body and the torch tip come from the robot model at run time (MoveIt adapter tool_geometry): the collision
+      #      geometry mounted on flange_frame in robot_description + the boxes below, and the weld torch's tip in TF (weld_torch)
+      tool_body_boxes:                     # parts the robot model does not hold (eoat frame [xmin, ymin, zmin, xmax, ymax, zmax] m)
+        - [0.165, -0.016, -0.006, 0.200, 0.016, 0.054]   # sensor cable connector (with the sensor +5 mm along +z_eoat: the 5.0 mm
+                                                        # dust plate between the sensor and the bracket, 2026-10-12)
+        - [0.030, -0.037, 0.005, 0.201, 0.037, 0.152]    # sensor housing outer box (the CAD's far end is chamfered; dust plate +5 mm)
+      tool_body_mesh: package://eoat_description/meshes/eoat_base_link_dustplate_torch180.STL   # only when the robot model has no
+                                           # collision geometry on the flange: our EOAT CAD with the 5.0 mm dust plate and the torch turned
+                                           # 180 deg in its clamp (KIRO's setup, URDF v2 r4; eoat frame)
+      torch_protrusion_m: 0.1934           # only when the weld torch is not on this arm: the torch tip keypoint beyond the optical origin
+                                           # along +z_eoat = the farthest torch point = the wire end at the template's stick-out (TCP +
+                                           # (nozzle end 1.2 + stick-out 20) mm along the torch axis: eoat z 0.3155) - the calibrated
+                                           # optical origin (eoat z 0.1221); its (x, y) = the job's torch_lateral_m
+
+    # ---- 1G sensing run ----
+    auto_teach:
+      dwell_frames: 50                     # frames per dwell grab (column-wise median)
+      max_passes: 3                        # scan pass budget (the same algorithm value as the Hongik lab)
+      # [T8]
+      wrist2_branch_3g: any
+      wrist2_branch_1g: any                # arm configuration for 1G (neg | pos | any) - see [T8]
+      accept_inferred_end: false
+      max_corrections: 3
+      first_frame_timeout_s: 2.0           # sensor start -> first frame wait; none = the leg is not sent (REFUSED)
+
+    # ---- profiler ----
+    sensor:
+      # [T9]
+      ip: '192.168.3.15'                   # factory IP; the PC needs an interface in 192.168.3.x
+      port: 1096
+      frame_id: profiler_optical_frame
+      init_params:                         # sent with ID 43 after an ID 44 backup; restored at the end of a run
+        DataMode: 4
+        TransferAllPos_MM: 1
+        EthernetPackNr: 1
+        EthernetSendNoWait: 1
+        TriggerMode: -1                    # internal auto trigger
+        AutoTriggerFPS: 150.0              # the 1G run sets the job's profile_fps
+        AutoTriggerError: 0
+        ExposureMode: 0                    # fixed exposure (auto exposure loses the signal after the first frame)
+        ShutterTime: 100                   # us
+        GainVal: 250                       # 300 gives ghost points at near-normal incidence, 200 loses the bevel face
+        AutoShutterMin: 5
+        AutoShutterMax: 100
+        ROI_X_PIX: 0
+        ROI_Y_PIX: 0
+        ROI_DX_PIX: 1408
+        ROI_DY_PIX: 1080
+        LaserMode: 1
+        LaserSelect: 0
+        TriggerDelayNs: 0
+      points_expected: 1408
+      z_valid_mm: [233.1, 544.0]           # valid window of the sensor (near, far)
+      ghost_burst_frames: 2                # longest run of ghost-point frames (measured) - dwell median and end identification
+      column_monotonic_k: 5.0
+      quickack: false
+      data_wait_ms: 1000
+      param_poll_hz: 1.0
+
+    # ---- time model (t_acq,k = a_lo + T_est * k, k = sensor result counter) ----
+    time_model:
+      mode: warmup_fixed
+      fps_nominal: 150.0
+      warmup_s: 60.0
+      min_span_s: 25.0
+      min_frames: 2500
+      residual_percentile_lo: 5.0
+      latency_dt_s: 0.0

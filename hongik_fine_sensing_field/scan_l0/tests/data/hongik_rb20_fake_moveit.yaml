@@ -1,0 +1,217 @@
+# Test platform of the virtual arm (scan_l0/tests/sim_arm.py, robot-free 1G simulations) and of the development fake-MoveIt
+# end-to-end check (dev/kiro_e2e: the Hongik lab RB20-1900ES-U MoveIt config + mock hardware + JTC, the same communication pattern
+# as KIRO). Same keys as hongik_scan_ros/config/hongik_kiro.yaml, RB20 values (link0 / tcp / mainpulation / joint_trajectory_controller).
+# No real robot, no real sensor.
+
+/**:
+  ros__parameters:
+    platform: hongik_rb20_fake_moveit
+    pose_source: ros_tf
+    motion_backend: moveit_jtc
+    use_sim_time: false
+
+    base_frame: link0
+    flange_frame: tcp                      # rbpodo SRDF 그룹 mainpulation 의 끝 링크 (플랜지면)
+    eoat_frame: eoat_base_link             # eoat_description rb20_1900es_u_eoat.xacro (eoat_yaw = 캘리브 파일)
+    laser_frame: laser_link
+    tool_frame: hongik_profiler_optical_frame
+    torch_frame: torch_tcp                 # 이 팔에 달린 우리 토치의 TCP (URDF EOAT: CAD 컨택트 팁 끝, 공칭) — 용접 계획의 토치 모형
+                                           # weld_torch 의 tcp_frame 과 같다 (2026-10-12: 용접 토치 = 우리 1차 브라켓 토치)
+    world_frame: world
+    gravity:
+      frame: world                         # world → link0 정적 TF (항등)
+      axis: [0.0, 0.0, -1.0]
+
+    joint_names: []
+    planning_group: mainpulation           # rbpodo_moveit_config SRDF 오타 그대로
+    progression_sign: 1
+
+    # ---- MoveIt 어댑터: MoveIt move_group + JTC (hongik_scan_ros.moveit_adapter) ----
+    moveit_jtc:
+      move_group_name: mainpulation         # MoveIt 계획 그룹 (eef = flange_frame)
+      cartesian_path_service: /compute_cartesian_path   # move_group 서비스 (직선 경로)
+      fk_service: /compute_fk              # move_group 서비스 (직선 대조)
+      jtc_action: /joint_trajectory_controller/follow_joint_trajectory
+      controller_name: joint_trajectory_controller
+      controller_state_topic: /joint_trajectory_controller/controller_state   # 지령 위치·속도 (액션 취소의 감속 정지; control_msgs/JointTrajectoryControllerState)
+      joint_states_topic: /joint_states
+      trajectory_execution_event_topic: /trajectory_execution_event   # 정지 시 "stop" (MoveIt 실행 관리자)
+      robot_description_topic: /robot_description   # URDF: base → flange 체인 (조밀 직선 IK)
+      cartesian_step_m: 0.002               # 직선 보간 간격 (MoveIt max_step)
+      jump_threshold: 0.0                  # MoveIt 상대 점프 검사 (0 = 끔; 대신 max_joint_step_rad 절대 검사)
+      max_joint_step_rad: 0.05             # 이웃 웨이포인트 사이 관절 변화 상한 (형상 뒤집힘 거부)
+      min_fraction: 0.999                  # Cartesian 경로 비율이 이 미만이면 거부 (부분 직선 실행 금지)
+      avoid_collisions: true               # MoveIt 플래닝 씬 충돌 검사 (우리 포락선에 더해)
+      rotation_radius_m: 0.2               # 순수 회전 이동의 등가 길이 반경 (속도 = v / r rad/s)
+      path_check_tol_m: 0.0005             # 같은 프레임의 두 출처 허용: 세션 시작 FK ↔ TF (같은 스탬프), 정적 TF ↔ URDF, 계획 시작 FK ↔ 자세
+      path_on_moveit_tol_rad: 0.02         # 조밀 IK 경로 ↔ move_group 이 검사한 경로 점 (같은 IK 분기)
+      goal_pose_tol_m: 0.001               # 끝점·도착 실측 허용 (위치)
+      goal_pose_tol_deg: 0.2               # 끝점·도착 실측 허용 (자세)
+      prepared_start_tol_mm: 0.1           # 미리 한 계획 (센서 녹화 전) 을 그대로 보낼 수 있는 플랜지 이동 상한 (넘으면 다시 계획)
+      prepared_start_tol_deg: 0.05         # 같은 (자세)
+      limits:                              # 필수: 없으면 시작 거부 (CB 스피드바·충돌감지가 없는 백엔드의 선언 한계)
+        max_tcp_speed_mps: 0.06
+        max_tcp_accel_mps2: 0.3
+        max_joint_velocity_rad_s: 1.0
+        max_joint_accel_rad_s2: 2.0
+      stop_decel_tcp_mps2: 0.2             # 래치 정지: 지금 지령 위치·속도에서 이 감속도로 경로를 따라 멈춘다 (TCP·관절 중 느린 쪽;
+      stop_decel_joint_rad_s2: 2.0         # 2026-10-03 at15 — 취소는 늦은 실측 자세로 지령이 튀어 '외부 충돌 의심'). 30 mm/s → 0.15 s·2.3 mm
+      goal_time_margin_s: 5.0              # 궤적 시간 + 이 여유 (타임아웃은 1.5 × 궤적 + 여유)
+      tf_timeout_s: 0.5                    # 정적 TF (World←base 등) 를 처음 읽을 때 기다리는 기본 상한 — 자세 샘플은 TF 를 쓰지 않는다 (FK)
+      history_s: 600.0                     # 자세 이력 보관 (재구성)
+
+    # ---- 스캔 기본값 (플랫폼 공통; 중력만 TF 유도) ----
+    scan_defaults:
+      standoff_m: 0.32                     # 광축 교차(~0.337) 근방, 교정범위 0.233~0.544 내
+      speed_mps: 0.03                      # 순항 30 mm/s @ 100 fps -> 0.3 mm 간격
+      accel_mps2: 0.2
+      profile_fps: 100.0
+      lead_in_m: 0.04
+      lead_out_m: 0.04
+      pitch_deg: -5.0                      # 라인 축 둘레 피치 (정반사 -12 deg 회피). 부호는 P1 에서 ±5 deg 비교로 확정
+      incidence_tilt_deg: 0.0              # 입사 기울기 기본 0 (1G). 3G 작업파일은 +10 (센서가 심 점을 내려다봄, 광학 원점이 심 점 위 standoff·sin(tilt)).
+                                           # 라인축 둘레 회전이되 광학 Z 가 심 점을 계속 향함(원점이 standoff 호 위 이동). − = 올려다봄(3G 바닥 위반 가능). |tilt| ≤ 25
+      bidirectional: false
+      table_z_m: null                      # base_frame 기준 테이블 상면 z [m]. null = 미지정 (스캔 요청/티칭에서 채움)
+      specimen_top_z_m: null               # base_frame 기준 시편 상면 z [m]. null = 미지정
+      # ---- R4 방향·기준점 규칙 (scan_core.types.ScanJob 동명 필드) ----
+      gravity_axis_base: null              # MoveIt 어댑터: 손으로 적지 않는다 — gravity.frame/axis 에서 TF 로 유도 (서버가 목표마다)
+      vertical_direction: down             # 3G(시편 세움) 진행 방향: down = 위 점→아래 점(리드인은 위쪽에만, 리드아웃 없음) | up = 아래→위(리드인 없음)
+      reference_point: optical             # 높이·transit·3G 바닥 규칙의 기준점 = profiler_optical_frame 원점 (플랜지 중심 아님)
+      direction_tol_deg: 20.0               # 1G: 진행방향 ⟂ 중력, 3G: 진행방향 ∥ 중력 허용 편차 (위반 시 ScanJob JobError)
+      check_torch_tip: true                # 토치 팁을 추가 키포인트로 검사 (시편 상단·transit 규칙, '(torch keypoint)' 메시지)
+
+    # ---- KIRO 형식 용접 계획 (out_dir/kiro/pass_<k>.yaml = KIRO xy_endpoint_review_v1 직선 + pass_<k>_info.yaml 공유용 정보 (명령 아님);
+    #      scan_core.kiro_plan) 사용자 승인 2026-10-12. 프레임 사슬은 여기서만 (코드에 수 없음). 쓰는 자세의 TCP·끝 틀 = 아래 weld_torch.
+    kiro_output:                           # ('reference' 자세 정책·reference_dir 은 없앴다, 2026-10-12: 폐기된 KIRO 로그 프레임에 기댄다)
+      enabled: true
+      world_frame: World                   # KIRO 의 세계 프레임 (로그 tcp_tracking.parent_frame=World) = pass_<k>.yaml frame_id
+      world_from_tf: false                 # true = 실행 때 TF 에 World <- base 가 있으면 그것으로 덮어쓴다 (선택; 아무것도 TF 에 기대지 않는다)
+      world_from_base:                     # World <- 실행 때 MoveIt 에서 읽은 계획 프레임 (팔 base; 이름은 설정하지 않는다). 계획 프레임이
+                                           # World 면 항등 (이 값은 안 쓴다). 고정값: KIRO 몸통·베이스는 움직이지 않는다 (사용자 2026-10-12)
+        xyz_m: [-0.24982842514061013, -0.49970893784963016, 1.330424871627074]   # KIRO 로그 맞춤 (-249.83, -499.71, 1330.42) mm
+        quat_xyzw: [-6.094245571196422e-05, 3.808556282163003e-07, 0.00012641046925126396, 0.9999999901531326]   # 맞춤 회전 0.016 deg (KIRO 자세 0.09 mm 재현)
+        source: "FK fit World <- link0 of KIRO's 26 logged poses (1.log-4.log), our RB20-1900ES-U chain: position rms 0.048 mm (max 0.089), rotation rms 0.004 deg; KIRO's torso and base do not move (user 2026-10-12) - fsv1_work/kiro_dataset/fk_fit_world_link0_ee.json"
+        status: fixed (KIRO torso and base do not move)
+
+    # ---- 용접 계획의 토치 모형 = 우리 1차 브라켓 토치 (사용자·KIRO 합의 2026-10-12: KIRO 에 달린 것도 같은 브라켓·토치·센서·RB20 팔) ----
+    #      모든 패스의 TCP 위치·토치 자세 (weld_plan.* 의 TCP 자세, kiro/pass_<k>.yaml·info, 액션 결과 paths, precision_sensing.npz) 를
+    #      이 토치 TCP 로 낸다 (scan_core.weld_torch). TCP = 토치 팁 끝 중심 = CAD 컨택트 팁 끝 (KIRO 답 2026-10-12 밤: KIRO 의 TCP 는
+    #      토치 팁 끝, 와이어 끝이 아니다; eoat.xacro torch_tcp) — 공칭값. 내는 TCP 자세 = 비드 겨냥점 (와이어 끝) − (토치의 노즐 끝 +
+    #      공정 와이어 돌출 job weld_plan.stick_out_mm) · z_TCP — 돌출 = 가스 노즐 끝 → 와이어 끝 (사용자 2026-10-13), 노즐 끝 = TCP 에서
+    #      토치 축으로 잰 가스 노즐 끝 (이 팔의 토치: 이 로봇 URDF 충돌 형상에서 유도, scan_core.weld_clearance.nozzle_end_mm — CAD
+    #      1.2 mm; 설정 값이 아니다); 액션 결과 paths 는 겨냥점 (와이어 끝) 선 그대로 (KIRO WeldingPath 정의). TCP 롤 (0 / 180°)
+    #      은 계획이 D14 로 고른다. D14 (용접 계획 도달성) 는 이 토치가 이 팔에 있을 때 (on_this_arm) 이 토치로.
+    weld_torch:
+      tcp_frame: torch_tcp                    # 가짜 팔 = 연구실 URDF (eoat.xacro torch_tcp: CAD 컨택트 팁 끝)
+      tip_in_tcp:                          # TCP 축 ← 계획의 끝 틀 [x 진행, y = z × x, z 토치 축 (공작물 쪽)] 의 축만 (항등: +z = 노즐 축,
+        axes:                              # x = 굽힘 면 안 = 진행 — TCP 롤 0°; 계획이 D14 로 0 / 180° 를 고른다, WeldPlan.torch_roll_deg).
+          x: [1.0, 0.0, 0.0]               # 끝 (비드 겨냥점 = 와이어 끝) 의 위치 = TCP 에서 토치 축으로 노즐 끝 + 공정의 와이어 돌출 (job
+          y: [0.0, 1.0, 0.0]               # weld_plan.stick_out_mm, 노즐 끝에서; KIRO 실행기는 돌출을 적용하지 않는다 — 사용자 2026-10-12 밤)
+          z: [0.0, 0.0, 1.0]               # → 내는 TCP 자세 = 겨냥점 − (노즐 끝 + 돌출) · z_TCP. CAD 의 와이어 토막 (20 mm) 은 계획 값이 아니다
+        source: "our torch's TCP frame (eoat.xacro torch_tcp): +z = the nozzle axis toward the work, x in the bend plane = the plan's travel x (roll 0); the tip offset along +z = the torch's nozzle end (derived from the robot's URDF collision geometry) + the process stick-out measured from the nozzle end (job weld_plan.stick_out_mm)"
+        status: axes of our torch's TCP (CAD); the stick-out (nozzle end -> wire end) is a process input
+      flange_frame: tcp                   # flange_from_tcp 의 기준 = 이 팔의 MoveIt flange_frame (rbpodo tcp = link6 + 0.13 m)
+      flange_from_tcp:                     # flange (rbpodo tcp = link6 + 0.13 m) <- the torch TCP: (-0.45, +237.86, +297.17) mm, rpy (0, -30,
+                                           # -90) deg - the URDF chain tcp -> eoat_base_link (eoat_yaw) -> torch_clamp_link (the torch turned
+                                           # 180 deg in its clamp, 2026-10-13) -> weld_link -> torch_tcp (eoat.xacro). A RECORD: the run takes
+                                           # this frame from the robot model (TF) and refuses when this record differs (MoveIt adapter
+                                           # weld_torch_model); a change of the tool is made in the URDF / xacro, then here
+        xyz_m: [-0.0004521202956022036, 0.2378568670647345, 0.2971720033278718]
+        quat_xyzw: [-0.18301248324233174, -0.18301239077290107, -0.6830127434898018, 0.6830128022457533]
+        source: "lab EOAT CAD with the torch turned 180 deg in its clamp (eoat_base_link_dustplate_torch180, make_torch_turned_mesh.py; the lab torch re-mounted like KIRO's September setup, user 2026-10-13) through the URDF chain tcp -> eoat_base_link (eoat_yaw -90 deg) -> torch_clamp_link -> weld_link -> torch_tcp (eoat.xacro); = KIRO's URDF v2 r4 flange <- TCP"
+        status: nominal (CAD contact-tip end); KIRO's calibration sets the final TCP
+      on_this_arm: true                   # 연구실과 같이 이 토치가 이 팔에 있다 → D14 가 이 토치로 (TF 의 tcp ← torch_tcp).
+                                           # 일반 기제 (false: D14 없이 납품 + 기록) 는 시험이 이 값을 false 로 바꿔 본다
+      source: "our 1st-bracket torch (user + KIRO agreement 2026-10-12: the bracket at KIRO is our 1st bracket - same bracket, torch, VC nano 3D-Z and RB20 arm as the lab EOAT; KIRO's URDF 2nd bracket and chiseling gun were never manufactured)"
+      status: nominal TCP = the CAD contact-tip end of our torch (KIRO's TCP = the torch tip end, KIRO 2026-10-12); the plan's tip (bead aim point) = the wire end, the nozzle end (the contact-tip end is recessed inside the gas nozzle) + the process stick-out (job weld_plan.stick_out_mm, from the nozzle end) further along the torch axis
+
+    specimen:
+      source: job_file                     # GrooveSpec 은 job YAML 의 specimen 블록 (플랫폼 무관; 목표의 설계값이 덮어쓴다)
+      default_job: groove_10T_1G
+      qc_targets_source: job_file
+
+    # ---- 안전 봉투 (플랫폼 무관 부분; CB 전용 R1 충돌감지·R2 스피드바 키는 이 백엔드에 없다 — moveit_jtc.limits 가 대신한다) ----
+    judgement:                             # 판정의 통계 배수 k 하나 (사용자 2026-10-07 결정): 잡음 기반 판정 = k × 데이터에서 잰 σ
+      k: 3.0                               # (하한 = 센서 양자화 dX(z)/√12); 그 밖의 판정 기준은 설계·센서 모형·용접 경로 단면에서 유도
+    safety:
+      clearance_m: 0.05                    # 정책 (사용자 2026-10-07, 유일한 명시 안전값): 모든 툴 점 ↔ 모든 면 (판·지지면·테이블·MoveIt 장면)
+                                           # 최소 여유. 정지 거리 (속도 상한·센서 주기·지연·정지 감속도) 는 자동으로 더해진다 (scan_l0.safety)
+      max_laser_tilt_deg: 40.0             # 센서 Z 와 판 법선 사이 최대 각 (2026-10-05 30 → 40: 3G 입사 ≤ 35° + 패스 피치 5°)
+      tool_body_mesh: package://eoat_description/meshes/eoat_base_link_dustplate_torch180.STL   # 툴 몸체 (EOAT 메시 껍질): 테이블 규칙이 센서 하우징·
+                                           # 토치 몸체의 가장 낮은 점도 본다 (3G 토치 위 자세에서 카메라 끝이 원점보다 ~175 mm 아래)
+      tool_body_boxes:                     # 메시에 없는 부품 (eoat 프레임 [xmin, ymin, zmin, xmax, ymax, zmax] m): 센서 케이블 커넥터 —
+        - [0.165, -0.016, -0.006, 0.200, 0.016, 0.054]   # 센싱면 반대쪽 (뒷면 z 0.054) 먼 끝에서 뒤로 ~60 mm (사용자 2026-10-06; 먼지판 5 mm
+                                                    # 로 센서와 함께 +z 5 mm, 2026-10-12 — 예전 [.., -0.011, .., 0.049])
+        - [0.030, -0.037, 0.005, 0.201, 0.037, 0.152]    # 센서 하우징 외곽 상자 — 메시의 먼 끝은 모따기라 실제보다 ~2 cm 덜 내려온다
+                                                    # (먼지판 5 mm 로 센서와 함께 +z 5 mm, 2026-10-12 — 예전 z [0.000, 0.147])
+                                                    # (2026-10-06 g3_09 정지 자세: 자로 테이블까지 ~50 mm, 메시 85 mm, 상자 63 mm)
+      torch_protrusion_m: 0.1924           # (fallback: the MoveIt adapter takes the torch keypoint from the robot model - the wire end at the
+                                           # job's stick-out; the torch turned in its clamp (2026-10-13) turns about z_eoat, so the height
+                                           # is the CAD one and its (x, y) moves - the job's torch_lateral_m)
+                                           # 토치 팁 키포인트의 광학 원점 너머 +z_eoat 거리 = 토치의 가장 먼 점 = 와이어 끝 (torch_tcp +
+                                           # weld_torch.tip_in_tcp: eoat z 0.3145) − 캘리브 광학 원점 (eoat_lab_01, eoat z 0.1221) — 팁 (x, y) 는
+                                           # 작업 파일 torch_lateral_m.
+                                           # 같은 EOAT. 예전 0.168 은 CAD 창면 (0.147) 기준이라 10-06 광축 원점 −25 mm 뒤 팁이 24.5 mm 짧았다
+
+    # ---- 적응형 심 자동 티칭 (플랫폼 공통 값) ----
+    auto_teach:
+      # 거리·측면 탐색은 설정이 아니라 유도 (scan_l0.sensor_view, 2026-10-07): 거친 단계 = 센서 창 먼 쪽 (z_valid 상한 − 도착 허용
+      # − 그루브 깊이/cos 기울기, 시야 최대), 패스 = 그루브 깊이 가운데가 광축 교차 거리 (337 mm), 탐색 간격 = FOV(거리) − 개구 (시편 폭 안)
+      dwell_frames: 50                     # 드웰당 프레임 수 (0.5 s @ 100 Hz, 열별 nanmedian)
+      max_passes: 4                        # 스트리밍 패스 최대 수 (패스 1 = E→S, 이후 지그재그 S→E, E→S …; 충실도 게이트 PASS 에서 종료)
+      wrist2_branch_3g: any                  # 3G 손목 형태 강제 (neg|pos; any = 검사 안 함). 2026-10-07 사용자: 음수 선호는 일단 빼고 손목 형태는
+                                               # 도달성으로 고른다 — 정확도를 보고 필요하면 neg 로 강제 (2026-10-06: g3_24/25 + ↔ g3_13/17 − 심 3–4 mm)
+      wrist2_branch_1g: any                  # 1G 손목 형태 = 캘리브를 만든 팔 형태 집합 (neg|pos; any = 제한 없음). P7 이 정한다
+      accept_inferred_end: false           # 판 위 물체가 끝을 가리면 ('end_occluded') 추정 끝 (다른 끝 ± 설계 길이) 을 받아들일지 (기본: 받지 않음)
+      # 판 끝 식별 (scan_core.localize.identify_seam_ends) 은 설정이 아니다 (2026-10-07 4b): 판마다 잰 상면 모형·k·σ, 루트·바닥 σ,
+      # 설계 갭, 용접 단면 창, 끝 구역 지연, 유령점 버스트 (sensor.ghost_burst_frames), 추출기 최소 판 길이에서 유도.
+      # RANSAC 인라이어도 k × 이 패스의 LMedS 척도 (예전 plate_plane_ransac_thr_m).
+      max_corrections: 3                   # 드웰당 상대 보정 반복 예산 (보정은 잰 만큼 — 스텝·누적 상한 없음, 2026-10-07; 수렴하면 그 전에 멈춘다)
+      first_frame_timeout_s: 2.0           # 센서 시작 → 첫 프레임 대기 (실기 수백 ms). 없으면 그 구간을 보내지 않고 REFUSED 'sensor did not start'
+
+    # ---- 프로파일러 ----
+    sensor:
+      ip: '127.0.0.1'                      # 시험: FakeSensor (vc3dz_driver.fake_sensor) — 포트는 launch 인자                   # 공장 기본 IP (2026-09-30 확인). PC 에 192.168.3.x 대역 두 번째 인터페이스 필요
+                                           # (로봇 CB 는 192.168.0.50 → 서로 다른 NIC/VLAN). 구 문서의 192.168.0.19 는 폐기
+      port: 1096
+      frame_id: profiler_optical_frame
+      init_params:                         # 설계서 §3.3 (ID 43 로 전송, 전송 전 ID 44 로 백업)
+        DataMode: 4
+        TransferAllPos_MM: 1               # 전열 전송(고정 열 인덱스), 무효점 x·z NaN — 펌웨어 1.9.7 실기 확인(2026-09-30)
+        EthernetPackNr: 1
+        EthernetSendNoWait: 1
+        TriggerMode: -1                    # 내부 자동트리거 (P0~P3). P4 HW 마커: +1 또는 -2
+        AutoTriggerFPS: 100.0
+        AutoTriggerError: 0
+        ExposureMode: 0                    # 고정 노출. 자동노출(1)은 실기에서 첫 프레임 후 신호 소실(2026-09-30) → 사용 금지
+        ShutterTime: 100                   # µs, 레이저 펄스 상한(초과 시 레이저 OFF)
+        GainVal: 250                       # 2026-10-01 실기: 300 → 거의 수직 입사에서 판 앞 유령점(G4 거짓 정지), 250 → 유령 0·유효 99.8 %·
+                                           # 베벨면 보임, 200 → 베벨면 소실. 자세·거리별로 teach-live 로 재확인 (vc3dz_driver.params 주석)
+        AutoShutterMin: 5                  # (자동노출 모드용 참고값)
+        AutoShutterMax: 100
+        ROI_X_PIX: 0
+        ROI_Y_PIX: 0
+        ROI_DX_PIX: 1408
+        ROI_DY_PIX: 1080
+        LaserMode: 1
+        LaserSelect: 0
+        TriggerDelayNs: 0
+      points_expected: 1408                # 경고용. 실제 점 수는 서브헤더 NumberOfPoints (1408 하드코딩 금지)
+      z_valid_mm: [233.1, 544.0]           # 유효 마스크: isfinite(x) & isfinite(z) & (z > 0) & (233.1 < z < 544.0)
+      ghost_burst_frames: 2                # 유령점 최대 연속 프레임 (2026-10-01 실측, 게인 300·거의 수직 입사: 500 프레임 중 1 프레임 50 회·2 프레임 50 회)
+                                           # → 가드 확인 프레임 = 이 값 + 1 (정지 거리의 반응 시간에 들어간다)
+      column_monotonic_k: 5.0              # |dx| > k * dX(z) -> 반사 후보
+      quickack: false                      # 실측 fps 가 ~25 에 묶이면 true (TCP_QUICKACK)
+      data_wait_ms: 1000                   # 글로벌 헤더 data_wait_ms (SmartShape 값)
+      param_poll_hz: 1.0                   # 스캔 중 ID 44 주기 판독 (AutoTriggerError 감시)
+
+    # ---- 시간 모델 (t_acq,k = a_lo + T_est * k, k = sensor_result_counter) ----
+    time_model:
+      mode: warmup_fixed                   # warmup_fixed (온라인, 워밍업 후 고정) | full_span (후처리 전구간 재고정)
+      fps_nominal: 100.0
+      warmup_s: 60.0                       # 워밍업 회귀 시간폭 (고정 후 T_est, a_lo 동결)
+      min_span_s: 25.0                     # 회귀 최소 시간폭
+      min_frames: 2500                     # 회귀 최소 프레임 수 (scan_core CounterClock 기본값과 동일)
+      residual_percentile_lo: 5.0          # a_lo = 잔차 5 백분위 (하한 포락선)
+      latency_dt_s: 0.0                    # P3 캘리브 후 calib 파일 dt_s 로 덮어씀

@@ -1,0 +1,131 @@
+{
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan",
+  "export_folder": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-161232_saved_iopj_truth",
+  "reference_set_id": "20261015-161231-818284_22cb4992",
+  "capture_snapshot": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth",
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-161231-818284_22cb4992_before_four_pass_references",
+  "relative_model": "measured_layout",
+  "root_anchor_pass": 1,
+  "relative_from_root_mm": {
+    "2": {
+      "along": -0.20434074792718626,
+      "lateral_toward_square_face": 4.0070352362591795,
+      "height": 4.141680813102547
+    },
+    "3": {
+      "along": -0.1463707948807771,
+      "lateral_toward_square_face": 0.8353017070119528,
+      "height": 8.798897027691869
+    },
+    "4": {
+      "along": -0.15406368206362378,
+      "lateral_toward_square_face": 0.8246971573356895,
+      "height": 8.795681277511662
+    }
+  },
+  "truth_checks_at_measurement_attitudes": [
+    {
+      "pass": 1,
+      "end": "start",
+      "error_mm": 1.734723475976807e-15,
+      "reference_tcp_world_m": [
+        -0.0036486691055347686,
+        -1.7267368104431282,
+        0.5860772996186825
+      ],
+      "target_tcp_world_m": [
+        -0.003648669105534767,
+        -1.7267368104431282,
+        0.5860772996186825
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "start",
+      "error_mm": 0.0,
+      "reference_tcp_world_m": [
+        0.0003417903846854031,
+        -1.7267498604999478,
+        0.5902381552481115
+      ],
+      "target_tcp_world_m": [
+        0.0003417903846854031,
+        -1.7267498604999478,
+        0.5902381552481115
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "error_mm": 0.0,
+      "reference_tcp_world_m": [
+        -0.002854013358379523,
+        -1.7267499874707868,
+        0.594879887759239
+      ],
+      "target_tcp_world_m": [
+        -0.002854013358379523,
+        -1.7267499874707868,
+        0.594879887759239
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "start",
+      "error_mm": 0.0,
+      "reference_tcp_world_m": [
+        -0.002864071287473638,
+        -1.7267419345985824,
+        0.5948769001135013
+      ],
+      "target_tcp_world_m": [
+        -0.002864071287473638,
+        -1.7267419345985824,
+        0.5948769001135013
+      ]
+    }
+  ],
+  "inferred_ends": {
+    "1": [
+      "goal"
+    ],
+    "2": [
+      "goal"
+    ],
+    "3": [
+      "goal"
+    ],
+    "4": [
+      "goal"
+    ]
+  },
+  "welding_attitudes_unchanged": true,
+  "p3_p4_coincident_confirmed_by_user": true,
+  "robot_motion_executed": false,
+  "unchanged_source_sha256": {
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/pass_orientations.yaml": "f97dd75207f5c961f40fda23861dd0a1c96dc8c0284dbf2ea7fc9c0044b5ecf7",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/wire_tip_offset.yaml": "7a793f1c79120291ddef103e14598233c96c16a6d29e89c4c4166bb0ae0fc6f2",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/estimate.json": "1c933eb6aedf6425441b5f996cfd36c7926333da3038a90731ff710c9bca6056",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/calib_used.json": "39f8b81373f9da4429bfe446e352ccbfe79c9b07c90e8bbee043c2fa1b537f36",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1_info.yaml": "c62257e07ddcecc5e3f2c41c43cc2a69f1f976200bafcc2d6f5ac53e6ec80d09",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2_info.yaml": "2ae7855d0c741038391178a963606da100be38866657b55c834f9b6d3a36f2f0",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2.yaml": "e756fa33404438a5cfb9c403aa9765329fdb7ad7ada60e4aada5324ed5cb7fb2",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3_info.yaml": "cf782c9d031fb262f719c2d4fd379f78814a8f66727ecf0b4a26cb3059802348",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3.yaml": "c9bddd62242d9f7925c782c5294d1ea987f62d940cb28a5feb134c7e190fa606",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4_info.yaml": "ebeb292c921ec155d15f984474fe0f487bd9fe7d48586845b18c4706e7ab93e2",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4.yaml": "3398aafb497161e459885ba02981e053e1a84004b88230ff1867d613ab6c3fc1",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1.yaml": "15bb729777b32ce192b2321088a5f859f8999362a338fddfa3b3cc90c46478ff",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml": "aaf8066d572d7a95bd6f8456f7b57ce3475618b1d1f25d75bdaf826941fc0e5a",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml": "ddc34d5c07417e532a4898e1f72a98f56b4b0f5f368e85fd1b4375b35597c6f7",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml": "bdd07a61e4148c69342245d2d94826c3bab15132ea36b0204a47b0ece85bcfdf",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml": "b6ff9dedba3ea3c37f9268e6376bdc1e3d38c626245f6252d1fccb9fbb15e57e"
+  },
+  "tests_passed": 120,
+  "native_controller_load": "PASS",
+  "exported_wire_tip_errors_mm": [
+    1.734723475976807e-15,
+    0.0,
+    0.0,
+    0.0
+  ]
+}

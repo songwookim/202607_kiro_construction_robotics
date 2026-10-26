@@ -1,0 +1,31 @@
+{
+  "server_pid": 805131,
+  "launch_pid": 805082,
+  "status": "adapter=moveit_jtc base_frame=World running=False goal= phase=idle pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=",
+  "post_weld_action_servers": 1,
+  "action_server_entries": [
+    [
+      "/hongik_fine_sensing/hongik_auto_teach_server",
+      [
+        "hongik_scan_msgs/action/PostWeldScan"
+      ]
+    ]
+  ],
+  "runner_source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/scan_l0/scan_l0/post_weld.py",
+  "runner_sha256": "ca3704f90d4458f69f459a5bcdfb9b38b4872e9f3860efff375be3a235da6861",
+  "post_weld_goal_fields": [
+    "run_dir",
+    "measure_speed_mps",
+    "confirm_mode",
+    "dry_run",
+    "after_pass",
+    "direction"
+  ],
+  "config": "/home/irs/hongik/hongik_kiro.yaml",
+  "job": "/home/irs/hongik/job_kiro.yaml",
+  "calib": "/home/irs/ros2_ws/install/eoat_description/share/eoat_description/calib/eoat_kiro_01.yaml",
+  "out_root": "/home/irs/hongik/runs",
+  "kiro_confirm_mode": "none (unchanged)",
+  "tests_passed": 150,
+  "motion_goals_sent": 0
+}

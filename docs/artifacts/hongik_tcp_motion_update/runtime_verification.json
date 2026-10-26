@@ -1,0 +1,15 @@
+{
+  "server_pid": 611644,
+  "launch_pid": 611632,
+  "status": "adapter=moveit_jtc base_frame=World running=False goal= phase=idle pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=",
+  "autoteach_source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/scan_l0/scan_l0/autoteach.py",
+  "autoteach_sha256": "5e647e0ec02da2cc094335b13e2e12aec3c13e1acd5cdce24d912644257f140b",
+  "config": "/home/irs/hongik/hongik_kiro.yaml",
+  "job": "/home/irs/hongik/job_kiro.yaml",
+  "calib": "/home/irs/ros2_ws/install/eoat_description/share/eoat_description/calib/eoat_kiro_01.yaml",
+  "out_root": "/home/irs/hongik/runs",
+  "kiro_confirm_mode": "none (unchanged)",
+  "tests_passed": 138,
+  "motion_goals_sent": 0,
+  "get_planning_scene_available": true
+}

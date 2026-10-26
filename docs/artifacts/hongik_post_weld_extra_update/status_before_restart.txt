@@ -1,0 +1,1 @@
+adapter=moveit_jtc base_frame=World running=False goal= phase=setup pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=post-weld scan REFUSED: run 20261015-005527_kiro_1G, after pass 1 of 4, no line, 0 frames, 0.1 s in all -> /home/irs/hongik/runs/20261015-005527_kiro_1G/post_weld_scan_p1_20261015-031126 (auto-teach n

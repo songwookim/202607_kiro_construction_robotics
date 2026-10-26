@@ -68,6 +68,9 @@ class KeyboardServoBridge:
         self.references = {arm: None for arm in KEYBOARD_SERVO_ARMS}
         self.reference_changed_at = {arm: 0.0 for arm in KEYBOARD_SERVO_ARMS}
         self.twist_publishers = {}
+        # JTC references are only used while that arm is in keyboard
+        # teaching (see _watch_references).
+        self.state_subscriptions = {}
         self.start_clients = {}
         self.stop_clients = {}
         self.parameter_clients = {}
@@ -76,7 +79,7 @@ class KeyboardServoBridge:
             prefix = keyboard_jog_prefix(arm)
             controller = self.controller_names[arm]
             self.twist_publishers[arm] = node.create_publisher(
-                TwistStamped, f"{prefix}/delta_twist_cmds", 10
+                TwistStamped, f"{prefix}/delta_twist_cmds", 1
             )
             self.start_clients[arm] = node.create_client(Trigger, f"{prefix}/start")
             self.stop_clients[arm] = node.create_client(Trigger, f"{prefix}/stop")
@@ -88,12 +91,6 @@ class KeyboardServoBridge:
                 f"/{arm}_rbpodo_hardware/set_joint_position_controller_config",
             )
             node.create_subscription(
-                JointTrajectoryControllerState,
-                f"/{controller}/controller_state",
-                lambda message, arm=arm: self._controller_state(arm, message),
-                10,
-            )
-            node.create_subscription(
                 Int8,
                 f"{prefix}/status",
                 lambda message, arm=arm: self._jog_status(arm, message),
@@ -101,6 +98,8 @@ class KeyboardServoBridge:
             )
 
     def _controller_state(self, arm, message):
+        if arm not in self.__dict__.get("watched_arms", ()):
+            return
         positions = list(message.reference.positions) or list(
             message.desired.positions
         )
@@ -135,6 +134,28 @@ class KeyboardServoBridge:
             )
         )
 
+    def _watch_references(self, arm, enabled):
+        # The subscription is created on first use and never destroyed:
+        # destroying it from a worker thread while the GUI executor waits on
+        # it stalled that executor (every later service call timed out).
+        subscriptions = self.__dict__.setdefault("state_subscriptions", {})
+        watched = self.__dict__.setdefault("watched_arms", set())
+        if enabled:
+            watched.add(arm)
+            if arm not in subscriptions:
+                create = getattr(self.node, "create_subscription", None)
+                if create is not None:
+                    subscriptions[arm] = create(
+                        JointTrajectoryControllerState,
+                        f"/{self.controller_names[arm]}/controller_state",
+                        lambda message, arm=arm: self._controller_state(arm, message),
+                        1,
+                    )
+        elif arm in watched:
+            watched.discard(arm)
+            with self.lock:
+                self.references[arm] = None
+
     def enable(self, arm):
         """Switch the JTC to open-loop starts, then start the jog stream."""
         if not self.available(arm):
@@ -142,12 +163,15 @@ class KeyboardServoBridge:
                 f"{keyboard_jog_prefix(arm)} or "
                 f"/{self.controller_names[arm]} parameters unavailable"
             )
+        self._watch_references(arm, True)
         ok, message = self.set_open_loop(arm, True)
         if not ok:
+            self._watch_references(arm, False)
             return False, message
         ok, message = self._trigger(self.start_clients[arm], "jog start")
         if not ok:
             self.set_open_loop(arm, False)
+            self._watch_references(arm, False)
             return False, message
         # Lower RB lag is a comfort feature: keyboard teaching still works on
         # the welding profile if the hardware service is unavailable.
@@ -166,6 +190,7 @@ class KeyboardServoBridge:
         profile_ok, profile_message = self.set_servo_j_profile(
             arm, SERVO_J_WELDING_PROFILE
         )
+        self._watch_references(arm, False)
         return (
             stop_ok and loop_ok and profile_ok,
             f"{stop_message}; {loop_message}; {profile_message}",

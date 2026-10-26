@@ -1,0 +1,15 @@
+derived:
+  role: cap
+  estimator: kiro
+  frames:
+    tcp_frame: right_manipulator_ee_point
+    tcp_to_aim_point_mm: 21.200271
+    aim_point_World_m:
+      start:
+      - -0.012762945595327094
+      - -1.7536240863239148
+      - 0.5738104082493745
+      goal:
+      - -0.0011908849202735077
+      - -1.5535316153831193
+      - 0.5759441440287332

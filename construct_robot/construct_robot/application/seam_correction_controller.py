@@ -25,6 +25,7 @@ node callbacks and host-level overrides keep their entry points.
 """
 
 import copy
+from functools import partial
 import math
 import threading
 import time
@@ -944,7 +945,8 @@ class SeamCorrectionController:
                 for teaching_name, stored, corrected_tcp in updates
             )
             threading.Thread(
-                target=host.node.resolve_tcp_joint_states,
+                target=partial(host.node.resolve_tcp_joint_states,
+                               task_position=getattr(host, "welding_position", None)),
                 args=(ik_targets,),
                 daemon=True,
             ).start()

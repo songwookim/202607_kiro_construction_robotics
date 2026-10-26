@@ -1,0 +1,31 @@
+format_version: 1
+planning_group: right_manipulator
+joint_state:
+  names:
+  - right_manipulator_joint1
+  - right_manipulator_joint2
+  - right_manipulator_joint3
+  - right_manipulator_joint4
+  - right_manipulator_joint5
+  - right_manipulator_joint6
+  positions_rad:
+  - 5.325434282251044
+  - 1.0869886399917987
+  - 1.0405250010854041
+  - 5.833277264208216
+  - 0.6340846073731164
+  - -0.6990586140151339
+tcp_pose_world:
+  position_m:
+    x: 0.5760316314016799
+    y: -1.7886977034647087
+    z: 1.0266316678926954
+  orientation_xyzw:
+    x: 0.7257766864629405
+    y: -0.6878035874423316
+    z: -0.011336799405512075
+    w: -0.006775209780777253
+capture_provenance:
+  capture_source: restored_from_execution_log
+  source_log: weld_feedback/weld_feedback_20261023_155750_146.log
+  source_sha256: 0e8245aebb853c9e298036389fe000e79256f04de940b2b4a57a9da9ef10a98a

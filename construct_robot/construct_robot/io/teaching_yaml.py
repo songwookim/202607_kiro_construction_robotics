@@ -200,6 +200,7 @@ def read_pass_teaching_reference(path, expected_pass):
         "source_log": document.get("source_log"),
         "source_log_sha256": document.get("source_log_sha256"),
         "requires_ik": bool(document.get("requires_ik", False)),
+        "weave_geometry": copy.deepcopy(document.get("weave_geometry")),
         "correction_history": copy.deepcopy(
             document.get("correction_history", [])
             if isinstance(document.get("correction_history", []), list)

@@ -1,0 +1,16 @@
+{
+  "server_pid": 488136,
+  "launch_pid": 488123,
+  "status": "adapter=moveit_jtc base_frame=World running=False goal= phase=idle pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=",
+  "numeric": {
+    "numpy": "1.21.5",
+    "scipy": "1.8.0",
+    "source": "/usr/lib/python3/dist-packages"
+  },
+  "config": "/home/irs/hongik/hongik_kiro.yaml",
+  "job": "/home/irs/hongik/job_kiro.yaml",
+  "calib": "/home/irs/ros2_ws/install/eoat_description/share/eoat_description/calib/eoat_kiro_01.yaml",
+  "out_root": "/home/irs/hongik/runs",
+  "kiro_confirm_mode": "none (preserved from previous launch)",
+  "motion_goals_sent": 0
+}

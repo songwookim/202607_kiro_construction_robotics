@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "cli_orientation": "pass",
+      "goal_orientation": "pass",
+      "direction": ""
+    },
+    {
+      "cli_orientation": "pass",
+      "goal_orientation": "pass",
+      "direction": "S->E"
+    },
+    {
+      "cli_orientation": "pass",
+      "goal_orientation": "pass",
+      "direction": "E->S"
+    },
+    {
+      "cli_orientation": "least-rotation",
+      "goal_orientation": "least_rotation",
+      "direction": ""
+    },
+    {
+      "cli_orientation": "least-rotation",
+      "goal_orientation": "least_rotation",
+      "direction": "S->E"
+    },
+    {
+      "cli_orientation": "least-rotation",
+      "goal_orientation": "least_rotation",
+      "direction": "E->S"
+    }
+  ],
+  "message_source": "/home/irs/hongik_field_ws/install/hongik_scan_msgs/local/lib/python3.10/dist-packages/hongik_scan_msgs/action/_post_weld_scan.py",
+  "goals_sent": 0
+}

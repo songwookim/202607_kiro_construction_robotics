@@ -1,0 +1,57 @@
+entries:
+- position_m:
+    x: -0.013
+    y: -1.53
+    z: 0.59
+  orientation_xyzw:
+    x: 0.7
+    y: -0.631
+    z: 0.112
+    w: 0.314
+  pass: 1
+  label: goal
+  source: tf2_echo World right_manipulator_ee_point 2026-10-15 01:2x (mm)
+  saved: '2026-10-15T01:41:39'
+- position_m:
+    x: -0.022127043701487548
+    y: -1.7282129578592875
+    z: 0.5882043948908755
+  orientation_xyzw:
+    x: 0.707032925165845
+    y: -0.6262515313734835
+    z: 0.10745244648351737
+    w: 0.310431045368377
+  pass: 1
+  label: start
+  source: 'keyboard I capture 2026-10-15 00:5x on the Welding tab (file weld_start):
+    root corner end'
+  saved: '2026-10-15T00:54:36'
+- position_m:
+    x: -0.017198304052081788
+    y: -1.53012014378398
+    z: 0.575768577674274
+  orientation_xyzw:
+    x: -0.6614963746929083
+    y: 0.6828362829972952
+    z: -0.25616907869016253
+    w: -0.17474140898370885
+  pass: 2
+  label: goal
+  source: pasted P2 goal correct TCP (joint_state_timestamp 1791996666, P2 orientation)
+  saved: '2026-10-15T01:55:12'
+- position_m:
+    x: -0.01720155709047074
+    y: -1.529679763307345
+    z: 0.5926291112659666
+  orientation_xyzw:
+    x: 0.6846448742532973
+    y: -0.6608634851011342
+    z: 0.1855939829145968
+    w: 0.2451034959452174
+  pass: 4
+  label: goal
+  source: weld_end_state 01:53:29 = P4 goal correct TCP (P4 orientation)
+  saved: '2026-10-15T01:55:12'
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point

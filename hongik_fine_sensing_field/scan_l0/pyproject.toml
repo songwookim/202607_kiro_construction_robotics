@@ -1,0 +1,12 @@
+[build-system]
+# 메타데이터는 setup.py 에 둔다 (ROS 2 Humble / Ubuntu 22.04 의 setuptools 59.6 은 [project] 표를 모른다).
+requires = ["setuptools>=59", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

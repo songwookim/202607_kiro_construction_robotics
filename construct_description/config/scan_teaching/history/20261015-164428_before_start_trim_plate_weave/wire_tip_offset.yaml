@@ -1,0 +1,24 @@
+format_version: 1
+frame: right_manipulator_ee_point
+tip_tcp_m:
+- 0.0023230090626219723
+- -0.01883220873074798
+- 0.028879786983482533
+computed: '2026-10-15T06:35:22'
+samples: 7
+rms_mm: 1.596397598518737
+residuals_mm:
+- 2.1410957331242764
+- 1.791869166578276
+- 1.7647919536160146
+- 1.0405580097055946
+- 1.7169320842032214
+- 1.4372223036760545
+- 0.913014598074535
+spread_deg: 30.617217598947526
+point_world_m:
+- 0.002814252229203647
+- -1.5482559006461782
+- 0.5717872868642887
+note: used by the scan targets instead of Hongik's tcp_to_aim along the torch axis;
+  recompute the reference correction after changing it

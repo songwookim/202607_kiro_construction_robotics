@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>scan_l0</name>
+  <version>0.1.0</version>
+  <description>
+    Pure-Python (no ROS) groove sensing run for the VC nano 3D-Z profiler: the 1G core orchestration (teach_1g + compute worker),
+    motion planning with the envelope and the cell world, sensor session, job / calibration / platform config files. The robot
+    platform is the MoveIt adapter in hongik_scan_ros. Uses scan_core and vc3dz_driver.
+  </description>
+  <maintainer email="jm68112@gmail.com">DBCM Lab</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>scan_core</exec_depend>
+  <exec_depend>vc3dz_driver</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

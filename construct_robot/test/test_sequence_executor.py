@@ -429,3 +429,76 @@ def test_wire_feed_turns_off_when_wait_raises():
 def test_wire_feed_preflight_requires_hicomm():
     host, executor = make_host(hicomm_connected=False)
     assert executor.execution_preflight_error([{"type": "wire_feed"}], True) == "Connect Hi-COMM before wire feed"
+
+
+def test_fake_arc_completion_saves_record_and_marks_simulation():
+    host, executor = make_host(fake_arc=True)
+    steps = [{"type": "digital_weld", "command": "on", "settings": {},
+              "parallel_slot": 1, "execution_conditions": {"mode": "sequence"}},
+             named(2),
+             {"type": "digital_weld", "command": "off", "settings": {}, "parallel_slot": 3}]
+    run(executor, steps)
+    host._finish_weld_feedback_record.assert_any_call("completed")
+    for call in host._begin_weld_feedback_record.call_args_list:
+        assert call.args[1] == {"mode": "sequence", "fake_arc": True}
+    host.hicomm_client.clear_outputs.assert_not_called()
+    host.hicomm_client.inhibit_outputs.assert_not_called()
+
+
+def test_fake_arc_plan_never_opens_or_saves_execution_log():
+    host, executor = make_host(fake_arc=True)
+    run(executor, [named(1)], execute=False)
+    host._begin_weld_feedback_record.assert_not_called()
+    host._finish_weld_feedback_record.assert_not_called()
+
+
+def _early_preplan_fixture(stop_at_start=True):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from geometry_msgs.msg import Pose
+    from construct_robot.application.sequence_executor import SequenceExecutor
+    pose = Pose()
+    pose.orientation.w = 1.0
+    weld = {"type": "motion", "weld_scenario_id": "w1", "weld_scenario_stage": "weld_motion",
+            "planning_group": "right_manipulator", "points": [pose]}
+    contact = {"type": "motion", "weld_scenario_id": "w1", "weld_scenario_stage": "start_contact"}
+    arc = {"type": "digital_weld", "command": "on", "weld_scenario_id": "w1"}
+    node = Mock()
+    node.path_start_joints.return_value = (["j1"], [0.5])
+    node.run_sequence_cartesian_motion.return_value = (True, "planned")
+    node.joints_within.return_value = stop_at_start
+    host = SimpleNamespace(node=node, log=Mock(), post=lambda fn, *a: fn(*a))
+    return SequenceExecutor(host, touch_io_backend="x"), [contact, weld, arc], weld, node
+
+
+def test_early_weld_preplan_is_reused_when_robot_stops_at_planned_start():
+    executor, steps, weld, node = _early_preplan_fixture()
+    executor.start_early_weld_preplan(steps, steps[0])
+    assert executor.preplan_weld_motion(steps, steps[2]) is None
+    assert weld["reuse_approved_plan"] and weld["start_joint_positions"] == [0.5]
+    assert node.run_sequence_cartesian_motion.call_count == 1
+    planned = node.run_sequence_cartesian_motion.call_args
+    assert planned.args[1] is False and planned.kwargs["track_goal"] is False
+    assert planned.args[0]["start_joint_positions"] == [0.5]
+
+
+def test_early_weld_preplan_falls_back_to_current_state_plan():
+    executor, steps, weld, node = _early_preplan_fixture(stop_at_start=False)
+    executor.start_early_weld_preplan(steps, steps[0])
+    assert executor.preplan_weld_motion(steps, steps[2]) is None
+    assert node.run_sequence_cartesian_motion.call_count == 2
+    assert "start_joint_positions" not in weld
+    assert "start_joint_positions" not in node.run_sequence_cartesian_motion.call_args.args[0]
+
+
+def test_early_weld_preplan_starts_once_at_start_wait_seeded_with_its_joints():
+    executor, steps, weld, node = _early_preplan_fixture()
+    wait = {"type": "named_pose", "weld_scenario_id": "w1", "weld_scenario_stage": "start_wait",
+            "joint_names": ("j1",), "positions": (0.4,)}
+    steps.insert(0, wait)
+    executor.start_early_weld_preplan(steps, wait)
+    executor.start_early_weld_preplan(steps, steps[1])  # contact: already planning
+    assert executor.preplan_weld_motion(steps, steps[3]) is None
+    node.path_start_joints.assert_called_once_with(weld, {"j1": 0.4})
+    assert node.run_sequence_cartesian_motion.call_count == 1
+    assert weld["reuse_approved_plan"]

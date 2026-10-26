@@ -1,0 +1,33 @@
+# Python virtual environment for this package tree (tools, tests, `python3 -m ...` runs) - read by tools/make_venv.py.
+#
+# The ROS nodes (ros2 run / ros2 launch) do NOT use any venv: their installed entry scripts start with #!/usr/bin/python3, so the
+# server always runs with the system Python and the apt packages below (the delivery's build/test environment, MANIFEST.txt).
+# A venv only matters for what you run with its python. Build the workspace (colcon) with the venv OFF.
+#
+#   python3 tools/make_venv.py --profile system --dest ~/venv_hongik      # default profile: no pip, works offline
+#   python3 tools/make_venv.py --profile lab --dest ~/venv_hongik         # downloads the pinned wheels (pip needed)
+
+python: /usr/bin/python3                 # Ubuntu 22.04: Python 3.10
+system_site_packages: true               # rclpy and the ROS Python packages come from /opt/ros/humble (sourced ROS setup)
+
+requires:                                # checked after creation (the import must satisfy these)
+  python: ">=3.10,<3.11"
+  numpy: ">=1.21,<2"                     # numpy 2 is not supported (ROS Humble binary modules, this package untested)
+  scipy: ">=1.8"
+  yaml: ">=5.4"
+
+profiles:
+  system:                                # = MANIFEST.txt build environment: apt python3-numpy 1.21.5, python3-scipy 1.8.0, python3-yaml 5.4.1
+    system_links: [numpy, scipy, yaml]
+    pip: []                              # nothing installed over the system packages (same versions as the ROS nodes see)
+  pinned:                                # the same versions as the apt packages, installed inside the venv (system ones missing/broken)
+    pip: ["numpy==1.21.5", "scipy==1.8.0", "PyYAML==5.4.1", "pytest==6.2.5"]
+  lab:                                   # the Hongik lab development venv (2026-10-10 versions)
+    pip: ["numpy==1.26.4", "scipy==1.15.3", "pytest==7.4.4", "h5py==3.16.0"]
+
+packages:                                # pure-Python packages of this tree, made importable in the venv
+  - /home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/scan_core
+  - /home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/vc3dz_driver
+  - /home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/scan_l0
+link: pth                                # pth = add the source folders to the venv (editable, no build tools needed)
+                                         # pip = pip install --no-deps -e (needs setuptools + wheel in the venv)

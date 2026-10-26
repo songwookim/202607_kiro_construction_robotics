@@ -25,6 +25,22 @@ use_fake_head_hardware = LaunchConfiguration("use_fake_head_hardware")
 cb_simulation = LaunchConfiguration("cb_simulation")
 use_rviz = LaunchConfiguration("use_rviz")
 execute_motion = LaunchConfiguration("execute_motion")
+robot_model = LaunchConfiguration("robot_model")
+
+# robot_model -> (URDF xacro, SRDF) under construct_moveit_config/config.
+# hongik_v4 (Hongik EOAT: bracket + torch + VC nano 3D-Z) is the mounted tool.
+# kiro_legacy is the original 0528 model (2nd bracket + chisel gun, right D435);
+# teaching files saved with it do not match hongik_v4 TCP poses.
+ROBOT_MODEL_FILES = {
+    "hongik_v4": (
+        "config/construct_robot_0528_hongik_v4.urdf.xacro",
+        "config/construct_robot_0528_hongik_v4.srdf",
+    ),
+    "kiro_legacy": (
+        "config/construct_robot_0528.urdf.xacro",
+        "config/construct_robot_0528.srdf",
+    ),
+}
 
 
 def generate_launch_description():
@@ -70,6 +86,13 @@ def generate_launch_description():
             default_value="false",
             description="Use the RB Control Box simulation mode",
         ),
+        DeclareLaunchArgument(
+            "robot_model",
+            default_value="hongik_v4",
+            choices=list(ROBOT_MODEL_FILES),
+            description="Robot model: hongik_v4 (Hongik right-arm EOAT/TCP, default) "
+            "or kiro_legacy (original 0528 tool)",
+        ),
     ]
     return LaunchDescription(
         declared_arguments + [OpaqueFunction(function=launch_setup)]
@@ -83,6 +106,7 @@ def launch_setup(_context):
         "yes",
         "on",
     )
+    urdf_file, srdf_file = ROBOT_MODEL_FILES[robot_model.perform(_context)]
     mappings = {
         "left_robot_ip": left_robot_ip,
         "right_robot_ip": right_robot_ip,
@@ -99,11 +123,11 @@ def launch_setup(_context):
             package_name="construct_moveit_config",
         )
         .robot_description(
-            file_path="config/construct_robot_0528.urdf.xacro",
+            file_path=urdf_file,
             mappings=mappings,
         )
         .robot_description_semantic(
-            file_path="config/construct_robot_0528.srdf"
+            file_path=srdf_file
         )
         .planning_scene_monitor(
             publish_robot_description=True,

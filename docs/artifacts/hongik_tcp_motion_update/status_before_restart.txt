@@ -1,0 +1,1 @@
+adapter=moveit_jtc base_frame=World running=False goal= phase=acquire pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=auto-teach REFUSED: 0 pass(es), 0 moves, 0.3 s (category motion)

@@ -1,0 +1,423 @@
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point
+reference_set:
+  id: 20261015-161231-818284_22cb4992
+  source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan
+  relative_model: measured_layout
+  baseline_relative_model: design_layout
+  created: '2026-10-15T16:12:31'
+  backup: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-161231-818284_22cb4992_before_four_pass_references
+  baseline_correction:
+    format_version: 2
+    anchor_pass: 1
+    source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan
+    calib:
+      file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+      xyz:
+      - 0.039454
+      - 0.024934
+      - -0.100543
+      rpy:
+      - 3.11659954
+      - -0.02107031
+      - 1.57079633
+    computed: '2026-10-15T15:27:00'
+    compare_at: wire tip (aim point) = TCP + rotated TCP-frame wire-tip vector (or
+      L * torch axis); root position from the selected anchor; pass remainders compared
+      at TCP
+    wire_tip_model_m:
+    - 0.0023230090626219723
+    - -0.01883220873074798
+    - 0.028879786983482533
+    seam_frame:
+      u:
+      - -0.035960320692313405
+      - -0.9992762041494526
+      - -0.012406577141482125
+      w:
+      - 0.9993415450859962
+      - -0.03601713425099027
+      - 0.004386605234124237
+      n:
+      - -0.004830279581957818
+      - -0.01224066423882766
+      - 0.999913413520467
+    offsets_seam_m:
+      start:
+      - 0.0065096341628435046
+      - 0.011560149216404718
+      - -0.0013540857229933504
+      goal:
+      - 0.00801990014196366
+      - 0.01349731578444608
+      - -0.0016902626659177258
+    offsets_world_m:
+      start:
+      - 0.011324989459881063
+      - -0.006904711054250834
+      - -0.0013840209448218177
+      goal:
+      - 0.013208194670759935
+      - -0.008479540068386582
+      - -0.0017304084257355745
+    angle_convention: travel + push / - drag along the plan's travel; work + toward
+      the bevel face (Hongik / AWS A3.0)
+    reference_torch_angles_deg:
+      start:
+        travel: 36.255437774830824
+        work: 15.795085566333704
+      goal:
+        travel: 36.81218453534134
+        work: 16.094845535731928
+    hongik_root_torch_angles_deg:
+      travel: 41.77909858272883
+      work: 8.97179534778576
+    reference_orientation_xyzw:
+    - 0.707032925165845
+    - -0.6262515313734835
+    - 0.10745244648351737
+    - 0.310431045368377
+    reference_orientations_xyzw:
+      start:
+      - 0.707032925165845
+      - -0.6262515313734835
+      - 0.10745244648351737
+      - 0.310431045368377
+      goal:
+      - 0.7
+      - -0.631
+      - 0.112
+      - 0.314
+    matches:
+    - pass: 1
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.013
+      - -1.53
+      - 0.59
+      orientation_xyzw:
+      - 0.7
+      - -0.631
+      - 0.112
+      - 0.314
+      source: tf2_echo World right_manipulator_ee_point 2026-10-15 01:2x (mm)
+      saved: '2026-10-15T01:41:39'
+    - pass: 1
+      end: start
+      saved_as: start
+      position_m:
+      - -0.022127043701487548
+      - -1.7282129578592875
+      - 0.5882043948908755
+      orientation_xyzw:
+      - 0.707032925165845
+      - -0.6262515313734835
+      - 0.10745244648351737
+      - 0.310431045368377
+      source: 'keyboard I capture 2026-10-15 00:5x on the Welding tab (file weld_start):
+        root corner end'
+      saved: '2026-10-15T00:54:36'
+    - pass: 2
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.017198304052081788
+      - -1.53012014378398
+      - 0.579768577674274
+      orientation_xyzw:
+      - -0.6614963746929083
+      - 0.6828362829972952
+      - -0.25616907869016253
+      - -0.17474140898370885
+      source: P2 goal correct TCP (ts 1791996666) + 4 mm World Z (operator 2026-10-15
+        03:0x)
+      saved: '2026-10-15T01:55:12'
+    - pass: 2
+      end: start
+      saved_as: start
+      position_m:
+      - -0.02846129311177906
+      - -1.7278097371159558
+      - 0.5777540041342483
+      orientation_xyzw:
+      - -0.6614912109671243
+      - 0.6828406231471064
+      - -0.256169819003496
+      - -0.17474291122971214
+      source: 'operator 2026-10-15: P2 start = generated 113658 (hongik_aim) + World
+        X -2.5 mm (fits the specimen)'
+      saved: '2026-10-15T14:43:43'
+    - pass: 4
+      end: goal
+      saved_as: goal
+      position_m:
+      - -0.01720155709047074
+      - -1.529679763307345
+      - 0.5926291112659666
+      orientation_xyzw:
+      - 0.6846448742532973
+      - -0.6608634851011342
+      - 0.1855939829145968
+      - 0.2451034959452174
+      source: weld_end_state 01:53:29 = P4 goal correct TCP (P4 orientation)
+      saved: '2026-10-15T01:55:12'
+    notes: []
+    report:
+    - 'start: world (+11.3, -6.9, -1.4) mm = along +6.5 / lateral +11.6 / normal -1.4
+      mm, |13.3| mm'
+    - 'goal: world (+13.2, -8.5, -1.7) mm = along +8.0 / lateral +13.5 / normal -1.7
+      mm, |15.8| mm'
+    - 'goal - start: along +1.5 / lateral +1.9 / normal -0.3 mm (lateral / normal:
+      seam direction error; along: end position / length difference)'
+    - 'pass 2 goal: measured - predicted = along +0.1 / lateral +1.3 / normal -7.8
+      mm (measured_layout)'
+    - 'pass 2 start: measured - predicted = along +0.5 / lateral -0.0 / normal -7.9
+      mm (measured_layout)'
+    - 'pass 4 goal: measured - predicted = along -0.1 / lateral +1.7 / normal -3.7
+      mm (measured_layout)'
+    pass_deltas_seam_m:
+      design_layout:
+        '2':
+          goal:
+          - -6.860802760871069e-05
+          - 0.0037674611172492318
+          - -0.008216367092611369
+          start:
+          - 2.1322573925685524e-05
+          - 0.0015602572385943763
+          - -0.008092568691295227
+        '4':
+          goal:
+          - -0.0004558043077844585
+          - 0.0012157469452136365
+          - -0.004368610095299436
+      hongik_aim:
+        '2':
+          goal:
+          - -6.853790839958092e-05
+          - 0.0011224209312171237
+          - -0.007254765229925515
+          start:
+          - 2.1358353478006015e-05
+          - -0.0013759898313034577
+          - -0.0072425411354151235
+        '4':
+          goal:
+          - -0.00044682819857907275
+          - 0.0016152117822646685
+          - -0.005553431726592532
+      measured_layout:
+        '2':
+          goal:
+          - 0.00011812069447152582
+          - 0.0012640197760672954
+          - -0.007807054246827653
+          start:
+          - 0.0004680047482522825
+          - -4.583416380063756e-05
+          - -0.007902648840920807
+        '4':
+          goal:
+          - -5.06911548185196e-05
+          - 0.001706047503290422
+          - -0.0036579704106756315
+      hongik_tcp:
+        '2':
+          goal:
+          - -0.0002629523185552867
+          - 0.009056570540512844
+          - -0.006654946833137381
+          start:
+          - -0.00017305605667769982
+          - 0.0065581597779922635
+          - -0.0066427227386269905
+        '4':
+          goal:
+          - 0.00010150988216396309
+          - 0.0022117445079669618
+          - -0.005124727557430422
+  source_sha256:
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/estimate.json: 1c933eb6aedf6425441b5f996cfd36c7926333da3038a90731ff710c9bca6056
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1.yaml: 15bb729777b32ce192b2321088a5f859f8999362a338fddfa3b3cc90c46478ff
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_1_info.yaml: c62257e07ddcecc5e3f2c41c43cc2a69f1f976200bafcc2d6f5ac53e6ec80d09
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2.yaml: e756fa33404438a5cfb9c403aa9765329fdb7ad7ada60e4aada5324ed5cb7fb2
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_2_info.yaml: 2ae7855d0c741038391178a963606da100be38866657b55c834f9b6d3a36f2f0
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3.yaml: c9bddd62242d9f7925c782c5294d1ea987f62d940cb28a5feb134c7e190fa606
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_3_info.yaml: cf782c9d031fb262f719c2d4fd379f78814a8f66727ecf0b4a26cb3059802348
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4.yaml: 3398aafb497161e459885ba02981e053e1a84004b88230ff1867d613ab6c3fc1
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/kiro/pass_4_info.yaml: ebeb292c921ec155d15f984474fe0f487bd9fe7d48586845b18c4706e7ab93e2
+    /home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan/hongik_estimate/calib_used.json: 39f8b81373f9da4429bfe446e352ccbfe79c9b07c90e8bbee043c2fa1b537f36
+  capture_snapshot: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth
+  p3_p4_coincident_confirmed_by_user: true
+  endpoint_adjustments_world_m:
+    '2':
+      start:
+      - 0.0
+      - 0.0
+      - -0.002
+    '3':
+      start:
+      - 0.0
+      - 0.0
+      - -0.002
+  endpoint_adjustment_note: 'Operator 2026-10-15: P2/P3 START World Z -2 mm only;
+    GOAL truth to be supplied later.'
+entries:
+- position_m:
+    x: -0.0036486691055347686
+    y: -1.7267368104431282
+    z: 0.5860772996186825
+  orientation_xyzw:
+    x: 0.7006687038930904
+    y: -0.6305855897307476
+    z: 0.11226010841516047
+    w: 0.31436101772853425
+  pass: 1
+  label: start
+  source: Welding keyboard I captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml
+    (sha256 aaf8066d572d7a95bd6f8456f7b57ce3475618b1d1f25d75bdaf826941fc0e5a)
+  saved: '2026-10-15T15:51:41+09:00'
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.147261348473691
+    - 1.2706904293502108
+    - 1.6940426283538017
+    - 3.756005222359794
+    - 1.0162319119378105
+    - 1.1284744313466715
+  capture_provenance:
+    capture_source: measured_joint_fk
+    tcp_source: moveit_fk
+    joint_state_timestamp: 1792047101.9526513
+    joint_state_age_ms: 3.1084840011317283
+    tf_age_ms: 402.5087356567383
+    tf_fresh: false
+    tf_fk_position_error_mm: 0.0036033580863932078
+    tf_fk_orientation_error_deg: 0.0007808085579842218
+  imported_from: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_start_state.yaml
+- position_m:
+    x: 0.0003417903846854031
+    y: -1.7267498604999478
+    z: 0.5902381552481115
+  orientation_xyzw:
+    x: 0.7006450114501187
+    y: -0.630603545026744
+    z: 0.11228488569611796
+    w: 0.31436895739556947
+  pass: 2
+  label: start
+  source: Welding keyboard O captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml
+    (sha256 ddc34d5c07417e532a4898e1f72a98f56b4b0f5f368e85fd1b4375b35597c6f7)
+  saved: '2026-10-15T15:51:58+09:00'
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.150868333854094
+    - 1.2663315004360238
+    - 1.6954246758014981
+    - 3.760964028309522
+    - 1.0142232892646454
+    - 1.125884906660733
+  capture_provenance:
+    capture_source: measured_joint_fk
+    tcp_source: moveit_fk
+    joint_state_timestamp: 1792047118.5050576
+    joint_state_age_ms: 1.6825819911900908
+    tf_age_ms: 398.82731437683105
+    tf_fresh: false
+    tf_fk_position_error_mm: 6.2803698347351e-13
+    tf_fk_orientation_error_deg: 0.0
+  imported_from: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_start_wait_state.yaml
+- position_m:
+    x: -0.002854013358379523
+    y: -1.7267499874707868
+    z: 0.594879887759239
+  orientation_xyzw:
+    x: 0.7006482704177922
+    y: -0.6306079189292583
+    z: 0.11228357019943085
+    w: 0.31435338968673004
+  pass: 3
+  label: start
+  source: Welding keyboard P captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml
+    (sha256 bdd07a61e4148c69342245d2d94826c3bab15132ea36b0204a47b0ece85bcfdf)
+  saved: '2026-10-15T15:52:08+09:00'
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.147967618794779
+    - 1.260882806003776
+    - 1.7005239634987275
+    - 3.7579682383992914
+    - 1.0136081656318643
+    - 1.1261621417302101
+  capture_provenance:
+    capture_source: measured_joint_fk
+    tcp_source: moveit_fk
+    joint_state_timestamp: 1792047128.408711
+    joint_state_age_ms: 1.3392590044531971
+    tf_age_ms: 399.0356922149658
+    tf_fresh: false
+    tf_fk_position_error_mm: 0.005782885742741996
+    tf_fk_orientation_error_deg: 0.00031308241650691
+  imported_from: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_goal_wait_state.yaml
+- position_m:
+    x: -0.002864071287473638
+    y: -1.7267419345985824
+    z: 0.5948769001135013
+  orientation_xyzw:
+    x: 0.7006470420141544
+    y: -0.6306106907010626
+    z: 0.11227915565446801
+    w: 0.31435214409299905
+  pass: 4
+  label: start
+  source: Welding keyboard J captured from /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml
+    (sha256 b6ff9dedba3ea3c37f9268e6376bdc1e3d38c626245f6252d1fccb9fbb15e57e)
+  saved: '2026-10-15T15:52:13+09:00'
+  joint_state:
+    names:
+    - right_manipulator_joint1
+    - right_manipulator_joint2
+    - right_manipulator_joint3
+    - right_manipulator_joint4
+    - right_manipulator_joint5
+    - right_manipulator_joint6
+    positions_rad:
+    - 5.147963357737035
+    - 1.260882806003776
+    - 1.7005315535078342
+    - 3.7579719668248175
+    - 1.0136081656318643
+    - 1.1261621417302101
+  capture_provenance:
+    capture_source: measured_joint_fk
+    tcp_source: moveit_fk
+    joint_state_timestamp: 1792047133.088681
+    joint_state_age_ms: 2.7261360082775354
+    tf_age_ms: 404.451847076416
+    tf_fresh: false
+    tf_fk_position_error_mm: 6.674335893081556e-13
+    tf_fk_orientation_error_deg: 0.0
+  imported_from: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_end_state.yaml

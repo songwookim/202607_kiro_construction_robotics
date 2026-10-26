@@ -1,0 +1,32 @@
+{
+  "reason": "Backup of accidental keyboard captures (I/O/P/J/K/L) before restoring saved poses",
+  "original_capture_interval": "2026-10-23 19:20-19:21 Asia/Seoul",
+  "restored": [
+    {
+      "pose": "clear2_top",
+      "source": "git stash snapshot 32b2b28 (2026-10-23 19:07)"
+    },
+    {
+      "pose": "clear2_inside",
+      "source": "git stash snapshot 32b2b28 (2026-10-23 19:07)"
+    },
+    {
+      "pose": "clear3_top",
+      "source": "git stash snapshot 32b2b28 (2026-10-23 19:07)"
+    },
+    {
+      "pose": "clear3_inside",
+      "source": "git stash snapshot 32b2b28 (2026-10-23 19:07)"
+    },
+    {
+      "pose": "clear1_1",
+      "source": "weld_feedback/weld_feedback_20261023_155750_146.log",
+      "source_sha256": "0e8245aebb853c9e298036389fe000e79256f04de940b2b4a57a9da9ef10a98a"
+    },
+    {
+      "pose": "clear1_2",
+      "source": "weld_feedback/weld_feedback_20261023_155750_146.log",
+      "source_sha256": "0e8245aebb853c9e298036389fe000e79256f04de940b2b4a57a9da9ef10a98a"
+    }
+  ]
+}

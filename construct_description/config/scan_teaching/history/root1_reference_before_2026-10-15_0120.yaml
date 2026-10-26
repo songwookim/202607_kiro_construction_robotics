@@ -1,0 +1,32 @@
+entries:
+- position_m:
+    x: -0.01256986382607396
+    y: -1.530114248386943
+    z: 0.591054393395193
+  orientation_xyzw:
+    x: 0.7070707636207981
+    y: -0.626207779533733
+    z: 0.10741512580850139
+    w: 0.3104460385182557
+  pass: 1
+  label: goal
+  source: 'keyboard J capture 2026-10-15 00:5x on the Welding tab (file weld_end):
+    root corner end'
+  saved: '2026-10-15T00:54:36'
+- position_m:
+    x: -0.022127043701487548
+    y: -1.7282129578592875
+    z: 0.5882043948908755
+  orientation_xyzw:
+    x: 0.707032925165845
+    y: -0.6262515313734835
+    z: 0.10745244648351737
+    w: 0.310431045368377
+  pass: 1
+  label: start
+  source: 'keyboard I capture 2026-10-15 00:5x on the Welding tab (file weld_start):
+    root corner end'
+  saved: '2026-10-15T00:54:36'
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point

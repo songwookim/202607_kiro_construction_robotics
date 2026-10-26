@@ -1,0 +1,36 @@
+format_version: 1
+planning_group: right_manipulator
+joint_state:
+  names:
+  - right_manipulator_joint1
+  - right_manipulator_joint2
+  - right_manipulator_joint3
+  - right_manipulator_joint4
+  - right_manipulator_joint5
+  - right_manipulator_joint6
+  positions_rad:
+  - 5.123959221567715
+  - 1.2543254376097286
+  - 1.6743476199862841
+  - 3.7628434210907904
+  - 0.9041791427566175
+  - 1.0903679916780273
+tcp_pose_world:
+  position_m:
+    x: -0.014077920190379109
+    y: -1.7278580834465114
+    z: 0.5833335964988923
+  orientation_xyzw:
+    x: 0.712477851847943
+    y: -0.6353483013268317
+    z: 0.08717798270913897
+    w: 0.28479439242726756
+capture_provenance:
+  capture_source: measured_joint_fk
+  tcp_source: moveit_fk
+  joint_state_timestamp: 1792743396.2137623
+  joint_state_age_ms: 12.55869003944099
+  tf_age_ms: 20.63894271850586
+  tf_fresh: true
+  tf_fk_position_error_mm: 1.276831898851135e-12
+  tf_fk_orientation_error_deg: 0.0

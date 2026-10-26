@@ -1,0 +1,25 @@
+{
+  "source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field",
+  "patch_sha256": "15948e1eebcf531b2211d7ebb2863921a42b82b736dfa175f28b7330af748019",
+  "relay_sha256": "03696d6b207fcda9d26393e40e1b032456cb5e21d1766cb6c43f5402a566f015",
+  "files_after": {
+    "CHANGES_2026-10-14_kiro-1g-field.md": "b6eb6623717f4c3204e987ab31711539788435c516f7f7ee16959f3320a8e71a",
+    "hongik_scan_msgs/action/PostWeldScan.action": "14c4069746b362d49a04a03a36fda892a55c84c3d0809c3cadaa16aa83b7c610",
+    "hongik_scan_ros/hongik_scan_ros/auto_teach_server.py": "72639d1b9a05033880f3971435032b2406ff5f1c80b610c2f83bd648960cef9d",
+    "hongik_scan_ros/hongik_scan_ros/post_weld_client.py": "3496f2e0c0a4da058d13c52a3ea900ed9fd0365c3b1f58052ca49f799212d36b",
+    "scan_l0/scan_l0/post_weld.py": "ca3704f90d4458f69f459a5bcdfb9b38b4872e9f3860efff375be3a235da6861",
+    "scan_l0/scan_l0/teach_1g.py": "cf44cd35f642e1f42d923e0aed14cbb28d117062911aee55473f5b62a1ebd1fb",
+    "scan_l0/tests/test_sim_post_weld.py": "318c53e118814b5a749c08ba29ed2c296c7739f06185ff9a08d0d02d08db16c7"
+  },
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/docs/artifacts/hongik_post_weld_update/before_post_weld.tar.gz",
+  "gui_files_after": {
+    "construct_robot/construct_robot/gui/precision_sensing_test_panel.py": "9a3c394a38536c432012a8c47229ab391cf5d3b5df81e23e79d66de6493b5c2a",
+    "construct_robot/construct_robot/nodes/precision_sensing_test.py": "236b31b0cbdb11534e8bfdb4b2cf222a53ee99766d6c9324edc3db9891363052",
+    "construct_robot/test/test_scanner_scan_task.py": "5a527394b20b3e861f7759bae203607fd1a7a3b8aade305b43801736b584cef5"
+  },
+  "pytest6_test_fix": {
+    "file": "scan_l0/tests/test_sim_post_weld.py",
+    "sha256": "17abdf00333bb50cae909ee041cfaec2f94fabe02f560953817185527059b777",
+    "reason": "pytest 6 dict-of-lists approx does not recurse; compare each envelope field with the same tolerances"
+  }
+}

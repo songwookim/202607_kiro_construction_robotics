@@ -54,6 +54,19 @@ def _active(sample):
     )
 
 
+def _speed_stats(values, durations):
+    result = _stats(values)
+    if durations:
+        total = sum(durations)
+        average = sum(value * duration for value, duration in zip(values, durations)) / total
+        result["average"] = average
+        result["std"] = math.sqrt(sum(
+            duration * (value - average) ** 2
+            for value, duration in zip(values, durations)
+        ) / total)
+    return result
+
+
 def _xyz(sample):
     return tuple(_number(sample.get(key)) for key in ("x_m", "y_m", "z_m"))
 
@@ -300,6 +313,90 @@ def _contiguous_dwell(tcp, peak_row):
     return detail
 
 
+def _local_quadratic(times, values, centre, half_window):
+    """(value, slope, 2*curvature) of a least-squares quadratic around centre (None when too few points)."""
+    pts = [(t - centre, v) for t, v in zip(times, values) if abs(t - centre) <= half_window]
+    if len(pts) < 5:
+        return None
+    s = [sum(x ** k for x, _ in pts) for k in range(5)]
+    r = [sum(v * x ** k for x, v in pts) for k in range(3)]
+    m = [[s[0], s[1], s[2]], [s[1], s[2], s[3]], [s[2], s[3], s[4]]]
+
+    def det(a):
+        return (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+    d = det(m)
+    if abs(d) < 1e-18:
+        return None
+    coef = []
+    for col in range(3):
+        mc = [row[:] for row in m]
+        for i in range(3):
+            mc[i][col] = r[i]
+        coef.append(det(mc) / d)
+    return coef[0], coef[1], 2.0 * coef[2]
+
+
+def tcp_motion_profile(document, step_s=0.05, window_s=1.0):
+    """Seam-axis position / speed / acceleration of the measured TCP over the weld motion.
+
+    Time = the TF stamp of each sample (repeated stamps = stale TF, dropped), smoothed by a local quadratic over
+    window_s. Returns {"rows": [(t, along_mm, speed_mm_s, acc_mm_s2)], "summary": {...}} or None."""
+    production = document.get("production_metrics", {}) or {}
+    start = _number(production.get("weld_motion_start_elapsed_s"))
+    end = _number(production.get("weld_motion_complete_elapsed_s"))
+    requested = _number((document.get("execution_conditions", {}) or {}).get("weld_tcp_speed_mm_s"))
+    raw = []
+    for row in document.get("tcp_trajectory", ()):
+        elapsed, stamp, along = (_number(row.get(k)) for k in ("elapsed_s", "tf_stamp_s", "along_mm"))
+        if elapsed is not None and stamp is not None and along is not None:
+            raw.append((stamp, elapsed, along))
+    if start is None or end is None or len(raw) < 10:
+        return None
+    raw.sort()
+    first_stamp, first_elapsed = raw[0][0], raw[0][1]
+    times, alongs, last = [], [], None
+    for stamp, _elapsed, along in raw:
+        if stamp == last:
+            continue
+        last = stamp
+        times.append(stamp - first_stamp + first_elapsed)
+        alongs.append(along)
+    half = window_s / 2.0
+    rows = []
+    t = max(times[0] + half, start - 0.5)
+    while t <= min(times[-1] - half, end + 0.5):
+        fit = _local_quadratic(times, alongs, t, half)
+        if fit is not None:
+            rows.append((round(t, 3), fit[0], fit[1], fit[2]))
+        t += step_s
+    if not rows:
+        return None
+    speeds = [r[2] for r in rows if start <= r[0] <= end]
+    peak = max(speeds) if speeds else 0.0
+    cruise = [r for r in rows if start <= r[0] <= end and r[2] >= 0.8 * peak]
+    moving = next((r[0] for r in rows if r[0] >= start and r[2] > 0.1 * (requested or peak)), None)
+    at90 = next((r[0] for r in rows if r[0] >= start and r[2] >= 0.9 * (requested or peak)), None)
+    summary = {"time_base": "tf_stamp", "smoothing_window_s": window_s, "requested_mm_s": requested,
+               "start_delay_s": None if moving is None else moving - start,
+               "ramp_to_90pct_s": None if moving is None or at90 is None else at90 - moving}
+    if len(cruise) >= 3:
+        cs = [r[2] for r in cruise]
+        ca = [abs(r[3]) for r in cruise]
+        n = len(cruise)
+        tm = sum(r[0] for r in cruise) / n
+        vm = sum(cs) / n
+        slope = (sum((r[0] - tm) * (r[2] - vm) for r in cruise) / max(1e-12, sum((r[0] - tm) ** 2 for r in cruise)))
+        span = cruise[-1][0] - cruise[0][0]
+        summary.update(cruise_start_s=cruise[0][0], cruise_end_s=cruise[-1][0], cruise_speed_mean_mm_s=vm,
+                       cruise_speed_min_mm_s=min(cs), cruise_speed_max_mm_s=max(cs),
+                       cruise_speed_drift_percent=100.0 * slope * span / vm if vm > 1e-9 else None,
+                       cruise_acc_mean_mm_s2=sum(r[3] for r in cruise) / n,
+                       cruise_acc_abs_p95_mm_s2=sorted(ca)[min(n - 1, int(0.95 * n))],
+                       cruise_speed_error_percent=(100.0 * (vm - requested) / requested if requested else None))
+    return {"rows": rows, "summary": summary}
+
+
 def analyze_weld_quality(document):
     """Augment a live or reconstructed report without changing any commands."""
     samples = sorted(document.get("samples", ()), key=lambda row: float(row.get("elapsed_s", 0.0)))
@@ -396,10 +493,19 @@ def analyze_weld_quality(document):
 
     seam_speed = []
     tcp_speed = []
+    seam_durations = []
+    tcp_durations = []
     seam_alongs = []
     for first, second in zip(tcp, tcp[1:]):
         t0, t1 = float(first["elapsed_s"]), float(second["elapsed_s"])
-        dt = t1-t0
+        stamp0 = _number(first.get("tf_stamp_s"))
+        stamp1 = _number(second.get("tf_stamp_s"))
+        if stamp0 is None and stamp1 is None:
+            dt = t1-t0
+        elif stamp0 is None or stamp1 is None:
+            continue
+        else:
+            dt = stamp1-stamp0
         if not 1e-4 < dt <= MAX_TCP_INTERVAL_S:
             continue
         if motion_start is not None and t0 < motion_start:
@@ -407,12 +513,14 @@ def analyze_weld_quality(document):
         if motion_end is not None and t1 > motion_end:
             continue
         a, b = _number(first.get("along_mm")), _number(second.get("along_mm"))
-        if a is not None and b is not None and b >= a:
+        if a is not None and b is not None:
             seam_speed.append((b-a)/dt)
+            seam_durations.append(dt)
             seam_alongs.extend((a, b))
         distance = _distance_mm(first, second)
         if distance is not None:
             tcp_speed.append(distance/dt)
+            tcp_durations.append(dt)
     seam_length = (max(seam_alongs)-min(seam_alongs)) if seam_alongs else None
 
     # Signed offset needs a known weave axis and a taught seam segment.  The
@@ -866,11 +974,12 @@ def analyze_weld_quality(document):
         "timeline": events,
         "motion": {
             "requested_seam_speed_mm_s": _number(conditions.get("weld_tcp_speed_mm_s")),
-            "actual_seam_speed": _stats(seam_speed),
-            "actual_tcp_path_speed": _stats(tcp_speed),
+            "actual_seam_speed": _speed_stats(seam_speed, seam_durations),
+            "actual_tcp_path_speed": _speed_stats(tcp_speed, tcp_durations),
             "actual_seam_length_mm": seam_length,
             "final_endpoint_error_mm": endpoint_error,
             "final_remaining_mm": final_remaining,
+            "profile": (tcp_motion_profile(document) or {}).get("summary"),
         },
         "weave": weave,
         "production": {

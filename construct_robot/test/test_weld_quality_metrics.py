@@ -26,6 +26,34 @@ def _tcp(t, along, x, y=0.0):
     }
 
 
+def test_motion_speed_uses_tf_clock_not_callback_jitter():
+    rows = [_tcp(0.0, 0.0, 0.0), _tcp(0.001, 0.5, 0.0005),
+            _tcp(0.15, 1.0, 0.001)]
+    for row, stamp in zip(rows, (100.0, 100.1, 100.2)):
+        row["tf_stamp_s"] = stamp
+    motion = analyze_weld_quality({"tcp_trajectory": rows})["motion"]
+    assert motion["actual_seam_speed"]["average"] == pytest.approx(5.0)
+    assert motion["actual_tcp_path_speed"]["max"] == pytest.approx(5.0)
+
+
+def test_motion_speed_weights_time_and_includes_reverse_progress():
+    rows = [_tcp(0.0, 0.0, 0.0), _tcp(0.1, 1.0, 0.001),
+            _tcp(0.3, 0.5, 0.0005)]
+    motion = analyze_weld_quality({"tcp_trajectory": rows})["motion"]
+    assert motion["actual_seam_speed"]["average"] == pytest.approx(0.5 / 0.3)
+    assert motion["actual_seam_speed"]["min"] == pytest.approx(-2.5)
+    assert motion["actual_tcp_path_speed"]["average"] == pytest.approx(1.5 / 0.3)
+
+
+@pytest.mark.parametrize("stamps", [(100.0, 100.0), (100.1, 100.0), (100.0, None)])
+def test_motion_speed_rejects_stale_reversed_or_mixed_tf_clock(stamps):
+    rows = [_tcp(0.0, 0.0, 0.0), _tcp(0.1, 1.0, 0.001)]
+    for row, stamp in zip(rows, stamps):
+        row["tf_stamp_s"] = stamp
+    motion = analyze_weld_quality({"tcp_trajectory": rows})["motion"]
+    assert motion["actual_tcp_path_speed"]["average"] is None
+
+
 def test_software_crater_requires_feedback_plateau_not_native_state2():
     samples = [_sample(t, 66, 25, state=1) for t in (1.0, 1.1, 1.2, 1.3, 1.4, 1.5)]
     samples.append(_sample(1.6, 0, 0, state=0, wcr=False))

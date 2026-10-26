@@ -791,8 +791,6 @@ def wide_sensing_path_poses(
 
 WEAVE_REFERENCES = ("touch_pair", "bisector", "manual")
 TOUCH_PAIR_MIN_SEPARATION_M = 0.0005
-
-
 def touch_pair_weave_direction(touches, d_real, orientation_reference=None):
     """Weave across the joint: from each endpoint's wall touch to its floor touch.
 

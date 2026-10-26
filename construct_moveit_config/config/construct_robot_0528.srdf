@@ -3,6 +3,8 @@
     This is a format for representing semantic information about the robot structure.
     A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
 -->
+<!-- LEGACY (robot_model:=kiro_legacy): original 0528 right-arm tool. The default model is
+     construct_robot_0528_hongik_v4 (urdf.xacro / srdf). -->
 <robot name="construct_robot_0528">
     <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
     <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
@@ -15,12 +17,15 @@
     <group name="right_manipulator">
         <chain base_link="right_manipulator_base_link" tip_link="right_manipulator_ee_point"/>
     </group>
-    <!-- <group name="left_tool">
+    <group name="left_tool">
         <link name="left_manipulator_ee_point"/>
     </group>
     <group name="right_tool">
         <link name="right_manipulator_ee_point"/>
-    </group> -->
+    </group>
+    <group name="head_tool">
+        <link name="robot_head_rev_link1"/>
+    </group>
     <group name="robot_head">
         <joint name="robot_head_rev_joint1"/>
         <joint name="robot_head_rev_joint2"/>

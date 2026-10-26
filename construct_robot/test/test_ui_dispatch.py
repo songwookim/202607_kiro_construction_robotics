@@ -33,6 +33,32 @@ def test_ros_ui_bridge_is_rescheduled_even_if_dispatch_fails(monkeypatch):
     gui.root.after.assert_called_once_with(10, gui.check_ros)
 
 
+def test_telemetry_budget_preserves_pending_updates_and_uses_the_newest(monkeypatch):
+    gui = object.__new__(weld_action_gui.WeldActionGui)
+    gui.root = SimpleNamespace(report_callback_exception=Mock())
+    gui._ui_queue = queue.Queue()
+    gui._latest_ui_updates_lock = threading.Lock()
+    gui._latest_ui_updates = {}
+    clock = [0.0]
+    received = []
+    monkeypatch.setattr(weld_action_gui.time, "monotonic", lambda: clock[0])
+
+    def slow_render(value):
+        received.append(value)
+        clock[0] += 0.003
+
+    gui.post_latest("first", slow_render, "first")
+    gui.post_latest("second", slow_render, "old")
+    gui._drain_ui_queue()
+    assert received == ["first"]
+    assert "second" in gui._latest_ui_updates
+    gui.post_latest("second", slow_render, "new")
+    gui.post(received.append, "key release")
+    gui._drain_ui_queue()
+    assert received == ["first", "key release", "new"]
+    assert not gui._latest_ui_updates
+
+
 def test_stop_sends_cancel_and_controller_stop_before_feedback_save(monkeypatch):
     order = []
     gui = object.__new__(weld_action_gui.WeldActionGui)

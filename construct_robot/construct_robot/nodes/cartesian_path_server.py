@@ -1,12 +1,14 @@
 import copy
 import math
+import time
 import threading
 
 import rclpy
 from geometry_msgs.msg import Point, Pose, PoseArray
 from moveit_msgs.action import ExecuteTrajectory
-from moveit_msgs.msg import DisplayTrajectory
+from moveit_msgs.msg import DisplayTrajectory, RobotState
 from moveit_msgs.srv import GetCartesianPath
+from rcl_interfaces.srv import GetParameters
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -16,17 +18,27 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from construct_msgs.action import CartesianPath
 from construct_robot.nodes.action_call import ActionCall, wait_for_future
+from construct_robot.nodes.robot_model import (
+    PATH_DEVIATION_LIMIT_MM,
+    PATH_ORIENTATION_LIMIT_DEG,
+    describe_fidelity,
+    fetch_robot_description,
+    planning_frame_chain,
+    verify_path_fidelity,
+)
 from construct_robot.core.cartesian_path_common import (
     PLANNING_GROUP_TIPS,
     cartesian_path_length,
     pose_is_valid,
     retime_trajectory_constant_velocity,
+    tcp_progress,
     scale_trajectory_speed,
     scale_trajectory_to_tcp_speed,
     slerp_quaternion,
     tip_link_for_group,
     trajectory_duration_seconds,
 )
+from construct_robot.core.trajectory_limits import limit_trajectory_derivatives
 
 
 PLANNING_TIMEOUT = 30.0
@@ -176,6 +188,11 @@ class CartesianPathActionServer(Node):
         self.declare_parameter("use_moveit", False)
         self.declare_parameter("execute_motion", True)
         self.declare_parameter("planning_frame", "World")
+        # Every complete plan is checked against the requested Cartesian path
+        # (see construct_robot.core.path_fidelity); disable only to diagnose.
+        self.declare_parameter("path_fidelity_check", True)
+        self.declare_parameter("path_deviation_limit_mm", PATH_DEVIATION_LIMIT_MM)
+        self.declare_parameter("path_orientation_limit_deg", PATH_ORIENTATION_LIMIT_DEG)
         self._approved_plan_lock = threading.Lock()
         self._approved_plan_signature = None
         self._approved_plan_response = None
@@ -220,6 +237,114 @@ class CartesianPathActionServer(Node):
             f"(use_moveit={self.get_parameter('use_moveit').value}, "
             f"execute_motion={self.get_parameter('execute_motion').value})"
         )
+
+    def _robot_description(self):
+        """URDF of the running robot_state_publisher, cached once read."""
+        urdf = self.__dict__.get("_robot_description_xml")
+        if not urdf:
+            urdf = fetch_robot_description(self, callback_group=ReentrantCallbackGroup())
+            self.__dict__["_robot_description_xml"] = urdf
+        return urdf
+
+    def _arm_chain(self, planning_group):
+        """Cached KDL chain from the active robot_state_publisher URDF."""
+        chains = self.__dict__.setdefault("_arm_chains", {})
+        if planning_group in chains:
+            return chains[planning_group]
+        try:
+            from construct_robot.core.keyboard_jog_kinematics import ArmChain
+            urdf = CartesianPathActionServer._robot_description(self)
+            arm = planning_group.split("_")[0]
+            chain = ArmChain(urdf, f"{arm}_manipulator_base_link", tip_link_for_group(planning_group))
+        except Exception as error:
+            raise RuntimeError(f"Cannot verify constant TCP speed: {error}") from error
+        chains[planning_group] = chain
+        return chain
+
+    def _world_chain(self, planning_group):
+        """Cached chain planning frame -> TCP for checking plans in the request frame."""
+        chains = self.__dict__.setdefault("_world_chains", {})
+        if planning_group not in chains:
+            try:
+                chains[planning_group] = planning_frame_chain(
+                    CartesianPathActionServer._robot_description(self),
+                    self.get_parameter("planning_frame").value,
+                    planning_group,
+                )
+            except Exception as error:
+                raise RuntimeError(f"Cannot verify the planned TCP path: {error}") from error
+        return chains[planning_group]
+
+    def _verify_path_fidelity(self, planning_group, waypoints, solution):
+        """Commanded TCP vs requested path; refuses IK branch changes."""
+        if not self.get_parameter("path_fidelity_check").value:
+            return None
+        return verify_path_fidelity(
+            self._world_chain(planning_group),
+            waypoints,
+            solution,
+            self.get_parameter("path_deviation_limit_mm").value,
+            self.get_parameter("path_orientation_limit_deg").value,
+        )
+
+    def _joint_motion_limits(self, planning_group):
+        """Read enabled v/a/jerk limits from the active MoveIt configuration."""
+        cached = self.__dict__.setdefault("_joint_motion_limits_cache", {})
+        if planning_group in cached:
+            return cached[planning_group]
+        chain = self._arm_chain(planning_group)
+        fields = (("velocity", "max_velocity"), ("acceleration", "max_acceleration"),
+                  ("jerk", "max_jerk"))
+        parameter_names = [
+            f"robot_description_planning.joint_limits.{name}.{field}"
+            for name in chain.joint_names
+            for derivative, maximum in fields
+            for field in (f"has_{derivative}_limits", maximum)
+        ]
+        client = self.create_client(GetParameters, "/move_group/get_parameters",
+                                    callback_group=ReentrantCallbackGroup())
+        try:
+            if not client.wait_for_service(timeout_sec=2.0):
+                raise RuntimeError("move_group joint limit parameters unavailable")
+            reply = self._wait_for_future(
+                client.call_async(GetParameters.Request(names=parameter_names)),
+                5.0, "joint derivative limits",
+            )
+        finally:
+            self.destroy_client(client)
+        if reply is None or len(reply.values) != len(parameter_names):
+            raise RuntimeError("Incomplete MoveIt joint derivative limits")
+        limits = {}
+        values = iter(reply.values)
+        for name, urdf_speed in zip(chain.joint_names, chain.velocity_limits):
+            limits[name] = {}
+            for derivative, _maximum in fields:
+                enabled, value = next(values), next(values)
+                maximum = value.double_value if value.type == 3 else value.integer_value
+                if (enabled.type != 1 or not enabled.bool_value or value.type not in (2, 3)
+                        or not math.isfinite(maximum) or maximum <= 0.0):
+                    raise RuntimeError(f"Constant-speed planning needs an enabled, positive {name} {derivative} limit")
+                limits[name][derivative] = float(maximum)
+            if not math.isfinite(urdf_speed) or urdf_speed <= 0.0:
+                raise RuntimeError(f"Invalid URDF velocity limit for {name}")
+            limits[name]["velocity"] = min(limits[name]["velocity"], float(urdf_speed))
+        cached[planning_group] = limits
+        return limits
+
+    def _retime_constant_tcp_speed(self, planning_group, trajectory, ramp, target_speed):
+        """Return the retimed copy, uniform slowdown and actual ramp duration."""
+        chain = self._arm_chain(planning_group)
+        try:
+            candidate = copy.deepcopy(trajectory)
+            progress = tcp_progress(candidate, lambda q: tuple(chain.fk(q)[0]), chain.joint_names)
+            retime_trajectory_constant_velocity(
+                candidate, ramp_duration_s=ramp, progress=progress, target_speed=target_speed,
+            )
+            stretch = limit_trajectory_derivatives(candidate, self._joint_motion_limits(planning_group))
+        except (ValueError, IndexError) as error:
+            raise RuntimeError(f"Constant TCP speed retiming rejected: {error}") from error
+        effective_ramp = min(ramp, progress[-1] / target_speed) * stretch
+        return candidate, stretch, effective_ramp
 
     def publish_weld_markers(self, waypoints, visible=True):
         frame = self.get_parameter("planning_frame").value
@@ -283,14 +408,23 @@ class CartesianPathActionServer(Node):
             scale_trajectory_speed(response.solution, request.velocity_scale)
 
         if request.linear_motion_profile:
-            retime_trajectory_constant_velocity(
-                response.solution,
-                ramp_duration_s=(
-                    LINEAR_TCP_RAMP_DURATION_S
-                    if request.tcp_speed_m_s > 0.0
-                    else None
-                ),
-            )
+            ramp = LINEAR_TCP_RAMP_DURATION_S if request.tcp_speed_m_s > 0.0 else None
+            if request.tcp_speed_m_s > 0.0:
+                response.solution, stretch, ramp = self._retime_constant_tcp_speed(
+                    request.planning_group, response.solution, ramp, achieved_speed,
+                )
+                achieved_speed /= stretch
+                applied_scale /= stretch
+            else:
+                retime_trajectory_constant_velocity(response.solution)
+                stretch = limit_trajectory_derivatives(
+                    response.solution, self._joint_motion_limits(request.planning_group),
+                )
+            if stretch > 1.0:
+                self.get_logger().warning(
+                    f"Joint velocity/acceleration/jerk limits require uniform time stretch {stretch:.6f}; "
+                    "the path speed profile is preserved at a reduced speed"
+                )
 
         if request.tcp_speed_m_s > 0.0:
             final_duration = trajectory_duration_seconds(response.solution)
@@ -303,7 +437,7 @@ class CartesianPathActionServer(Node):
                     f"TCP cruise target={request.tcp_speed_m_s * 1000.0:.2f}mm/s, "
                     f"planned cruise={achieved_speed * 1000.0:.2f}mm/s, "
                     f"planned average={final_average * 1000.0:.2f}mm/s, "
-                    f"ramp={LINEAR_TCP_RAMP_DURATION_S:.2f}s each, "
+                    f"ramp={ramp:.2f}s each, "
                     f"timing_scale={applied_scale:.3f}, profile=linear"
                 )
             else:
@@ -318,6 +452,15 @@ class CartesianPathActionServer(Node):
                 f"profile={'linear' if request.linear_motion_profile else 's_curve'}"
             )
 
+        # A complete plan can still hide an IK branch change: MoveIt Humble
+        # ignores absolute jump thresholds and returns fraction 1.0 for it.
+        # (Incomplete plans are refused by the callers.)
+        fidelity = None
+        if response.fraction >= 0.999 and len(response.solution.joint_trajectory.points) > 1:
+            fidelity = self._verify_path_fidelity(
+                request.planning_group, effective_waypoints, response.solution,
+            )
+
         if publish:
             self.publish_trajectories(
                 response.start_state,
@@ -327,6 +470,7 @@ class CartesianPathActionServer(Node):
             f"MoveIt path fraction={response.fraction:.3f}, "
             f"points={len(response.solution.joint_trajectory.points)}, "
             f"{speed_description}"
+            + ("" if fidelity is None else f", {describe_fidelity(fidelity)}")
         )
         return response
 
@@ -342,13 +486,16 @@ class CartesianPathActionServer(Node):
         offset = 0.0
         state = start_state
         segment_start = 0
+        started, legs = time.monotonic(), 0
         for index in range(1, len(request.waypoints)):
             # A zero-hold center/lead waypoint is a pass-through, not a stop.
             # Splitting a 1 mm lead into its own TOTG path can produce zero
             # duration. Retain that geometry inside the next dwell-to-dwell leg.
             if holds[index] == 0 and index < len(request.waypoints) - 1:
                 continue
-            leg = copy.deepcopy(request)
+            # Shallow copy + only this leg's poses: deep-copying the whole request per leg cost ~25 ms each
+            # (a 600-pose weave: ~100 legs, seconds parked at the weld start before ARC ON; 2026-10-15).
+            leg = copy.copy(request)
             leg.waypoint_hold_s = []
             leg.linear_motion_profile = False
             leg.waypoints = copy.deepcopy(request.waypoints[segment_start:index+1])
@@ -395,6 +542,11 @@ class CartesianPathActionServer(Node):
             state.joint_state.effort = []
             state.is_diff = False
             segment_start = index
+            legs += 1
+        self.get_logger().info(
+            f"Planned {legs} dwell-to-dwell legs ({len(request.waypoints)} waypoints) in "
+            f"{time.monotonic() - started:.2f} s"
+        )
         if publish:
             self.publish_trajectories(combined.start_state, [combined.solution])
         return combined
@@ -430,7 +582,22 @@ class CartesianPathActionServer(Node):
             request.linear_motion_profile,
             tuple(request.waypoint_hold_s),
             tuple(pose_values),
+            tuple(request.start_joint_positions),
         )
+
+    def _requested_start_state(self, request):
+        """RobotState from request.start_joint_positions, or None for the current state."""
+        positions = list(request.start_joint_positions)
+        if not positions:
+            return None
+        names = list(self._arm_chain(request.planning_group).joint_names)
+        if len(positions) != len(names) or not all(math.isfinite(v) for v in positions):
+            raise ValueError(f"start_joint_positions needs {len(names)} finite values")
+        state = RobotState()
+        state.is_diff = True
+        state.joint_state.name = names
+        state.joint_state.position = positions
+        return state
 
     def approve_plan(self, request, response):
         with self._approved_plan_lock:
@@ -532,10 +699,15 @@ class CartesianPathActionServer(Node):
     def _execute_callback(self, goal_handle):
         request = goal_handle.request
         result = CartesianPath.Result()
-        self.publish_weld_markers(
-            request.waypoints,
-            request.visualize_path,
-        )
+        received = time.monotonic()
+        # Executing the plan approved before ARC ON: its markers and preview were published when it was planned.
+        # Repeating them here (601 weave waypoints: ~0.8 s, 2026-10-15) parked the torch at the weld start.
+        approved_execute = bool(request.execute_requested and request.reuse_approved_plan)
+        if not approved_execute:
+            self.publish_weld_markers(
+                request.waypoints,
+                request.visualize_path,
+            )
 
         moveit_plan = None
         if self.get_parameter("use_moveit").value:
@@ -546,7 +718,8 @@ class CartesianPathActionServer(Node):
                         "Using the exact matching GUI-approved trajectory"
                     )
                 else:
-                    moveit_plan = self.plan_with_moveit(request)
+                    moveit_plan = self.plan_with_moveit(
+                        request, start_state=self._requested_start_state(request))
                 if moveit_plan.fraction < 0.999:
                     goal_handle.abort()
                     result.success = False
@@ -586,6 +759,8 @@ class CartesianPathActionServer(Node):
 
                 current = interpolate_pose(start, target, sample_index / samples)
                 sampled_path.append(current)
+                if approved_execute:
+                    continue
                 feedback = CartesianPath.Feedback()
                 feedback.current_pose = current
                 feedback.waypoint_index = waypoint_index
@@ -610,6 +785,10 @@ class CartesianPathActionServer(Node):
                 return result
             if request.reuse_approved_plan:
                 self.consume_approved_plan()
+            self.get_logger().info(
+                f"Cartesian goal -> trajectory sent in {time.monotonic() - received:.3f} s "
+                f"({len(request.waypoints)} waypoints, {'approved plan' if approved_execute else 'planned now'})"
+            )
             try:
                 execute_result = self.execute_moveit_trajectory(
                     moveit_plan.solution, goal_handle=goal_handle,

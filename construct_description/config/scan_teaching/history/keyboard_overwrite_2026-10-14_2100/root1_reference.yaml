@@ -1,0 +1,115 @@
+entries:
+- position_m:
+    x: -0.003
+    y: -1.547
+    z: 0.59
+  orientation_xyzw:
+    x: 0.725
+    y: -0.688
+    z: -0.019
+    w: -0.007
+  pass: 1
+  label: goal
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14 20:3x, mm resolution)'
+  saved: '2026-10-14T20:40:48'
+- position_m:
+    x: -0.012974467404576934
+    y: -1.744997676739207
+    z: 0.5862398537844791
+  orientation_xyzw:
+    x: 0.7260994470808597
+    y: -0.6874355309204507
+    z: -0.013686746309247603
+    w: -0.004965556610817478
+  source: GUI capture (measured joints FK)
+  saved: '2026-10-14T19:56:55'
+  pass: 1
+  label: start
+- position_m:
+    x: -0.01
+    y: -1.547
+    z: 0.596
+  orientation_xyzw:
+    x: 0.725
+    y: -0.688
+    z: -0.019
+    w: -0.007
+  pass: 2
+  label: goal
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14 20:3x, mm resolution)'
+  saved: '2026-10-14T20:40:48'
+- position_m:
+    x: -0.018
+    y: -1.745
+    z: 0.59
+  orientation_xyzw:
+    x: 0.726
+    y: -0.687
+    z: -0.013
+    w: -0.005
+  pass: 2
+  label: start
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14, mm resolution)'
+  saved: '2026-10-14T20:12:30'
+- position_m:
+    x: -0.005
+    y: -1.548
+    z: 0.597
+  orientation_xyzw:
+    x: 0.725
+    y: -0.688
+    z: -0.019
+    w: -0.007
+  pass: 3
+  label: goal
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14 20:3x, mm resolution)'
+  saved: '2026-10-14T20:40:48'
+- position_m:
+    x: -0.016
+    y: -1.746
+    z: 0.594
+  orientation_xyzw:
+    x: 0.726
+    y: -0.687
+    z: -0.013
+    w: -0.004
+  pass: 3
+  label: start
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14, mm resolution)'
+  saved: '2026-10-14T20:12:30'
+- position_m:
+    x: -0.007
+    y: -1.548
+    z: 0.602
+  orientation_xyzw:
+    x: 0.725
+    y: -0.688
+    z: -0.019
+    w: -0.007
+  pass: 4
+  label: goal
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14 20:3x, mm resolution)'
+  saved: '2026-10-14T20:40:48'
+- position_m:
+    x: -0.018
+    y: -1.746
+    z: 0.597
+  orientation_xyzw:
+    x: 0.726
+    y: -0.687
+    z: -0.014
+    w: -0.005
+  pass: 4
+  label: start
+  source: 'operator measurement: ros2 run tf2_ros tf2_echo world right_manipulator_ee_point
+    (2026-10-14, mm resolution)'
+  saved: '2026-10-14T20:12:30'
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point

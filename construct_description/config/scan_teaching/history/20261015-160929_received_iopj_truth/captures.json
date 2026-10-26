@@ -1,0 +1,198 @@
+{
+  "records": [
+    {
+      "key": "i",
+      "pass": 1,
+      "source": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml",
+      "copy": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_start_state.yaml",
+      "sha256": "aaf8066d572d7a95bd6f8456f7b57ce3475618b1d1f25d75bdaf826941fc0e5a",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792047101.9526513,
+        "joint_state_age_ms": 3.1084840011317283,
+        "tf_age_ms": 402.5087356567383,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 0.0036033580863932078,
+        "tf_fk_orientation_error_deg": 0.0007808085579842218
+      },
+      "tcp_pose_world": {
+        "position_m": {
+          "x": -0.0036486691055347686,
+          "y": -1.7267368104431282,
+          "z": 0.5860772996186825
+        },
+        "orientation_xyzw": {
+          "x": 0.7006687038930904,
+          "y": -0.6305855897307476,
+          "z": 0.11226010841516047,
+          "w": 0.31436101772853425
+        }
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.147261348473691,
+          1.2706904293502108,
+          1.6940426283538017,
+          3.756005222359794,
+          1.0162319119378105,
+          1.1284744313466715
+        ]
+      }
+    },
+    {
+      "key": "o",
+      "pass": 2,
+      "source": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml",
+      "copy": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_start_wait_state.yaml",
+      "sha256": "ddc34d5c07417e532a4898e1f72a98f56b4b0f5f368e85fd1b4375b35597c6f7",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792047118.5050576,
+        "joint_state_age_ms": 1.6825819911900908,
+        "tf_age_ms": 398.82731437683105,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 6.2803698347351e-13,
+        "tf_fk_orientation_error_deg": 0.0
+      },
+      "tcp_pose_world": {
+        "position_m": {
+          "x": 0.0003417903846854031,
+          "y": -1.7267498604999478,
+          "z": 0.5902381552481115
+        },
+        "orientation_xyzw": {
+          "x": 0.7006450114501187,
+          "y": -0.630603545026744,
+          "z": 0.11228488569611796,
+          "w": 0.31436895739556947
+        }
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.150868333854094,
+          1.2663315004360238,
+          1.6954246758014981,
+          3.760964028309522,
+          1.0142232892646454,
+          1.125884906660733
+        ]
+      }
+    },
+    {
+      "key": "p",
+      "pass": 3,
+      "source": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml",
+      "copy": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_goal_wait_state.yaml",
+      "sha256": "bdd07a61e4148c69342245d2d94826c3bab15132ea36b0204a47b0ece85bcfdf",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792047128.408711,
+        "joint_state_age_ms": 1.3392590044531971,
+        "tf_age_ms": 399.0356922149658,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 0.005782885742741996,
+        "tf_fk_orientation_error_deg": 0.00031308241650691
+      },
+      "tcp_pose_world": {
+        "position_m": {
+          "x": -0.002854013358379523,
+          "y": -1.7267499874707868,
+          "z": 0.594879887759239
+        },
+        "orientation_xyzw": {
+          "x": 0.7006482704177922,
+          "y": -0.6306079189292583,
+          "z": 0.11228357019943085,
+          "w": 0.31435338968673004
+        }
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.147967618794779,
+          1.260882806003776,
+          1.7005239634987275,
+          3.7579682383992914,
+          1.0136081656318643,
+          1.1261621417302101
+        ]
+      }
+    },
+    {
+      "key": "j",
+      "pass": 4,
+      "source": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml",
+      "copy": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-160929_received_iopj_truth/right_manipulator_weld_end_state.yaml",
+      "sha256": "b6ff9dedba3ea3c37f9268e6376bdc1e3d38c626245f6252d1fccb9fbb15e57e",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792047133.088681,
+        "joint_state_age_ms": 2.7261360082775354,
+        "tf_age_ms": 404.451847076416,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 6.674335893081556e-13,
+        "tf_fk_orientation_error_deg": 0.0
+      },
+      "tcp_pose_world": {
+        "position_m": {
+          "x": -0.002864071287473638,
+          "y": -1.7267419345985824,
+          "z": 0.5948769001135013
+        },
+        "orientation_xyzw": {
+          "x": 0.7006470420141544,
+          "y": -0.6306106907010626,
+          "z": 0.11227915565446801,
+          "w": 0.31435214409299905
+        }
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.147963357737035,
+          1.260882806003776,
+          1.7005315535078342,
+          3.7579719668248175,
+          1.0136081656318643,
+          1.1261621417302101
+        ]
+      }
+    }
+  ],
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan",
+  "p3_p4_coincident_confirmed_by_user": true
+}

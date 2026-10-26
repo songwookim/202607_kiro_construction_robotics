@@ -1,0 +1,9 @@
+# Bead layout of the 4 passes (design_layout relative model): wire tip of pass k from the root (pass 1) wire tip, mm.
+# along = seam travel, lateral + toward the 90 deg face / - up the 30 deg bevel, normal + up from the groove bottom.
+# Operator 2026-10-15 (corrected): root (0, 0, 0), fill 1 (4, 0, 3..7), fill 2 (-4, 0, 5..8 diagonal up), cap (0, 0, 10).
+# Passes with a measured reference (P2, P4) are pinned to it by the correction; P3 follows these values exactly.
+format_version: 1
+passes_mm:
+  2: [0.0, 4.0, 5.0]
+  3: [0.0, -4.0, 6.5]
+  4: [0.0, 0.0, 10.0]

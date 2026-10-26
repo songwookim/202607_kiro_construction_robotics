@@ -106,8 +106,8 @@ def validate_digital_weld_settings(settings):
         raise ValueError("custom hot start hold must be in 0.01..5.0 seconds")
     normalized["expect_native_crater"] = bool(normalized["expect_native_crater"])
     normalized["software_crater_enabled"] = bool(normalized["software_crater_enabled"])
-    if not 20.0 <= normalized["software_crater_ratio_percent"] <= 40.0:
-        raise ValueError("software crater ratio must be in 20..40 percent")
+    if not 20.0 <= normalized["software_crater_ratio_percent"] <= 50.0:          # operator 2026-10-19: up to 50 %
+        raise ValueError("software crater ratio must be in 20..50 percent")
     if not 10.0 <= normalized["software_crater_voltage_v"] <= 40.0:
         raise ValueError("software crater voltage must be in 10.0..40.0 V")
     if not 0.0 < normalized["software_crater_hold_s"] <= 5.0:

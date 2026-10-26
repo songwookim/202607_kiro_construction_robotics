@@ -1,0 +1,266 @@
+format_version: 2
+anchor_pass: 2
+anchor_references:
+  start:
+    position_m:
+      x: -0.02846129311177906
+      y: -1.7278097371159558
+      z: 0.5777540041342483
+    orientation_xyzw:
+      x: -0.6614912109671243
+      y: 0.6828406231471064
+      z: -0.256169819003496
+      w: -0.17474291122971214
+    source: 'operator 2026-10-15: P2 start = generated 113658 (hongik_aim) + World
+      X -2.5 mm (fits the specimen)'
+    saved: '2026-10-15T14:43:43'
+    saved_as: start
+  goal:
+    position_m:
+      x: -0.017198304052081788
+      y: -1.53012014378398
+      z: 0.579768577674274
+    orientation_xyzw:
+      x: -0.6614963746929083
+      y: 0.6828362829972952
+      z: -0.25616907869016253
+      w: -0.17474140898370885
+    source: P2 goal correct TCP (ts 1791996666) + 4 mm World Z (operator 2026-10-15
+      03:0x)
+    saved: '2026-10-15T01:55:12'
+    saved_as: goal
+anchor_design_m:
+- 0.0
+- 0.002
+- 0.005
+design_layout_m:
+  '2':
+  - 0.0
+  - 0.002
+  - 0.005
+  '3':
+  - 0.0
+  - -0.004
+  - 0.006500000000000001
+  '4':
+  - 0.0
+  - 0.0
+  - 0.01
+derived_root_aims_world_m:
+  start:
+  - -0.008989611870476828
+  - -1.7462267832610332
+  - 0.5529962973558966
+  goal:
+  - 0.0022735629658668694
+  - -1.5485368536450619
+  - 0.5550107567718717
+correction_scope: groove origin from pass-2 design anchor; before execution
+source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan
+calib:
+  file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+  xyz:
+  - 0.039454
+  - 0.024934
+  - -0.100543
+  rpy:
+  - 3.11659954
+  - -0.02107031
+  - 1.57079633
+computed: '2026-10-15T15:00:00'
+compare_at: wire tip (aim point) = TCP + rotated TCP-frame wire-tip vector (or L *
+  torch axis); root position from the selected anchor; pass remainders compared at
+  TCP
+wire_tip_model_m:
+- 0.0023230090626219723
+- -0.01883220873074798
+- 0.028879786983482533
+seam_frame:
+  u:
+  - -0.035960320692313405
+  - -0.9992762041494526
+  - -0.012406577141482125
+  w:
+  - 0.9993415450859962
+  - -0.03601713425099027
+  - 0.004386605234124237
+  n:
+  - -0.004830279581957818
+  - -0.01224066423882766
+  - 0.999913413520467
+offsets_seam_m:
+  start:
+  - 0.006530956736769191
+  - 0.01312040645499909
+  - -0.009446654414288578
+  goal:
+  - 0.00795129211435495
+  - 0.017264776901695308
+  - -0.009906629758529094
+offsets_world_m:
+  start:
+  - 0.012922541942148374
+  - -0.006883155773234728
+  - -0.009469309236672552
+  goal:
+  - 0.01701532960160338
+  - -0.008446101060985312
+  - -0.009928686536602505
+angle_convention: travel + push / - drag along the plan's travel; work + toward the
+  bevel face (Hongik / AWS A3.0)
+reference_torch_angles_deg:
+  start:
+    travel: 36.255437774830824
+    work: 15.795085566333704
+  goal:
+    travel: 36.81218453534134
+    work: 16.094845535731928
+hongik_root_torch_angles_deg:
+  travel: 41.77909858272883
+  work: 8.97179534778576
+reference_orientation_xyzw:
+- 0.707032925165845
+- -0.6262515313734835
+- 0.10745244648351737
+- 0.310431045368377
+reference_orientations_xyzw:
+  start:
+  - 0.707032925165845
+  - -0.6262515313734835
+  - 0.10745244648351737
+  - 0.310431045368377
+  goal:
+  - 0.7
+  - -0.631
+  - 0.112
+  - 0.314
+matches:
+- pass: 1
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.013
+  - -1.53
+  - 0.59
+  orientation_xyzw:
+  - 0.7
+  - -0.631
+  - 0.112
+  - 0.314
+  source: tf2_echo World right_manipulator_ee_point 2026-10-15 01:2x (mm)
+  saved: '2026-10-15T01:41:39'
+- pass: 1
+  end: start
+  saved_as: start
+  position_m:
+  - -0.022127043701487548
+  - -1.7282129578592875
+  - 0.5882043948908755
+  orientation_xyzw:
+  - 0.707032925165845
+  - -0.6262515313734835
+  - 0.10745244648351737
+  - 0.310431045368377
+  source: 'keyboard I capture 2026-10-15 00:5x on the Welding tab (file weld_start):
+    root corner end'
+  saved: '2026-10-15T00:54:36'
+- pass: 2
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.017198304052081788
+  - -1.53012014378398
+  - 0.579768577674274
+  orientation_xyzw:
+  - -0.6614963746929083
+  - 0.6828362829972952
+  - -0.25616907869016253
+  - -0.17474140898370885
+  source: P2 goal correct TCP (ts 1791996666) + 4 mm World Z (operator 2026-10-15
+    03:0x)
+  saved: '2026-10-15T01:55:12'
+- pass: 2
+  end: start
+  saved_as: start
+  position_m:
+  - -0.02846129311177906
+  - -1.7278097371159558
+  - 0.5777540041342483
+  orientation_xyzw:
+  - -0.6614912109671243
+  - 0.6828406231471064
+  - -0.256169819003496
+  - -0.17474291122971214
+  source: 'operator 2026-10-15: P2 start = generated 113658 (hongik_aim) + World X
+    -2.5 mm (fits the specimen)'
+  saved: '2026-10-15T14:43:43'
+- pass: 4
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.01720155709047074
+  - -1.529679763307345
+  - 0.5926291112659666
+  orientation_xyzw:
+  - 0.6846448742532973
+  - -0.6608634851011342
+  - 0.1855939829145968
+  - 0.2451034959452174
+  source: weld_end_state 01:53:29 = P4 goal correct TCP (P4 orientation)
+  saved: '2026-10-15T01:55:12'
+notes:
+- 'Position anchor P2: root wire tip = measured P2 wire tip - design offset; P1 references
+  supply attitude only, other reference positions are ignored. Use design_layout for
+  the root-relative bead positions.'
+report:
+- 'start: world (+12.9, -6.9, -9.5) mm = along +6.5 / lateral +13.1 / normal -9.4
+  mm, |17.4| mm'
+- 'goal: world (+17.0, -8.4, -9.9) mm = along +8.0 / lateral +17.3 / normal -9.9 mm,
+  |21.4| mm'
+- 'goal - start: along +1.4 / lateral +4.1 / normal -0.5 mm (lateral / normal: seam
+  direction error; along: end position / length difference)'
+- 'pass 2 goal: measured - predicted = along +0.2 / lateral -2.5 / normal +0.4 mm
+  (measured_layout)'
+- 'pass 2 start: measured - predicted = along +0.4 / lateral -1.6 / normal +0.2 mm
+  (measured_layout)'
+pass_deltas_seam_m:
+  design_layout:
+    '2':
+      goal:
+      - -2.4952485003444245e-19
+      - 6.934324955118449e-18
+      - -3.3516797545414657e-20
+      start:
+      - -1.2476242501722122e-19
+      - 3.4671624775592247e-18
+      - -1.6758398772707328e-20
+  hongik_aim:
+    '2':
+      goal:
+      - 7.01192091295251e-08
+      - -0.002645040186032101
+      - 0.000961601862685853
+      start:
+      - 3.57795523203483e-08
+      - -0.00293624706989783
+      - 0.0008500275558801036
+  measured_layout:
+    '2':
+      goal:
+      - 0.00018672872208023625
+      - -0.00250344134118193
+      - 0.00040931284578371547
+      start:
+      - 0.00044668217432659705
+      - -0.0016060914023950138
+      - 0.00018991985037442063
+  hongik_tcp:
+    '2':
+      goal:
+      - -0.00019434429094657626
+      - 0.0052891094232636205
+      - 0.0015614202594739863
+      start:
+      - -0.00019437863060338544
+      - 0.00499790253939789
+      - 0.0014498459526682368

@@ -254,7 +254,8 @@ def test_required_pose_validation_and_endpoint_selection():
     )
 
 
-def test_gui_build_delegates_and_updates_sequence_model():
+@pytest.mark.parametrize("traverse_enabled", [False, True])
+def test_gui_build_delegates_and_updates_sequence_model(traverse_enabled):
     """The Tk method only snapshots inputs, publishes, and extends the model."""
     from construct_robot.core.sequence_model import SequenceModel
     from construct_robot.gui.weld_action_gui import WeldActionGui
@@ -277,6 +278,7 @@ def test_gui_build_delegates_and_updates_sequence_model():
         dict(DEFAULT_DIGITAL_WELD_SETTINGS)
     )
     values = dict(
+        scan_cycle_traverse_enabled=traverse_enabled,
         corner_touch_count=5, weld_lead_in_mm=0.0, weld_lead_out_mm=0.0,
         weld_safe_approach_mm=20.0, weld_pre_start_lead_mm=0.0,
         weld_arc_off_delay_ms=120.0, weld_tcp_speed_mm_s=6.0,
@@ -305,5 +307,81 @@ def test_gui_build_delegates_and_updates_sequence_model():
     expected = build_weld_scenario(
         scenario(), MOTION, scenario_id=steps[0]["weld_scenario_id"],
     ).steps
+    if traverse_enabled:
+        from construct_robot.application.scan_start_touch import configure_start_touch, START_TOUCH
+        configure_start_touch(expected, START_TOUCH)
+        contact = next(step for step in steps if step.get("weld_scenario_stage") == "start_contact")
+        assert contact["points"][-1].position.z == pytest.approx(
+            contact["start_touch_nominal"].position.z - 0.010
+        )
+        assert contact["tcp_speed_m_s"] == pytest.approx(0.0005)
     assert copy.deepcopy(steps) == expected
     assert logs and logs[-1].startswith("Built weld workflow from")
+
+
+@pytest.mark.parametrize("approach_mode", ["corner_geometry", "taught_wait"])
+def test_a_taught_weld_wait_opens_the_scenario_so_both_ends_pass_a_wait(approach_mode):
+    plain = dict(custom_hot_start_enabled=False, software_crater_enabled=False)
+    without = build_weld_scenario(scenario(settings=plain, approach_mode=approach_mode), MOTION,
+                                  base_slot=3, scenario_id="weld-w").steps
+    wait_tcp = pose(0.1, -1.7, 0.66)
+    steps = build_weld_scenario(scenario(settings=plain, approach_mode=approach_mode,
+                                         weld_wait=stored(wait_tcp)), MOTION,
+                                base_slot=3, scenario_id="weld-w").steps
+    assert stages(steps) == ["weld_wait"] + stages(without)
+    assert stages(steps)[-3:-1] == ["goal_wait", "finish"]          # the goal side already waits
+    first = steps[0]
+    assert first["type"] == "named_pose" and first["pose_name"] == "weld_wait" and first["use_joint_planning"]
+    assert first["parallel_slot"] == 3
+    assert [s["parallel_slot"] for s in steps[1:]] == [s["parallel_slot"] + 1 for s in without]
+    assert validate_managed_weld_sequence(steps, require_complete=True)
+    with pytest.raises(ValueError, match="right arm"):
+        build_weld_scenario(scenario(settings=plain, weld_wait=stored(wait_tcp, "left_manipulator")), MOTION)
+
+
+ORDER = ["start", "clear1_top", "clear1_inside", "WIRE_FORWARD:0.75", "DO7:ON", "DO7:OFF", "clear1_top",
+         "clear2_top", "clear2_inside", "DO6:2", "clear2_top", "clear3_top", "clear3_inside", "DO5:1",
+         "clear3_top", "start"]
+
+
+def test_cut_only_takes_the_cutter_part_from_start_back_to_start():
+    from construct_robot.application.weld_sequence_builder import cleaner_cut_only_tokens
+    assert cleaner_cut_only_tokens(ORDER) == [
+        "start", "clear1_top", "clear1_inside", "WIRE_FORWARD:0.75", "DO7:ON", "DO7:OFF", "clear1_top", "start"]
+
+
+def test_cut_only_refuses_an_order_without_the_cutter():
+    from construct_robot.application.weld_sequence_builder import cleaner_cut_only_tokens
+    with pytest.raises(ValueError, match="cutting part"):
+        cleaner_cut_only_tokens([t for t in ORDER if not t.startswith("DO7")])
+
+
+
+def test_cut_only_follows_the_cleaner_1_step_poses():
+    from construct_robot.application.weld_sequence_builder import cleaner_cut_only_tokens
+    order = ["start", "clear1_1", "clear1_2", "clear1_3", "DO7:ON", "DO7:OFF", "clear1_4", "WIRE_FORWARD:0.75",
+             "DO7:ON", "DO7:OFF", "clear1_5", "clear2_top", "clear2_inside", "DO6:2", "clear2_top", "start"]
+    assert cleaner_cut_only_tokens(order) == ["start"] + order[1:11] + ["start"]
+
+
+def test_cleaner_output_can_be_held_across_a_motion(tmp_path):
+    from unittest.mock import Mock
+    from construct_robot.application.weld_sequence_builder import build_cleaner_sequence_steps
+    for name in ("clear1_3", "clear1_4", "clear1_5"):
+        (tmp_path / f"{name}.yaml").write_text("format_version: 1\n")
+    load = Mock(return_value=("right_manipulator", tuple(f"right_manipulator_joint{i}" for i in range(1, 7)),
+                              (0.0,) * 6, None))
+    tokens = ["clear1_3", "DO7:ON", "clear1_4", "DO7:OFF", "WIRE_FORWARD:0.75", "DO7:ON", "clear1_5", "DO7:OFF"]
+    steps = build_cleaner_sequence_steps(tmp_path, tokens, 30.0, load)
+    kinds = [(s["type"], s.get("value"), s["duration"]) for s in steps]
+    assert kinds == [("named_pose", None, 0.0), ("digital_output", True, 0.0), ("named_pose", None, 0.0),
+                     ("digital_output", False, 0.0), ("wire_feed", None, 0.75), ("digital_output", True, 0.0),
+                     ("named_pose", None, 0.0), ("digital_output", False, 0.0)]
+    assert [s["parallel_slot"] for s in steps] == list(range(1, 9))          # strictly one after another
+
+
+def test_a_held_cleaner_output_needs_its_off():
+    from unittest.mock import Mock
+    from construct_robot.application.weld_sequence_builder import build_cleaner_sequence_steps
+    with pytest.raises(ValueError, match="later DO7:OFF"):
+        build_cleaner_sequence_steps("/x", ["DO7:ON", "WIRE_FORWARD:0.5"], 30.0, Mock())

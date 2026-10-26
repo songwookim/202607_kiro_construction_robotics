@@ -1,0 +1,123 @@
+{
+  "created": "2026-10-15T20:47:18.629945+09:00",
+  "verification_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-203605_scan",
+  "original_fit_source": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan",
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-204642-952797_before_world_x_minus_2mm",
+  "teaching": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-204719_world_x_minus_2mm",
+  "note": "Operator confirmed: extra World X -2 mm at all P1-P4 START/GOAL after recognition and truth fitting; retain P2/P3 START World Z -2 mm. Keep the existing fit and raw truth. Manual position trim; no new tool-angle or wire-tip calibration.",
+  "checks": [
+    {
+      "pass_number": 1,
+      "end": "start",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 1,
+      "end": "goal",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 2,
+      "end": "start",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        -2.0
+      ]
+    },
+    {
+      "pass_number": 2,
+      "end": "goal",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 3,
+      "end": "start",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        -2.0
+      ]
+    },
+    {
+      "pass_number": 3,
+      "end": "goal",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 4,
+      "end": "start",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 4,
+      "end": "goal",
+      "delta_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ],
+      "trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "hardware_executed": false
+}

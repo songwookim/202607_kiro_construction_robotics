@@ -2210,3 +2210,36 @@ def test_cartesian_cancel_is_forwarded_to_active_moveit_execution():
 
     assert response == CancelResponse.ACCEPT
     assert execute_handle.canceled
+
+
+def test_tcp_progress_retime_gives_a_constant_tcp_speed_not_a_constant_joint_speed():
+    from construct_robot.core.cartesian_path_common import max_joint_speeds, tcp_progress
+    def trajectory_with_uniform_joint_motion():
+        trajectory = RobotTrajectory()
+        trajectory.joint_trajectory.joint_names = ["j"]
+        for index in range(101):
+            point = JointTrajectoryPoint()
+            point.positions = [1.0 + index / 100.0]          # q 1 -> 2 rad, uniform in time
+            point.time_from_start.sec, point.time_from_start.nanosec = divmod(index * 100_000_000, 1_000_000_000)
+            trajectory.joint_trajectory.points.append(point)
+        return trajectory
+    fk = lambda q: (q[0] ** 2, 0.0, 0.0)                     # TCP x = q^2: joint-uniform is TCP-accelerating
+
+    def cruise_tcp_speeds(trajectory):
+        pts = trajectory.joint_trajectory.points
+        t = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in pts]
+        x = [fk(p.positions)[0] for p in pts]
+        return [(x[i + 1] - x[i]) / (t[i + 1] - t[i]) for i in range(30, 70)]
+    joint_timed = trajectory_with_uniform_joint_motion()
+    retime_trajectory_constant_velocity(joint_timed, ramp_duration_s=1.0)
+    speeds = cruise_tcp_speeds(joint_timed)
+    assert max(speeds) / min(speeds) > 1.2                    # the old behaviour: TCP speed drifts
+    tcp_timed = trajectory_with_uniform_joint_motion()
+    progress = tcp_progress(tcp_timed, fk, ["j"])
+    assert math.isclose(progress[-1], 3.0, rel_tol=1e-3)     # 1 -> 4 m along x
+    retime_trajectory_constant_velocity(tcp_timed, ramp_duration_s=1.0, progress=progress)
+    speeds = cruise_tcp_speeds(tcp_timed)
+    assert max(speeds) - min(speeds) < 1e-3 * max(speeds)    # constant TCP speed in the cruise
+    assert math.isclose(sum(speeds) / len(speeds), 3.0 / 10.0, rel_tol=1e-2)   # path / nominal duration
+    assert math.isclose(trajectory_duration_seconds(tcp_timed), 11.0, abs_tol=1e-6)
+    assert max_joint_speeds(tcp_timed)[0] > 0

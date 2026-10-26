@@ -1,0 +1,81 @@
+# scan_l0 작업: 10T 일면개선 그루브 시편(용접 전), 3G (시편 세움, 수직 용접선). base_frame(link0) 기준, m / s / deg.
+# start/end 는 자리표시자 — teach-start(위 점) / teach-end(아래 점) 로 채운다 (L = 0.380 m). 3G 는 specimen_top_z_m 필수.
+# 규칙(R4): 진행방향 ∥ 중력, vertical_direction=down: 위 점 → 아래 점, 리드인은 위쪽에만, 리드아웃 없음(아래 점에서 정지).
+# 광학 원점은 어떤 순간에도 floor(아래 점 높이) 아래로 내려가지 않는다.
+# 입사 기울기: incidence_tilt_deg = +10 → 광학 Z 를 라인축 둘레로 10° 돌려 센서가 심 점을 **내려다봄**; 광학 원점은 심 점보다
+#   standoff·sin(10°) ≈ 55.6 mm 위 → 바닥 규칙에 안전. 음수(올려다봄)는 아래 점에서 원점이 바닥 아래로 내려가 3G_floor 위반.
+#   사용자의 '살짝 위쪽으로 기울여' 가 어느 방향인지(센서가 위를 보는지 / 센서 몸체를 위로 두는지) 확정 필요 — 부호 규약은
+#   scan_core.types.ScanJob.incidence_tilt_deg 참조. pitch_deg 와 합성됨 (라인축 둘레 |pitch|+|tilt| ≤ max_laser_tilt_deg).
+job:
+  job_id: groove_10T_3G
+  start: [0.5, 0.7, 0.68]           # PLACEHOLDER (teach-start): 위 점 (용접선 상단)
+  end: [0.5, 0.7, 0.30]             # PLACEHOLDER (teach-end): 아래 점 (floor = 0.30 m, 광학 원점 기준), L = 0.380 m
+  surface_normal: [0.0, -1.0, 0.0]  # 판 법선, 로봇 베이스 쪽
+  position: 3G                      # 용접 자세 (단일 출처 → orientation vertical_3G): 3G = 진행 ∥ 중력 (플랫폼 gravity_axis_base 와 일관성 검사)
+  standoff_m: 0.32
+  speed_mps: 0.03
+  accel_mps2: 0.2
+  lead_in_m: 0.04
+  lead_out_m: 0.04
+  pitch_deg: -5.0
+  incidence_tilt_deg: 10.0          # + = 내려다봄 (원점이 심 점 위 55.6 mm). 방향 확정 전까지 기본값
+  profile_fps: 100.0
+  progression_sign: 1
+  safe_clearance_m: 0.10
+  table_z_m: 0.0                    # PLACEHOLDER (교시 도구는 옮기지 않는다; 실측 테이블 높이를 넣으면 툴 몸체 규칙·3G 입사 자동 선택, 임시 — 목표는 없이)
+  specimen_top_z_m: 0.70            # PLACEHOLDER: 세운 판의 상단 높이 (필수)
+  bidirectional: false
+  max_laser_tilt_deg: 40.0          # 3G 입사 ≤ 35° (테이블 높이 있으면 자동 선택) + 패스 피치 5° (2026-10-05)
+  torch_protrusion_m: 0.1924                # 토치 팁 = CAD 와이어 끝 (토치의 가장 먼 점) − 캘리브 광학 원점 (+z_eoat; 플랫폼 safety 값이 덮어쓴다)
+  torch_lateral_m: [-0.2479, -0.0005]   # 토치 팁 (x, y)_eoat = 우리 토치의 CAD 와이어 끝 (torch_tcp + 20 mm 노즐 축) - the torch turned 180 deg in
+                                        # its clamp (2026-10-13, the lab robot model; fallback - the MoveIt adapter takes it from the model)
+  standoff_min_m: 0.245
+  mode: standard
+  base_frame: link0
+  gravity_axis_base: [0.0, 0.0, -1.0]
+  vertical_direction: down          # down (기본) | up (아래→위, 리드인 없음)
+  reference_point: optical
+  direction_tol_deg: 20.0
+  check_torch_tip: true
+# ---- 시편 (scan_core.specimen.GrooveSpec) ----
+specimen:
+  name: groove_10T_single_bevel_30deg_gap5
+  kind: single_bevel
+  thickness_mm: 10.0
+  bevel_angle_deg: 30.0
+  bevel_side: left        # 2026-09-30 사용자 확인: 개선판 = 왼쪽(기록 자세에서 센서 -x 쪽 판). 티칭 후 base 프레임 방향은 첫 스캔에서 검증
+  root_gap_mm: 5.0
+  root_face_mm: 0.0
+  backing: true
+  backing_thickness_mm: 10.0
+  weld_length_mm: 380.0
+  plate_width_mm: 300.0
+  hi_lo_mm: 0.0
+# ---- 검증 목표 (seam_features QC) ----
+qc_targets:
+  root_gap_mm: {tol: 0.5}
+  bevel_angle_deg: {tol: 2.0}
+  groove_depth_mm: {tol: 0.5}
+  hi_lo_mm: {target_max: 1.0, warn_above: 2.0}
+  # 설계 허용치만 (설계 정보 — 시편 보고의 기준이자 '측정이 이 허용치를 구분하나' 의 기준). 측정 기준은 유도 (scan_core.measure):
+  weld_length_mm: {tol: 1.0, ambiguous: 5.0}   # 양 판 끝 관측 + 길이 = specimen.weld_length_mm ± 1 mm (같은 패스에서); 1 < 차 ≤ 5 mm 는
+                                    # 보고만 (끝 판독 산포·시편 편차, 사용자 2026-10-06), 넘으면 end_ambiguous (다음 패스로 확인 뒤 멈춤)
+  top_opening_mm: {tol: 0.5}        # 공칭 개구 ± 0.5 mm
+  root_position_mm: {tol: 1.0}      # 용접 경로 겨냥점 (루트 중심) 위치 ± 1 mm — 단면 중앙값의 k 배 불확도가 이 안 (사용자 2026-10-07)
+# ---- 용접 절차 (WPS) — 3G 는 KIRO 데이터셋 전의 가정값 그대로 (KIRO 데이터셋은 1G 만: 2026-10-12 기본값이 KIRO 1G WPS 로 바뀌어도 3G 계획은
+# 바뀌지 않게 명시). 3G 용접 자료가 생기면 그 값으로 바꾼다. 역할별 [root, fill, cap].
+weld_plan:
+  source: assumed (before the KIRO dataset)
+  wfs_mpm: [6.0, 6.6, 4.5]
+  speed_mps: [0.005, 0.005, 0.0035]
+  travel_angle_deg: [10.0, 10.0, 10.0]
+  work_angle_deg: [0.0, 0.0, 0.0]
+  stick_out_mm: 20.0                    # 와이어 돌출 (TCP = 토치 팁 끝 → 와이어 끝): KIRO 로그에 없다 — 잠정 = 토치 CAD 와이어 토막; KIRO 값으로
+  cap_reinforcement_mm: 1.5
+  speed_limits: [0.6, 1.6]
+  weave_amplitude_mm: null              # 캡 띠 모형 (진폭 = 띠 반폭 - weave_edge_margin_mm)
+  weave_pitch_mm: 2.5
+  weave_dwell_s: 0.1
+teach: {}
+meta:
+  note: groove specimen 10T single-bevel standing (3G), positions are placeholders until taught

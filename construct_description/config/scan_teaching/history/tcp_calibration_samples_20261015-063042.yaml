@@ -1,0 +1,13 @@
+note: wire tip held on ONE fixed point; only the torch orientation changes
+samples:
+- position_m:
+  - 0.06273890383601773
+  - -1.4873245688538534
+  - 1.1141166887704812
+  orientation_xyzw:
+  - 0.72537165183696
+  - -0.6880407924172306
+  - -0.019536008951625883
+  - -0.007360640966154629
+  source: auto start (measured joints FK)
+  saved: '2026-10-15T06:23:56'

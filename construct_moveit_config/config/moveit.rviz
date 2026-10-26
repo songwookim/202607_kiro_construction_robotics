@@ -670,6 +670,140 @@ Visualization Manager:
       Namespaces:
         tesseract_rigid_constraint: true
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Hongik Test Paths
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hongik_test/path_markers
+      Namespaces:
+        hongik_test: true
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: Hongik Test Poses
+      Frame Timeout: 2
+      Marker Scale: 0.3
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+      Frames:
+        All Enabled: false
+        hongik_test/selected_wire:
+          Value: true
+        hongik_test/selected_tcp:
+          Value: true
+        hongik_test/pass_1_wire_start:
+          Value: true
+        hongik_test/pass_1_wire_goal:
+          Value: true
+        hongik_test/pass_1_tcp_start:
+          Value: true
+        hongik_test/pass_1_tcp_goal:
+          Value: true
+        hongik_test/pass_2_wire_start:
+          Value: true
+        hongik_test/pass_2_wire_goal:
+          Value: true
+        hongik_test/pass_2_tcp_start:
+          Value: true
+        hongik_test/pass_2_tcp_goal:
+          Value: true
+        hongik_test/pass_3_wire_start:
+          Value: true
+        hongik_test/pass_3_wire_goal:
+          Value: true
+        hongik_test/pass_3_tcp_start:
+          Value: true
+        hongik_test/pass_3_tcp_goal:
+          Value: true
+        hongik_test/pass_4_wire_start:
+          Value: true
+        hongik_test/pass_4_wire_goal:
+          Value: true
+        hongik_test/pass_4_tcp_start:
+          Value: true
+        hongik_test/pass_4_tcp_goal:
+          Value: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: rviz_default_plugins/PointCloud2
+      Color: 0; 255; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Name: Hongik Scanner Profile
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.002
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hongik_scanner/profile
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 190; 30
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Name: Hongik Scanner Raw Profile
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 4
+      Size (m): 0.002
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hongik_scanner/raw_profile
+      Use Fixed Frame: true
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Hongik Scan Estimate
+      Namespaces: {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hongik_scanner/estimate_markers
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: rviz_default_plugins/PointCloud2
+      Color: 200; 200; 200
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Name: Hongik Scan Cloud
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.001
+      Style: Points
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hongik_scanner/scan_cloud
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

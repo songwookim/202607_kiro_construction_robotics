@@ -29,6 +29,8 @@ import sys
 import threading
 import time
 
+from construct_robot.io.scan_cycle_log import record_cycle_event
+
 from geometry_msgs.msg import Pose
 from tf2_ros import TransformException
 
@@ -109,6 +111,7 @@ class WeldFeedbackRecorder:
         conditions = copy.deepcopy(
             execution_conditions or {"mode": "manual_arc"}
         )
+        conditions["welding_position"] = getattr(host, "welding_position", "1G")
         conditions["hicomm_cyclic_period_ms"] = PERIOD_SECONDS * 1000.0
         conditions["arc_wait_recognition"] = True
         conditions["arc_wait_main_welding"] = True
@@ -124,6 +127,9 @@ class WeldFeedbackRecorder:
             if host.active_weld_feedback_session is not None:
                 return
             host.active_weld_feedback_session = {
+                "feedback_directory": host._weld_feedback_directory(),
+                "_scan_cycle_journal": (getattr(host, "_scan_cycle_journal", None)
+                                        if conditions.get("scan_cycle_log_directory") else None),
                 "started_unix_time": time.time(),
                 "started_monotonic": time.monotonic(),
                 "commanded": copy.deepcopy(settings),
@@ -145,6 +151,7 @@ class WeldFeedbackRecorder:
                 "samples": [],
                 "tx_frames": [],
                 "tcp_samples": [],
+                "joint_samples": [],
                 "latest_tcp_speed_m_s": 0.0,
                 "arc_off_control": {},
                 "custom_hot_start": {
@@ -353,6 +360,26 @@ class WeldFeedbackRecorder:
             sample["speed_m_s"] = filtered
             session["latest_tcp_speed_m_s"] = filtered
             session["tcp_samples"].append(sample)
+
+    def record_joint_sample(self, arm, snapshot):
+        """Capture named measured /joint_states on the same session clock as TCP; no file I/O here."""
+        if arm not in ("left", "right"):
+            return
+        names = [f"{arm}_manipulator_joint{i}" for i in range(1, 7)]
+        positions = snapshot["positions"]
+        if not all(name in positions and math.isfinite(positions[name]) for name in names):
+            return
+        received = float(snapshot["received_monotonic"])
+        with self.host.weld_feedback_lock:
+            session = self.host.active_weld_feedback_session
+            if session is None or received < float(session["started_monotonic"]):
+                return
+            session["joint_samples"].append({
+                "elapsed_s": received - float(session["started_monotonic"]),
+                "joint_stamp_s": float(snapshot["stamp_sec"]),
+                "arm": arm,
+                "positions_rad": [float(positions[name]) for name in names],
+            })
 
     def record_actual_tcp_until_motion_done(self, step):
         """Record stamped TF poses through the complete weld lead-out."""
@@ -612,6 +639,7 @@ class WeldFeedbackRecorder:
             "samples": session["samples"],
             "tx_frames": session.get("tx_frames", []),
             "tcp_trajectory": session.get("tcp_samples", []),
+            "joint_trajectory": session.get("joint_samples", []),
             "arc_off_control": arc_off_control,
             "custom_hot_start": copy.deepcopy(session.get("custom_hot_start", {})),
             "software_crater_control": session.get("software_crater_control", {}),
@@ -644,7 +672,9 @@ class WeldFeedbackRecorder:
             # feedback, TX frames, or TCP trajectory captured during a weld.
             document["quality_metrics"] = {"error": str(error)}
             host.post(host.error, f"Weld quality analysis unavailable: {error}")
-        directory = host._weld_feedback_directory()
+        directory = session.get("feedback_directory")
+        if directory is None:
+            directory = host._weld_feedback_directory()
         timestamp = (
             time.strftime("%Y%m%d_%H%M%S", time.localtime(ended))
             + f"_{int((ended % 1.0) * 1000.0):03d}"
@@ -656,7 +686,22 @@ class WeldFeedbackRecorder:
             save_weld_feedback_log(latest_path, document)
         except (KeyError, OSError, TypeError, ValueError) as error:
             host.post(host.error, f"Weld feedback save failed: {error}")
+            if session.get("_scan_cycle_journal") is not None:
+                host._scan_cycle_log_error = f"Weld feedback save failed: {error}"
+                record_cycle_event(host, "feedback_save_failed", message=str(error),
+                                   pass_number=session["execution_conditions"].get("scan_cycle_pass"))
             return None
+        journal = session.get("_scan_cycle_journal")
+        if journal is not None:
+            try:
+                journal.event("artifact", kind="weld_feedback", path=str(history_path), status=str(result),
+                              pass_number=session["execution_conditions"].get("scan_cycle_pass"),
+                              tcp_samples=len(session.get("tcp_samples", ())),
+                              joint_samples=len(session.get("joint_samples", ())))
+            except (OSError, TypeError, ValueError) as error:
+                if getattr(host, "_scan_cycle_journal", None) is journal:
+                    host._scan_cycle_log_error = f"Weld feedback journal link failed: {error}"
+                host.post(host.error, f"Weld feedback journal link failed: {error}")
         parameter_panel = getattr(host, "weld_parameter_panel", None)
         if parameter_panel is not None:
             host.post(parameter_panel.refresh)
@@ -949,6 +994,8 @@ class WeldExecutionController:
                     samples = list(live["samples"][sample_count:]) if live else []
                     sample_count += len(samples)
                 for frame in frames:
+                    if tx_seen:                  # keep the FIRST crater TX: later frames repeat it every cycle
+                        break
                     raw = bytes.fromhex(frame["raw_hex"])
                     if len(raw) == 55 and raw[0] & BIT_ARC and int.from_bytes(raw[3:5], "little") == target and int.from_bytes(raw[5:7], "little") == voltage:
                         tx_seen = True

@@ -283,6 +283,70 @@ def test_feedback_session_respects_stop_and_saves_once(tmp_path, monkeypatch):
     assert recorder.finish("again") is None
 
 
+def test_feedback_uses_task_and_directory_from_session_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(controller_module.subprocess, "Popen", Mock(return_value=Mock(wait=Mock(return_value=0))))
+    original = tmp_path / "3g"
+    host, _controller, recorder = make_host(original, welding_position="3G")
+    recorder.begin(settings())
+    assert host.active_weld_feedback_session["execution_conditions"]["welding_position"] == "3G"
+    host.welding_position = "1G"
+    host._weld_feedback_directory = lambda: tmp_path / "1g"
+    try:
+        path = recorder.finish("completed", STATUS)
+        assert path.parent == original
+        latest = original / "latest_weld_feedback.log"
+        assert "welding_position=3G" in latest.read_text()
+        assert not (tmp_path / "1g/latest_weld_feedback.log").exists()
+    finally:
+        recorder.shutdown()
+
+
+def test_measured_joint_callback_saves_both_arms_by_name_with_tcp_session_clock(tmp_path, monkeypatch):
+    from construct_robot.gui.weld_action_gui import WeldActionGui, WeldGuiNode
+    from construct_robot.io.weld_feedback_plot import parse_weld_trajectory_log
+    monkeypatch.setattr(controller_module.subprocess, "Popen", Mock(return_value=Mock(wait=Mock(return_value=0))))
+    host, _controller, recorder = make_host(tmp_path, fake=True)
+    host._weld_feedback_recorder = recorder
+    host.record_weld_joint_sample = lambda arm, snapshot: WeldActionGui.record_weld_joint_sample(host, arm, snapshot)
+    node = SimpleNamespace(ui=host, latest_joint_positions={}, last_robot_feedback_at={},
+                           last_measured_joints_at={}, robot_feedback_seen={},
+                           measured_joint_snapshot_lock=threading.Lock(), measured_joint_snapshots={})
+    names = [f"{arm}_manipulator_joint{i}" for i in (6, 3, 1, 5, 2, 4) for arm in ("left", "right")]
+    message = SimpleNamespace(name=names, position=[float(n[-1]) for n in names],
+                              header=SimpleNamespace(stamp=SimpleNamespace(sec=123, nanosec=500000000)))
+    WeldGuiNode._joint_state(node, message)  # receiving joints alone never starts a feedback session
+    assert host.active_weld_feedback_session is None
+    recorder.begin(settings(), {"mode": "sequence_execute", "fake_arc": True})
+    recorder.record_tcp_sample(pose(.5), phase="ACTUAL_TF", tf_stamp_s=123.5)
+    WeldGuiNode._joint_state(node, message)
+    session = host.active_weld_feedback_session
+    assert len(session["joint_samples"]) == 2
+    for sample in session["joint_samples"]:
+        assert sample["positions_rad"] == [1., 2., 3., 4., 5., 6.]
+        assert sample["joint_stamp_s"] == 123.5
+        assert sample["elapsed_s"] >= 0
+    # Missing / non-finite joints must not be replaced with the previous values.
+    partial = SimpleNamespace(name=names[:1], position=[1.], header=message.header)
+    WeldGuiNode._joint_state(node, partial)
+    invalid = SimpleNamespace(name=names[1::2], position=[float("nan")] * 6, header=message.header)
+    WeldGuiNode._joint_state(node, invalid)
+    assert len(session["joint_samples"]) == 2
+    path = recorder.finish("completed (fake ARC)")
+    text = path.read_text()
+    section = text.split("[joint_trajectory]", 1)[1]
+    assert "source=/joint_states" in section and "position_unit=rad" in section
+    rows = [line.split() for line in section.splitlines() if len(line.split()) == 9 and line.split()[2] in ("left", "right")]
+    assert len(rows) == 2
+    assert {row[2] for row in rows} == {"left", "right"}
+    assert all([float(v) for v in row[3:]] == [1., 2., 3., 4., 5., 6.] for row in rows)
+    assert len(parse_weld_trajectory_log(path)["actual"]) == 1  # existing TCP reader remains compatible
+    WeldGuiNode._joint_state(node, message)
+    assert len(session["joint_samples"]) == 2  # finished session stays immutable
+    recorder.begin(settings())
+    recorder.record_joint_sample("right", node.measured_joint_snapshots["right"])
+    assert host.active_weld_feedback_session["joint_samples"] == []  # no pre-session cached sample
+
+
 def plot_report(tmp_path, output, returncode=0):
     from construct_robot.application.weld_execution_controller import WeldFeedbackRecorder
     host = SimpleNamespace(calls=[])
@@ -317,3 +381,50 @@ def test_plot_report_missing_tcp_trajectory_is_only_a_note(tmp_path):
     calls = plot_report(tmp_path, f"{tmp_path}/weld_feedback_20261002_172811_139.png\n"
                         "SKIPPED weld_feedback_20261002_172811_139.log · 3D trajectory plot: no recorded actual TCP samples\n")
     assert calls[0][0] == "log" and "no recorded actual TCP samples" in calls[0][1]
+
+
+def test_software_crater_confirms_against_the_first_crater_tx_not_the_latest_repeat():
+    """The welder TX repeats the crater setpoint every cycle; samples arrive just before each repeat.
+    Measuring from the latest repeat skipped every sample (20261019 16:02: timeout with a 95 A echo)."""
+    import time
+    host, controller, recorder = make_host()
+    s = settings(software_crater_enabled=True, software_crater_ratio_percent=50.0,
+                 software_crater_voltage_v=20.0, software_crater_hold_s=0.05)
+    recorder.begin(s)
+    session = host.active_weld_feedback_session
+    target, voltage = round(s["current_a"] * 0.5), 200
+    frame = bytearray(55)
+    frame[0] = 0x01
+    frame[3:5] = target.to_bytes(2, "little")
+    frame[5:7] = voltage.to_bytes(2, "little")
+    stop = threading.Event()
+
+    def welder():
+        started = False
+        while not stop.wait(0.02):
+            if not any(c[0] == "update_setpoints" for c in host.calls):
+                continue
+            now = time.monotonic() - session["started_monotonic"]
+            with host.weld_feedback_lock:
+                if started:                                   # sample first, then the repeated TX frame
+                    session["samples"].append({"elapsed_s": now, "feedback_current_a": target + 2,
+                                               "wcr_detected": True, "set_current_a": target, "set_voltage_v": 20.0})
+                session["tx_frames"].append({"elapsed_s": now + 0.001, "raw_hex": bytes(frame).hex(" ")})
+            started = True
+    thread = threading.Thread(target=welder, daemon=True)
+    thread.start()
+    client = host.hicomm_client
+    client.snapshot = lambda: SimpleNamespace(command=0x01)
+    host.weld_motion_done_event.set()
+    host.weld_motion_success = True
+    endpoint = pose(0.5)
+    host.node.wait_until_arm_stopped = lambda arm, timeout: True
+    host.node._current_tcp_transform = lambda group: SimpleNamespace(
+        transform=SimpleNamespace(translation=endpoint.position))
+    try:
+        ok, message = controller.execute_software_crater({"settings": s, "endpoint": endpoint})
+    finally:
+        stop.set()
+        thread.join(1)
+    assert ok, message
+    assert "HOLD complete" in message

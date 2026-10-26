@@ -1,0 +1,156 @@
+diff --git a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+index 08f27a1..c42a9bb 100644
+--- a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
++++ b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+@@ -21,6 +21,7 @@
+ | 11 | B6 메시지 | 거부 이유가 현장에서 바로 이해되지 않음 | 세계 안 시작·90° 심 거부 메시지 보강 | c21c8df |
+ | 12 | 양방향 출력 | 한 번 센싱으로 두 방향 모두 용접할 수 있어야 함 | `directions/S_to_E/`, `directions/E_to_S/` 를 매 실행 출력 (D14 포함) | e1cf40f |
+ | 13 | 센싱 자세 선택 = TCP 최소 이동 | 관절 이동 최소로 고른 획득 자세가 토치를 115° 돌려 베이스 반대쪽으로 보냄 → 와이어가 베이스에서 반대쪽까지 돌아감 (21:44) | 공구 자세를 토치 팁 TCP 의 회전 최소 → 토치 팁 거리 최소로 고르고, 관절 이동 시간은 그 자세의 팔 형태만 정함 | f0774b6 |
++| 14 | 확인한 관절 계획의 시작 허용값 | 계획 시작과 보내기 직전 측정 관절이 0.054° 달라 실행 거부 (002753) — 재사용용 0.05°/0.1 mm 기준을 쓰고 있었음 | move_group 자신의 `allowed_start_tolerance` (실행 때 읽음, 없으면 MoveIt 기본 0.01 rad) 로 판정 | 34c5e37 |
+ 
+ ---
+ 
+@@ -333,6 +334,23 @@ KIRO Servo-J 지연 약 0.5 s × 관절 상한 0.24 rad/s ≈ 0.12 rad 로, 평
+ 
+ ---
+ 
++## 14. 확인한 관절 계획의 시작 허용값 = move_group 의 것 (KIRO 현장 2026-10-15, 34c5e37)
++
++**왜**: 실행 002753 에서 획득 이동이 "checked joint plan start changed: max joint 0.0542 deg, flange 0.141 mm (> 0.05 deg / 0.1 mm)" 로
++거부됐다. 0.05° / 0.1 mm 는 원래 '미리 만든 계획을 다시 쓸지' 정하는 기준 (넘으면 다시 계획) 이었는데, 6절에서 KIRO 의 '확인한 계획을
++그대로 한 번' 방식을 옮기면서 실행 거부 기준이 됐다. 팔이 멈춰 있는 동안의 관절 차이 (0.054°) 만으로도 거부된다.
++
++**무엇을·어떻게** (`hongik_scan_ros/moveit_adapter.py`):
++- `MoveItPlatform.allowed_start_tolerance()`: move_group 노드의 `trajectory_execution.allowed_start_tolerance` 를 한 번 읽는다
++  (계획 서비스와 같은 이름공간의 `/move_group/get_parameters`). move_group 이 자기가 실행하는 모든 궤적에 쓰는 규칙이다.
++  읽지 못하거나 0 이면 MoveIt 문서의 기본값 0.01 rad (0.57°) 를 쓰고 그 사실을 문구에 남긴다.
++- `_validate_checked_joint_start`: 관절 최대 차이가 그 허용값 이내면 확인한 궤적을 그대로 보낸다. 플랜지 차이는 기록만 한다.
++- 다시 확인하는 동안 우리 것이 아닌 관절이 움직였는지도 같은 허용값으로 본다.
++- 보내기 직전 전체 궤적의 충돌 재검사 (현재 전체 상태) 는 그대로다.
++- 시험: `test_moveit_checked_joint` 에 0.054° 는 보내고 1.15° 는 거부하는 경우를 더했다 (필수 시험만 돌림).
++
++---
++
+ ## KIRO 쪽에서 바뀌는 것
+ 
+ 1. **서버는 우리 런치 (`hongik_moveit.launch.py`) 로 띄운다.**
+diff --git a/scan_stack/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py b/scan_stack/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
+index 38d14fd..f855deb 100644
+--- a/scan_stack/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
++++ b/scan_stack/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
+@@ -947,7 +947,9 @@ class MoveItJtcBackend(MotionBackend):
+ 
+     def _validate_checked_joint_start(self, plan: dict, js) -> None:
+         """The measured joints must still be the checked plan's start: by raw joint value (a 2 pi / branch change FK cannot see) and
+-        by flange pose, within prepared_start_tol_deg / _mm. Else MotionError (nothing sent)."""
++        within move_group's own start-state tolerance (allowed_start_tolerance: the rule move_group applies to every trajectory it
++        executes; KIRO field 2026-10-15: the former 0.05 deg / 0.1 mm - a reuse threshold - refused a 0.054 deg holding difference).
++        The flange difference is reported. Else MotionError (nothing sent)."""
+         m = dict(zip(js.name, js.position))
+         try:
+             q = np.array([float(m[n]) for n in plan["names"]])
+@@ -960,11 +962,10 @@ class MoveItJtcBackend(MotionBackend):
+         Ta, Tb = fk(plan["q0"]), fk(q)
+         dp_mm = float(np.linalg.norm(Tb[:3, 3] - Ta[:3, 3])) * 1e3
+         dr_deg = _rot_deg(Ta[:3, :3], Tb[:3, :3])
+-        mj = self.p.mj
+-        if dq_deg > mj.prepared_start_tol_deg or dp_mm > mj.prepared_start_tol_mm or dr_deg > mj.prepared_start_tol_deg:
+-            raise MotionError(f"checked joint plan start changed: max joint {dq_deg:.4f} deg, flange {dp_mm:.3f} mm / {dr_deg:.4f} deg "
+-                              f"(> {mj.prepared_start_tol_deg} deg / {mj.prepared_start_tol_mm} mm) - plan and confirm again "
+-                              "(nothing sent)")
++        tol, src = self.p.allowed_start_tolerance()
++        if not math.radians(dq_deg) <= tol:
++            raise MotionError(f"checked joint plan start changed: max joint {dq_deg:.4f} deg > {math.degrees(tol):.3f} deg ({src}); flange "
++                              f"{dp_mm:.3f} mm / {dr_deg:.4f} deg - plan and confirm again (nothing sent)")
+ 
+     def move_checked_joint(self, check: dict, q_goal, v_mps: float, a_mps2: float, *, timeout_s: Optional[float] = None) -> MotionResult:
+         """Execute exactly the trajectory check_joint checked for this goal (check['_checked_plan']), once: never planned again. The
+@@ -1157,7 +1158,7 @@ class MoveItJtcBackend(MotionBackend):
+                     if jn in plan["names"]:
+                         continue
+                     v1 = a_map.get(jn)
+-                    if v1 is None or not math.isfinite(float(v1)) or abs(math.degrees(float(v1) - float(v0))) > mj.prepared_start_tol_deg:
++                    if v1 is None or not math.isfinite(float(v1)) or abs(float(v1) - float(v0)) > p.allowed_start_tolerance()[0]:
+                         raise MotionError(f"joint {jn} (not ours) moved while the trajectory was checked again - nothing sent")
+                 if p.latch.is_set or self._abort.is_set():
+                     raise MotionError("stopped while the checked joint trajectory was checked again - nothing sent")
+@@ -2295,6 +2296,34 @@ class MoveItPlatform(RobotPlatform):
+                                       f"({wt.tcp_from_tip.status or wt.tcp_from_tip.source}); nozzle end {wt.nozzle_end_source}")
+         return calib
+ 
++    def allowed_start_tolerance(self, timeout_s: float = 2.0) -> tuple:
++        """move_group's start-state tolerance [rad] - trajectory_execution.allowed_start_tolerance of the move_group node (in the
++        namespace of the planning service), the rule move_group itself applies before executing a trajectory; read once. Not readable,
++        or 0 (move_group's own check disabled) -> MoveIt's documented default 0.01 rad. -> (value, source text)."""
++        hit = getattr(self, "_start_tol", None)
++        if hit is not None:
++            return hit
++        from rcl_interfaces.srv import GetParameters
++        name = "trajectory_execution.allowed_start_tolerance"
++        srv = self.mj.plan_service.rsplit("/", 1)[0] + "/move_group/get_parameters"
++        val, why = None, ""
++        try:
++            cl = self.ctx.node.create_client(GetParameters, srv, callback_group=self.cb)
++            req = GetParameters.Request()
++            req.names = [name]
++            resp = call_service(cl, req, timeout_s, wait_service_s=min(1.0, timeout_s))
++            if resp is None or not resp.values:
++                why = f"{srv} not available"
++            elif resp.values[0].type == 3 and float(resp.values[0].double_value) > 0.0:     # PARAMETER_DOUBLE
++                val = float(resp.values[0].double_value)
++            else:
++                why = f"{name} not set or 0 on move_group"
++        except Exception as e:  # noqa: BLE001 - the documented default stands in, and says so
++            why = f"{type(e).__name__}: {e}"
++        self._start_tol = (val, f"move_group {name}") if val is not None else \
++            (0.01, f"MoveIt default allowed_start_tolerance 0.01 rad ({why})")
++        return self._start_tol
++
+     def weld_torch_model(self, torch, timeout_s: float = 2.0):
+         """The weld torch as the running robot model has it (the lab torch turned in its clamp, 2026-10-13: the URDF is the tool): for a
+         torch on this arm, flange_from_tcp = TF flange_frame <- tcp_frame (static, checked against robot_description) - the record the
+diff --git a/scan_stack/hongik_scan_ros/test/test_moveit_checked_joint.py b/scan_stack/hongik_scan_ros/test/test_moveit_checked_joint.py
+index 566d6bf..3e2767d 100644
+--- a/scan_stack/hongik_scan_ros/test/test_moveit_checked_joint.py
++++ b/scan_stack/hongik_scan_ros/test/test_moveit_checked_joint.py
+@@ -32,6 +32,7 @@ def _backend(js=None):
+         return T
+     latch = NS(is_set=False, reason="")
+     p = NS(mj=mj, latch=latch, fk=lambda: fk, validity_client=object(), chain=lambda: NS(joint_names=list(NAMES)),
++           allowed_start_tolerance=lambda *a, **k: (0.01, "MoveIt default allowed_start_tolerance 0.01 rad (test)"),
+            pose=NS(latest_joint_state=lambda: (0, js), latest_pose=lambda: np.eye(4), history=lambda t: []))
+     be = object.__new__(MA.MoveItJtcBackend)
+     be.p, be.cfg = p, NS(v_eff_max_mps=0.06, progress_s=0.0, progress_cb=None, default_timeout_s=120.0)
+@@ -145,3 +146,19 @@ def test_path_timing_limits_are_the_declared_limits_and_the_dense_step():
+     be, _sent = _backend()
+     assert be.path_timing_limits() == {"joint_velocity_rad_s": 0.24, "joint_path_step_rad": MA.JOINT_PATH_STEP_RAD, "tcp_speed_mps": 0.06,
+                                        "tcp_accel_mps2": 0.1, "rotation_radius_m": 0.2}
++
++
++def test_a_holding_difference_within_move_groups_start_tolerance_is_sent(validity):
++    """KIRO field 2026-10-15 run 002753: the arm held 0.054 deg off the checked start (the former 0.05 deg reuse threshold refused
++    the run) - within move_group's allowed_start_tolerance the checked trajectory is sent; beyond it nothing is sent."""
++    be, sent = _backend()
++    chk = _checked(be)
++    be._fresh_joint_state = lambda what: _js(right=(math.radians(0.054), 0.0))
++    be.move_checked_joint(chk, [1.0, 0.0], 0.06, 0.1)
++    assert sent == [chk["_checked_plan"]["goal"]]
++    be2, sent2 = _backend()
++    chk2 = _checked(be2)
++    be2._fresh_joint_state = lambda what: _js(right=(0.02, 0.0))
++    with pytest.raises(MotionError, match=r"start changed: max joint 1\.1459 deg > 0\.573 deg \(MoveIt default"):
++        be2.move_checked_joint(chk2, [1.0, 0.0], 0.06, 0.1)
++    assert sent2 == []
+diff --git a/scan_stack/scan_l0/scan_l0/teach_1g.py b/scan_stack/scan_l0/scan_l0/teach_1g.py
+index 407ac94..02375e3 100644
+--- a/scan_stack/scan_l0/scan_l0/teach_1g.py
++++ b/scan_stack/scan_l0/scan_l0/teach_1g.py
+@@ -301,7 +301,7 @@ class Teach1G(AutoTeach):
+         self._read_experiments()
+         self._decide_move_speeds()
+         self._decide("setup", f"1G core: taught rough points start {np.round(S0, 4).tolist()} m, end {np.round(E0, 4).tolist()} m; S = the "
+-                              "point visited first (decided before any motion: shortest planned joint move from the start pose (joint_selection)), E = the other; "
++                              "point visited first (decided before any motion: least TCP (torch tip) motion from the start pose: rotation, then distance), E = the other; "
+                               f"weld direction {weld_dir} (job weld_plan.direction; S->E = from the first-visited end); dwell / "
+                               f"transit range {self.job_c.standoff_m * 1e3:.0f} mm, pass plate distance {self.pass_plate_m * 1e3:.0f} mm; "
+                               f"max passes {self.max_passes}, k {self.k:g}, time offset {self.calib.dt_s * 1e3:.2f} ms (calibration; "

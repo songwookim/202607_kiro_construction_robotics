@@ -1,0 +1,64 @@
+# EOAT calibration file for KIRO's right arm (construct_robot_0528_hongik_v2): the Hongik lab calibration of the same sensor
+# (VC nano 3D-Z), the same 1st bracket and torch (eoat_lab_01.yaml of 2026-10-12, measured on the Hongik RB20-1900ES-U), with KIRO's
+# mounting yaw. A STARTING POINT ONLY: the hand-eye (xyz / rpy) must be verified on KIRO's robot, and the time offset (g1.dt_s) measured
+# with KIRO's /joint_states (README section 5). Until then the delivered geometry carries the lab hand-eye.
+#
+# Storage convention: laser_link -> profiler optical frame (downstream of eoat_yaw). It does not depend on the mounting yaw: the same
+# EOAT on another flange keeps these values; only eoat_yaw changes. Our launch publishes it as the static TF
+# <laser_frame> -> <tool_frame> (config hongik_kiro.yaml: hongik_laser_link -> hongik_profiler_optical_frame); the server reads the
+# flange -> optical / eoat transforms from TF (the v2 model + that static TF), so eoat_yaw below is the record of the mounting.
+
+eoat_serial: lab_01                 # the same physical EOAT / sensor
+platform: kiro                      # the platform this file's eoat_yaw belongs to
+copied_from: eoat_lab_01.yaml (2026-10-12)
+
+parent_frame: laser_link            # the EOAT's laser CAD frame (in the v2 model: hongik_laser_link = config laser_frame)
+child_frame: profiler_optical_frame
+
+# laser_link -> optical frame [m], [rad]: the lab hand-eye (2026-10-04 laser-plane rotation, 10-05 two-direction corrections, 10-06 optical
+# origin -25 mm from box-corner calibrations, 10-12 laser-line tilt w_x -1.432 deg from plate-distance passes). Verify on KIRO's robot.
+xyz: [0.047463, 0.001382, -0.099097]
+rpy: [3.11659954, -0.02107031, 1.57079633]
+
+# flange (rbpodo tcp convention, hongik_flange) -> eoat_base_link yaw [rad]: KIRO mounting -90 deg = the lab's (identified 2026-10-13
+# from KIRO's September weld logs and a photo; the torch is turned 180 deg in its clamp - not a calibration value) =
+# hongik_eoat_base_joint of the v2 model r4. (r1-r3 had +90 deg.)
+eoat_yaw: -1.5707963
+
+# sensor time -> robot pose time offset [s] (legacy paths; 0.0 = not calibrated)
+dt_s: 0.0
+
+# 1G core block. dt_s: the lab value with the lab's /joint_states (3.7 +- 1.0 ms) - measure it again with KIRO's /joint_states.
+# he_sigma_m: the posture-dependent hand-eye residual of the lab (plans the overscan). edge_response: the sensor's depth-step response
+# (sensor property, -5 deg pass pitch). noise_priors: population priors of the estimator's variance components (lab RB20 + this sensor,
+# 25 runs) - KIRO's arm is the same RB20 model; the run's own data update them.
+g1:
+  dt_s: 0.0037
+  dt_sigma_s: 0.001                # record only (the 1G core derives the time-offset prior width from the run's sample periods)
+  he_sigma_m: 0.002
+  edge_response:
+    sigma_l_m: 0.000474
+    sigma_l_log_sd: 0.0271
+    theta_tri_deg: 24.345
+    theta_tri_sigma_deg: 0.107
+    source: 'pooled 27 runs at -5 deg pass pitch, 118 legs, reconstructed with the w_x calibration; scan_l0.calib_edge_response (Hongik lab, copied)'
+    date: '2026-10-12'
+  noise_priors:
+    end_crossing: {static_var_m2: 2.9872e-09, timing_var_s2: 1.0000e-14, dynamic_var_s4_m2: 5.4476e-03, nu0: 144.98}
+    end_reading: {static_var_m2: 1.2193e-09, timing_var_s2: 9.7976e-08, dynamic_var_s4_m2: 8.4589e-05, nu0: 12.13}
+    leg_offset_w: {static_var_m2: 1.7385e-10, timing_var_s2: 5.7470e-10, dynamic_var_s4_m2: 5.1137e-08, nu0: 60.75}
+    leg_offset_n: {static_var_m2: 2.1474e-10, timing_var_s2: 2.5554e-08, dynamic_var_s4_m2: 2.2964e-06, nu0: 47.83}
+    # calibrated speed range (2026-10-13, the lab file's - the priors above are the lab's): the measurement speeds s0^2(v) was fitted
+    # over = the commanded measurement speeds of the 25 lab runs (their run logs; scan_l0.calib_noise_priors.speed_range) - a run-time
+    # measurement speed (a job.speed_mps of the server parameter job_overrides, the AutoTeach goal's measure_speed_mps) must lie in it
+    speed_range_mps: [0.015, 0.06]
+    speed_range_source: 'the commanded measurement speeds of the 25 calibration runs (run_log measure_speed / job_rough speed_mps): lowest 15 mm/s (1 run(s), e.g. ks_v15_01), highest 60 mm/s (13 run(s), e.g. kv_rep5_a)'
+    source: 'scan_l0.calib_noise_priors, 25 runs (Hongik lab RB20, copied)'
+    runs: [kv_first_20261011-210957, kv_rep1_a, kv_rep2_a, kv_rep3_a, kv_rep4_a, kv_rep5_a, kv_offA_a, kv_offB_a, kv_fps100a_a, kv_fps100b_a, ks_v30_01, ks_v15_01, g1d_m5_01, g1c_04, k20_1_a, k20_2_a, k20_3_a, k40_1_a, k40_2_a, k40_3_a, k60_1_a, k60_2_a, k60_3_a, x34_first, x34_1]   # the lab calibration runs (copied: the range's n_runs)
+    date: '2026-10-12'
+
+# sensor +X sign (relative to eoat_base_link -y): -1 = +X_opt = +y_eoat (the rpy yaw states the same fact; the code uses rpy)
+x_sign: -1
+
+sensor_param_hash: ''
+date: '2026-10-12'                  # copied from the lab file of this date; not yet verified on KIRO's robot

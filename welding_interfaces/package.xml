@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>welding_interfaces</name>
+  <version>0.0.1</version>
+  <description>Provisional stand-in for KIRO's welding_interfaces (PrecisionSensing action, WeldingPath), reconstructed from the Hongik 2026-10-14 delivery. Replace with KIRO's original package before connecting to KIRO's main system.</description>
+  <maintainer email="thddn191@gmail.com">songwookim</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

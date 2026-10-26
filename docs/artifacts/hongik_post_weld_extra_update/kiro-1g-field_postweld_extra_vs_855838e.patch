@@ -1,0 +1,284 @@
+diff --git a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+index 77c20f9..5beb8f4 100644
+--- a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
++++ b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+@@ -366,10 +366,16 @@ KIRO Servo-J 지연 약 0.5 s × 관절 상한 0.24 rad/s ≈ 0.12 rad 로, 평
+   - 그루브는 위로 열려 있으므로, 이 직선에서 모든 툴 점이 판에서 멀어진다.
+   - 도착 자세는 포락선 전체를 통과해야 한다.
+   - MoveIt 은 이 한 직선만 우리 물체를 장면에서 빼고 검사한다 (로봇 자신·KIRO 고정 구조물은 그대로). 끝나면 다시 넣고, 팔이 물체 밖인지 다시 확인한다.
+-- `post_weld._plan`: (방향 2개 × 진행 부호 2개) 가운데 지금 자세에서 TCP 최소 이동 (토치 회전 → 토치 팁 거리, 13절과 같은 규칙) 으로 고른다. 팔 형태는 그 자세 안에서 관절 이동 시간으로 정한다.
++- `post_weld._plan`: (방향 2개 × 진행 부호 2개) 가운데 지금 자세에서 TCP 최소 이동 (13절과 같은 규칙) 으로 고른다.
++  - 먼저 토치 쪽 (물리 공구 yaw) 가운데 회전이 작은 쪽을 고른다. 두 방향 모두 같은 두 쪽을 가지며, 방향에 따라 피치 기울기만 뒤집힌다.
++  - 그 안에서 토치 팁 거리 (어느 끝부터) 로 고른다. 피치 몇 도 차이로 먼 끝부터 시작하는 일이 없다.
++  - 팔 형태는 그 자세 안에서 관절 이동 시간으로 정한다.
++- 공구 방향 (사용자 2026-10-15): 기본 = 센싱 패스와 같은 공구 방향 (`tool_orientation: pass`) — 센싱 패스는 진행 방향이 바뀌어도 진행 부호를 함께 뒤집어 물리 공구 자세 (플랜지 축·피치 −5°) 를 같게 두므로, 재스캔도 S→E·E→S 어느 쪽이든 패스와 같은 시점이다. 이때 방향은 가까운 끝 (토치 팁 거리). `least_rotation` = 두 토치 쪽 가운데 지금 자세에 가까운 쪽 (용접 뒤 케이블 쪽 유지가 필요할 때). 액션 필드 `tool_orientation`, 클라이언트 `--tool-orientation pass|least-rotation`.
+ - 방향 지정: `PostWeldScan.action` 에 `direction` ('S->E' | 'E->S' | '' = TCP 최소 이동), 클라이언트 `--direction S->E|E->S`, 서버 입력 검사.
+   - 새 액션 필드라 `hongik_scan_msgs` 를 다시 빌드해야 한다 (워크스페이스 전체 빌드에 포함된다).
+ - 재스캔 선 자체는 그대로다: 실측 심 [S − 20, E + 20] mm, 그 실행 패스의 standoff·피치·속도, 원자료만 저장.
++- 플랫폼 능력 검사 (`_universal_ready`: 관절 계획·충돌 장면) 를 세션 시작 (모션 백엔드 생성) 뒤로 옮겼다. 6절에서 이 검사가 백엔드 함수까지 보게 되었는데, 재스캔은 백엔드를 만들기 전에 검사해서, 서버를 새로 띄운 직후 첫 동작이 재스캔이면 거부됐다 (현장 2026-10-15).
++- 실행 폴더 안쪽 폴더 (예: `directions/E_to_S/kiro`) 를 `--run` 으로 주면, 상위 실행 폴더와 `--direction` 사용법을 알려 주며 거부한다.
+ - 시험 (필수만): `test_sim_post_weld` 에 용접 직후 자세 (토치 팁이 판 위 약 30 mm) 에서 E→S 지정 재스캔 → 올라가기·접근·하강·스캔 OK 를 추가했다. `test_post_weld_units` 와 `test_post_weld_action` (메시지 새로 빌드) 도 통과했다.
+ 
+ ---
+diff --git a/scan_stack/hongik_scan_msgs/action/PostWeldScan.action b/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
+index 2d8f563..1fea1c6 100644
+--- a/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
++++ b/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
+@@ -16,8 +16,10 @@ float64 measure_speed_mps              # measurement speed of the scan line [m/s
+ string confirm_mode                    # 'each' | 'large' | 'scan' | 'auto' | 'none' ('' = server parameter confirm_mode); ~/confirm_move
+ bool dry_run                           # plan the line and the moves only: nothing is sent, the sensor is not opened, no folder written
+ uint32 after_pass                      # the pass just completed (1..n of the run's weld plan); 0 = final / unspecified (after every pass)
+-string direction                       # the scan direction: 'S->E' | 'E->S' (the run's S / E); '' = the least TCP motion from the
+-                                       # current pose (torch rotation first, then the torch tip's distance)
++string direction                       # the scan direction: 'S->E' | 'E->S' (the run's S / E); '' = the nearer end (the torch tip's
++                                       # distance from the current pose, with the tool orientation below)
++string tool_orientation                # 'pass' ('' = default): the sensor / torch orientation of the run's sensing passes (the same
++                                       # view as the passes); 'least_rotation': of the two torch sides the one nearer the current pose
+ ---
+ # ===================== result =====================
+ string status                          # OK | DRY_RUN | REFUSED | ABORTED | ERROR
+diff --git a/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py b/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
+index c7ba855..53f3083 100644
+--- a/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
++++ b/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
+@@ -272,8 +272,11 @@ def post_weld_inputs(goal, *, out_root: str, confirm_default: str) -> dict:
+     d = str(getattr(goal, "direction", "") or "").strip().replace(" ", "")
+     if d not in ("", "S->E", "E->S"):
+         raise ValueError(f"direction must be 'S->E', 'E->S' or '' (the least TCP motion), got {d!r}")
++    to = str(getattr(goal, "tool_orientation", "") or "").strip().lower().replace("-", "_") or "pass"
++    if to not in ("pass", "least_rotation"):
++        raise ValueError(f"tool_orientation must be 'pass' (default) or 'least_rotation', got {to!r}")
+     return {"run_dir": run_dir, "measure_speed_mps": v, "confirm": confirm,
+-            "dry_run": bool(getattr(goal, "dry_run", False)), "after_pass": k, "direction": d}
++            "dry_run": bool(getattr(goal, "dry_run", False)), "after_pass": k, "direction": d, "tool_orientation": to}
+ 
+ 
+ class AutoTeachServer(Node):
+@@ -984,7 +987,8 @@ class AutoTeachServer(Node):
+                   + (f"{float(goal.measure_speed_mps) * 1e3:g} mm/s (override)" if float(goal.measure_speed_mps or 0.0) > 0.0
+                      else "the run's measurement speed") + f", confirm '{goal.confirm_mode or self.confirm_mode}', "
+                   + (f"after pass {int(goal.after_pass)}" if int(goal.after_pass or 0) > 0 else "final (after every pass)")
+-                  + f", direction {str(getattr(goal, 'direction', '') or '') or 'least TCP motion'}"
++                  + f", direction {str(getattr(goal, 'direction', '') or '') or 'the nearer end'}"
++                  + f", tool orientation {str(getattr(goal, 'tool_orientation', '') or '') or 'pass'}"
+                   + f", {'dry run' if goal.dry_run else 'scan'}")
+         if goal_handle.is_cancel_requested:
+             return finish("ABORTED", "cancel requested before the scan started (nothing sent)", "canceled")
+@@ -1025,7 +1029,7 @@ class AutoTeachServer(Node):
+         session = ScanSession(robot=self.platform, sensor=None, owned=False)
+         out_dir = out_dir_for(run.run_dir, inp["after_pass"])
+         pw = PostWeldScan(self.settings, run, calib, out_dir=str(out_dir), after_pass=inp["after_pass"],
+-                          direction=inp.get("direction", ""), confirm=inp["confirm"],
++                          direction=inp.get("direction", ""), tool_orientation=inp.get("tool_orientation", "pass"), confirm=inp["confirm"],
+                           dry_run=bool(inp["dry_run"]), measure_speed_mps=inp["measure_speed_mps"], confirm_source=self._confirm_source,
+                           log=self._log, on_event=self._on_event,
+                           local_speed_mps=self.local_speed if self.local_speed > 0 else None,
+diff --git a/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py b/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
+index acc7af9..c2b61f7 100644
+--- a/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
++++ b/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
+@@ -70,8 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
+     ap.add_argument("--after-pass", type=_pass_number, default=0, metavar="K",
+                     help="the pass just completed (1..n of the run's weld plan); default = final (after every pass)")
+     ap.add_argument("--direction", default="", choices=("", "S->E", "E->S"),
+-                    help="scan direction along the run's measured seam (its S / E); default = the least TCP motion from the current "
+-                         "pose (torch rotation first, then the torch tip's distance) - after a weld the torch keeps its side")
++                    help="scan direction along the run's measured seam (its S / E); default = the nearer end (the torch tip's distance "
++                         "from the current pose)")
++    ap.add_argument("--tool-orientation", default="pass", choices=("pass", "least-rotation"),
++                    help="pass (default): the sensor / torch orientation of the run's sensing passes - the same view as the passes; "
++                         "least-rotation: of the two torch sides the one nearer the current pose (e.g. to keep the torch cable's side "
++                         "after a weld)")
+     ap.add_argument("--dry-run", action="store_true", help="plan and print the line and the moves; nothing is sent")
+     ap.add_argument("--action", default=ACTION)
+     ap.add_argument("--server-timeout", type=float, default=30.0)
+@@ -100,6 +104,7 @@ def goal_from_args(a, *, cwd: Optional[Path] = None):
+     g.dry_run = bool(a.dry_run)
+     g.after_pass = int(getattr(a, "after_pass", 0) or 0)
+     g.direction = str(getattr(a, "direction", "") or "")
++    g.tool_orientation = str(getattr(a, "tool_orientation", "pass") or "pass").replace("-", "_")
+     return g
+ 
+ 
+@@ -107,7 +112,7 @@ def goal_line(g) -> str:
+     return (f"post-weld scan goal: run {g.run_dir or '(the latest on the server)'}, measurement speed "
+             + (f"{g.measure_speed_mps * 1e3:g} mm/s (override)" if g.measure_speed_mps > 0 else "the run's measurement speed")
+             + f", {f'after pass {g.after_pass}' if g.after_pass > 0 else 'final (after every pass)'}"
+-            + f", direction {g.direction or 'least TCP motion'}"
++            + f", direction {g.direction or 'the nearer end'}, tool orientation {g.tool_orientation or 'pass'}"
+             + f", confirm {g.confirm_mode}"
+             + (", DRY RUN (nothing sent)" if g.dry_run else "") + " (Ctrl-C = cancel = stop the scan)")
+ 
+diff --git a/scan_stack/scan_l0/scan_l0/post_weld.py b/scan_stack/scan_l0/scan_l0/post_weld.py
+index 4f09e30..26ef451 100644
+--- a/scan_stack/scan_l0/scan_l0/post_weld.py
++++ b/scan_stack/scan_l0/scan_l0/post_weld.py
+@@ -195,6 +195,10 @@ def resolve_run_dir(run_dir: str, out_root) -> Path:
+     if not p.is_dir():
+         raise InputRunError(f"run folder {p} does not exist")
+     if not _is_run_dir(p):
++        up = next((a for a in p.parents if _is_run_dir(a)), None)
++        if up is not None:                                   # e.g. <run>/directions/E_to_S/kiro: a weld-plan set inside the run
++            raise InputRunError(f"{p} is a folder inside the run {up} (a weld-plan output, not a run): give the run folder itself "
++                                f"(--run {up}); the scan direction is chosen with --direction S->E|E->S (default: the least TCP motion)")
+         raise InputRunError(f"{p} is not a finished run folder (needs sections.json and verification/run_log.json)")
+     return p
+ 
+@@ -338,14 +342,18 @@ class PostWeldScan(Teach1G):
+     """One post-weld data-acquisition scan (module docstring). The motion primitives (world, envelope D3, MoveIt check D4,
+     confirmation, joint move, straight legs with sensor recording, cancel, abort path) are the 1G core's."""
+ 
+-    def __init__(self, settings, run: InputRun, calib, *, out_dir, after_pass: int = 0, direction: str = "", **kw):
++    def __init__(self, settings, run: InputRun, calib, *, out_dir, after_pass: int = 0, direction: str = "",
++                 tool_orientation: str = "pass", **kw):
+         job0, doc = run.job_and_doc()
+         kw.pop("max_passes", None)
+         super().__init__(settings, job0, doc, calib, out_dir=out_dir, **kw)
+         self.run_in = run
+         self.direction = str(direction or "").strip().replace(" ", "")
+         if self.direction not in ("", "S->E", "E->S"):
+-            raise ValueError(f"direction must be 'S->E', 'E->S' or '' (the least TCP motion), got {direction!r}")
++            raise ValueError(f"direction must be 'S->E', 'E->S' or '' (the nearer end), got {direction!r}")
++        self.tool_orientation = str(tool_orientation or "pass").strip().lower().replace("-", "_")
++        if self.tool_orientation not in ("pass", "least_rotation"):
++            raise ValueError(f"tool_orientation must be 'pass' or 'least_rotation', got {tool_orientation!r}")
+         self._start_inside: Optional[dict] = None
+         self.after_pass = run.check_after_pass(after_pass)
+         self.vdir = self.out                          # no verification/: the sensor backup goes next to raw.npz
+@@ -416,7 +424,6 @@ class PostWeldScan(Teach1G):
+         if self.spec is None or not (self.spec.weld_length_mm > 0.0):
+             raise _Abort(STATUS_REFUSED, "the input run has no specimen design with a weld length (nothing sent)", category="input")
+         self._check_measure_speed()                       # the goal's speed: inside the calibrated range (the 1G core's check)
+-        self._universal_ready()
+         self._motion_config()
+         job0 = self._apply_safety_policy(self.job0)
+         try:
+@@ -453,6 +460,9 @@ class PostWeldScan(Teach1G):
+             raise _Abort(STATUS_REFUSED, str(e), category="config")
+         self.default_speed = float(init.default_speed)
+         self._latch_at_start = self._latch_last()
++        # the platform's joint-space planning and collision scene: checked once the session has its motion backend (KIRO field
++        # 2026-10-15: checked before it, a post-weld scan as the first goal of a fresh server was refused - the backend did not exist yet)
++        self._universal_ready()
+         self._apply_world(f"the run {run.name}'s world (its passes' scene)", inside_ok=True)
+ 
+     # ---- the sensor: the run's settings, raw recording only -----------------------------------------------------------------
+@@ -546,7 +556,11 @@ class PostWeldScan(Teach1G):
+         req = self._wrist2_required()
+         T_now = self._T_now()
+         rows, pool, ctx = [], [], {}
+-        options = [(d_, sg) for d_ in ((self.direction,) if self.direction else ("S->E", "E->S")) for sg in (1, -1)]
++        dirs = (self.direction,) if self.direction else ("S->E", "E->S")
++        if self.tool_orientation == "pass":           # the sensing passes' orientation: per direction its progression sign
++            options = [(d_, int(self._scan_job(line, d_)[0].progression_sign)) for d_ in dirs]
++        else:                                          # both torch sides
++            options = [(d_, sg) for d_ in dirs for sg in (1, -1)]
+         for direction, sign in options:
+             key = f"{direction} {sign:+d}"
+             job, rot = self._scan_job(line, direction, sign)
+@@ -592,9 +606,19 @@ class PostWeldScan(Teach1G):
+                         f"TCP motion: rotation {r_['tool_rot_from_now_deg']:.0f} deg, torch tip {r_['tcp_move_mm']:.0f} mm; "
+                         f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it"
+                         + (f" ({', '.join(r_['fails'][:2])})" if r_.get("fails") else "")) for r_ in rows)
+-        # the tool pose and the direction: the least TCP motion from here (KIRO field 2026-10-15: after a weld the torch keeps its side
+-        # - the rule of the acquisition), torch rotation first, then the torch tip's distance; the joint path of that pose by duration
+-        usable = sorted((k_ for k_ in ctx if any(c.get("key") == k_ for c in ranked)), key=lambda k_: (ctx[k_]["rot"], ctx[k_]["tcp_m"]))
++        # the tool pose and the direction (user 2026-10-15): tool orientation 'pass' (default) = the sensing passes' (one option per
++        # direction - the same view as the passes), 'least_rotation' = the torch side nearer the current pose (the acquisition's
++        # rule); then the nearer end (the torch tip's distance); the joint path of that pose by duration
++        # the physical tool yaw (the torch's side) of an option: its progression sign in the S->E frame - both directions offer the
++        # same two sides, their pitch tilt only flips; the side with the smaller rotation first, then the torch tip's distance (which
++        # end first), so a few degrees of pitch never send the scan to the far end
++        side = {k_: int(ctx[k_]["job"].progression_sign) * (1 if ctx[k_]["direction"] == "S->E" else -1) for k_ in ctx}
++        side_rot = {}
++        for k_, sd in side.items():
++            side_rot[sd] = min(side_rot.get(sd, math.inf), ctx[k_]["rot"])
++        rank_side = {sd: i for i, sd in enumerate(sorted(side_rot, key=lambda sd: side_rot[sd]))}
++        usable = sorted((k_ for k_ in ctx if any(c.get("key") == k_ for c in ranked)),
++                        key=lambda k_: (rank_side[side[k_]], ctx[k_]["tcp_m"], ctx[k_]["rot"]))
+         if not usable:
+             self._decide("plan", f"no direction can be planned: {txt}", options=_jsonable(rows))
+             raise _Abort(STATUS_REFUSED, f"post-weld scan: no arm configuration reaches the scan start and follows the line "
+@@ -604,7 +628,8 @@ class PostWeldScan(Teach1G):
+         direction = cx["direction"]
+         same = [c for c in ranked if c.get("key") == key]
+         job, ovs = cx["job"], cx["ovs"]
+-        plan = {"direction": direction, "first_end": cx["first"], "ranked": same, "T_pre": cx["T_pre"], "T_from": cx["T_from"],
++        plan = {"direction": direction, "tool_orientation": self.tool_orientation, "first_end": cx["first"], "ranked": same,
++                "T_pre": cx["T_pre"], "T_from": cx["T_from"],
+                 "T_to": cx["T_to"], "job": job, "line": line, "depth_m": D, "retreat_m": retreat,
+                 "overscan": {"span_m": line["span_m"], "speed_ramp_m": ramp, "settling_m": settle, "first_end_m": cx["ov"]["first_m"],
+                              "last_end_m": cx["ov"]["last_m"], "hit_offset_m": float(ovs["hit_offset_m"]),
+@@ -621,8 +646,10 @@ class PostWeldScan(Teach1G):
+                              f"from {st['n_legs']} leg(s) of the run, {st['source']}), {ramp * 1e3:.2f} mm at the other end (speed ramp); "
+                              f"leg {L_leg * 1e3:.1f} mm at {float(job.speed_mps) * 1e3:.1f} mm/s, standoff {float(job.standoff_m) * 1e3:.1f} "
+                              f"mm, pitch {float(job.pitch_deg):+.1f} deg, progression {int(job.progression_sign):+d}; "
+-                             f"orientation choice: {txt} -> {key} (the least TCP motion from here: torch rotation "
+-                             f"{cx['rot']:.0f} deg, torch tip {cx['tcp_m'] * 1e3:.0f} mm"
++                             f"orientation choice: {txt} -> {key} ("
++                             + ("tool orientation of the sensing passes" if self.tool_orientation == "pass" else
++                                f"the torch side with the smaller rotation ({cx['rot']:.0f} deg)")
++                             + f", then the nearer end: torch tip {cx['tcp_m'] * 1e3:.0f} mm"
+                              + (f"; direction {self.direction} as asked" if self.direction else "; both directions")
+                              + f"{'' if self._wrist2_required() == 'any' else ', wrist2 ' + self._wrist2_required()})",
+                      plan=_jsonable({k_: v_ for k_, v_ in plan.items() if k_ not in ("ranked", "job", "line")}),
+@@ -745,7 +772,8 @@ class PostWeldScan(Teach1G):
+             order = ("span_to", "span_from")
+         else:
+             order = ("span_from", "span_to")
+-        rec = {"base_frame": self.run_in.base_frame, "direction": p.get("direction"), "span_m": line["span_m"],
++        rec = {"base_frame": self.run_in.base_frame, "direction": p.get("direction"), "tool_orientation": p.get("tool_orientation"),
++               "span_m": line["span_m"],
+                "data_span_s_m": [line["s_from_m"], line["s_to_m"]], "measured_length_m": line["L_m"],
+                "s": "s = (P - S).u from the measured S end along the measured seam axis u (S->E); the root line",
+                "base_m": {k: _jsonable(np.asarray(v, dtype=float)) for k, v in pts.items()},
+diff --git a/scan_stack/scan_l0/tests/test_post_weld_units.py b/scan_stack/scan_l0/tests/test_post_weld_units.py
+index 04104eb..b8e1873 100644
+--- a/scan_stack/scan_l0/tests/test_post_weld_units.py
++++ b/scan_stack/scan_l0/tests/test_post_weld_units.py
+@@ -7,6 +7,7 @@ import json
+ import math
+ import os
+ import time
++from pathlib import Path
+ 
+ import numpy as np
+ import pytest
+@@ -143,6 +144,10 @@ def test_run_dir_resolution_latest_name_and_absolute(tmp_path):
+         resolve_run_dir("missing", root)
+     with pytest.raises(InputRunError, match="not a finished run folder"):
+         resolve_run_dir("not_a_run", root)
++    inner = Path(b) / "directions" / "E_to_S" / "kiro"                 # a weld-plan set inside a run: the run is named
++    inner.mkdir(parents=True)
++    with pytest.raises(InputRunError, match=r"is a folder inside the run .*b_newer .*--run .*--direction"):
++        resolve_run_dir(str(inner), root)
+     with pytest.raises(InputRunError, match="does not exist"):
+         latest_run(tmp_path / "nowhere")
+     assert issubclass(InputRunError, ValueError)
+diff --git a/scan_stack/scan_l0/tests/test_sim_post_weld.py b/scan_stack/scan_l0/tests/test_sim_post_weld.py
+index dfe64ec..964cce6 100644
+--- a/scan_stack/scan_l0/tests/test_sim_post_weld.py
++++ b/scan_stack/scan_l0/tests/test_sim_post_weld.py
+@@ -105,13 +105,14 @@ def test_post_weld_scan_after_a_1g_run_covers_S_minus_20_to_E_plus_20_at_the_mea
+         T_low[:3, 3] -= n_up * 0.12                       # the torch tip ~30 mm above the plate top (inside C = 50 mm)
+         q_low = next(np.asarray(c["q"]) for c in cell.arm.reach_candidates(T_low, avoid_collisions=False))
+         cell.arm.pose.place(q_low)
++        cell.arm._backend = None                          # as on a fresh server: the scan is its first goal (no motion backend yet)
+         pw2, res2, lines2 = _post_weld(st, cell, run_dir, calib, after_pass=2, direction="E->S")
+     assert res2.status == "OK", (res2.status, res2.reason, lines2[-8:])
+     mv2 = executed(pw2.res)
+     assert [m["name"] for m in mv2] == ["post_weld_lift", "post_weld_approach", "post_weld_descend", "post_weld_scan"], \
+         [m["name"] for m in mv2]
+     assert mv2[0]["phase"] == "ascend" and mv2[0]["rot_deg"] < 1e-3 and mv2[0]["dist_mm"] > 0.0, mv2[0]
+-    assert pw2.plan["direction"] == "E->S"
++    assert pw2.plan["direction"] == "E->S" and pw2.plan["tool_orientation"] == "pass"
+     assert res.status == "OK" and res.category is None, (res.status, res.reason, lines[-8:])
+     out = run_dir / os.path.basename(res.out_dir)
+     assert out.name.startswith(OUT_PREFIX + "final_") and out.is_dir() and res.out_dir == str(out) and res.after_pass == 0
+@@ -198,3 +199,6 @@ def test_post_weld_scan_after_a_1g_run_covers_S_minus_20_to_E_plus_20_at_the_mea
+     assert "ShutterTime" in run_init and int(run_init["ExposureMode"]) == 0             # fixed exposure (no auto exposure)
+     print(f"[post-weld] {lines[-1]}; hit span {lo * 1e3:.1f} .. {hi * 1e3:.1f} mm at constant {V_RUN * 1e3:.0f} mm/s (L {L * 1e3:.1f} mm), "
+           f"overscan first {ov['first_end_m'] * 1e3:.2f} / last {ov['last_end_m'] * 1e3:.2f} mm")
++    # the default tool orientation = the sensing passes' (the same view): the lift scan's flange orientation = the last pass's
++    assert rot_between_deg(m_pass["to_R"], mv2[3]["to_R"]) < 1.0, rot_between_deg(m_pass["to_R"], mv2[3]["to_R"])
++    assert ln["tool_orientation"] == "pass"

@@ -1,0 +1,93 @@
+# scan_l0 예제 작업: 1G (시편 눕힘, 테이블 위 평판). base_frame(link0) 기준, m / s / deg.
+# 규칙(R4): 진행방향 ⟂ 중력, 리드인/리드아웃 양쪽, transit 은 광학 원점이 max(specimen_top, 위 점)+safe_clearance+standoff 이상.
+# 실제 값은 teach-start / teach-end 로 채운다 (이 파일은 plan 연습용).
+job:
+  job_id: example_1G
+  start: [0.6, -0.2, 0.05]          # 판 표면 위 시점 (광학 원점이 아니라 표면 점)
+  end: [0.6, 0.3, 0.05]             # 종점 (L = 0.5 m, +y 방향 = 수평)
+  surface_normal: [0.0, 0.0, 1.0]   # 판 법선 (로봇/센서 쪽을 향함)
+  position: 1G                      # 용접 자세 (단일 출처 → orientation flat_1G): 1G = 진행 ⟂ 중력 (플랫폼 gravity_axis_base 와 일관성 검사)
+  standoff_m: 0.32
+  speed_mps: 0.03
+  accel_mps2: 0.2
+  lead_in_m: 0.04
+  lead_out_m: 0.04
+  pitch_deg: -5.0
+  profile_fps: 100.0
+  progression_sign: 1
+  safe_clearance_m: 0.10
+  table_z_m: -0.05                  # 테이블 상판 높이 (base z)
+  specimen_top_z_m: 0.05            # 시편 최상단 (null 이면 start/end z 의 최댓값)
+  bidirectional: false
+  max_laser_tilt_deg: 30.0
+  torch_protrusion_m: 0.1924                # 토치 팁 = CAD 와이어 끝 (토치의 가장 먼 점) − 캘리브 광학 원점 (+z_eoat; 플랫폼 safety 값이 덮어쓴다)
+  torch_lateral_m: [-0.2479, -0.0005]   # 토치 팁 (x, y)_eoat = 우리 토치의 CAD 와이어 끝 (torch_tcp + 20 mm 노즐 축) - the torch turned 180 deg in
+                                        # its clamp (2026-10-13, the lab robot model; fallback - the MoveIt adapter takes it from the model)
+  standoff_min_m: 0.245
+  mode: standard
+  base_frame: link0
+  gravity_axis_base: [0.0, 0.0, -1.0]
+  vertical_direction: down
+  reference_point: optical
+  direction_tol_deg: 20.0
+  check_torch_tip: true
+# ---- 용접 절차 (WPS = scan_core.weld_plan.WeldProcess; 그 기본값과 같은 값 — test_weld_plan 이 대조) ----
+# 출처: KIRO dataset 2026-09-15/16, weld_testspecimen_logs (1.log-4.log, pass_1-4.yaml; 분석 fsv1_work/kiro_dataset; 사용자 승인
+# 2026-10-12). 역할별 값은 [root, fill, cap]. 키를 빼면 그 기본값 (WeldProcess.provenance 에 근거), 옛 작업의 블록도 그대로 읽힌다.
+weld_plan:
+  source: KIRO dataset 2026-09-15/16, weld_testspecimen_logs
+  current_a: [190.0, 230.0, 220.0]      # KIRO [commanded] current_a
+  voltage_v: [24.5, 26.5, 26.0]         # [commanded] voltage
+  wfs_mpm: [8.4, 10.8, 10.2]            # 와이어 송급 (로그 WFS 피드백 = 설정값)
+  speed_mps: [0.005, 0.007, 0.006]      # [execution_conditions] weld_tcp_speed_mm_s 5 / 7 / 6 — 공칭 속도
+  wfs_from_current: [0.06, -3.0]        # 설정선 WFS = 0.06 I - 3.0 m/min (세 설정점에서 정확)
+  voltage_from_current: [0.05, 15.0]    # 설정선 U = 15 + 0.05 I V
+  wire_material: FE-SOLID
+  wire_diameter_mm: 1.2
+  stick_out_mm: 20.0                   # 와이어 돌출 [mm]: 가스 노즐 끝 → 와이어 끝 (비드 겨냥점), 토치 축을 따라 (용접 관행; 사용자
+                                        # 2026-10-13: KIRO 15-20 mm, 우리 20 mm 모두 노즐 끝에서). KIRO 용접 로그에 없다 (1-4.log·pass_1-4.yaml
+                                        # 확인) → 잠정 20; KIRO 값으로 바꿀 것. TCP (컨택트 팁 끝면 중심) 는 노즐 안으로 들어가 있다: TCP → 와이어 끝 =
+                                        # 토치의 노즐 끝 (로봇 URDF 충돌 형상에서 유도, CAD 1.2 mm) + 이 값. KIRO 실행기는 돌출을 적용하지 않는다
+                                        # → kiro/pass_<k>.yaml 의 TCP 자세 = 겨냥점 − (노즐 끝 + 이 값) · z_TCP
+  welding_mode: LSM
+  shielding_gas: CO2 100%
+  deposition_efficiency: 0.95           # KIRO root + 충전 2 (질량 보존 85.2 mm2) = 잰 10T 그루브 (k20_2_a 85.5 mm2) -> eta 0.953
+  bead_toe_angle_deg: 30.0              # 볼록 비드의 모양 변수 하나 (사용자 2026-10-13 밤): 토우 현과 원호 접선 사이 각 -> 높이/폭 tan(15 deg)/2
+                                        # = 0.134. 용접한 그대로의 GMAW 토우·플랭크 각의 흔한 문헌 범위 (~20-40 deg) 의 값 (이 공정으로 확인한
+                                        # 출처 없음); KIRO 의 패스별 용접 후 스캔으로 보정 (bead_geometry.crown_ratio_from_profiles). 옛 키
+                                        # bead_aspect_ratio 는 2 atan(2 kappa) 로 읽힌다 (둘 다 주면 거부)
+  travel_angle_deg: [-42.0, [-41.0, -44.0], -44.0]   # + 미는 각 / - 끄는 각: root -42, 충전은 층 순서 -41 -> -44 (마지막 값이 이어진다),
+                                        # 캡 -44 (KIRO 9 월 용접은 끄는 각)
+                                        # KIRO confirmed 2026-10-13: backhand (drag). The TCP roll follows the travel angle's sign
+                                        # (scan_core.weld_orient NECK_RULE); a site override: --set weld_plan.travel_angle_deg=[...]
+  work_angle_deg: [9.0, [-20.0, 7.0], 7.0]   # root +9, 충전 -20 -> +7, 캡 +7; + = 와이어 / 토치 축이 베벨면 쪽으로 — KIRO 가 2026-09-15/16 +
+                                        # 09-22 에 실제로 용접한 각 (로그의 관절 FK, 식별한 토치: 장착 -90 deg, 토치 뒤집힘; 노즐 축; 두 세션 평균,
+                                        # 1 deg 반올림 — scan_core.weld_plan WPS_PROVENANCE["angles"]). 작업각 부호: 베벨은 KIRO 진행의 왼쪽
+                                        # (사용자 2026-10-13 밤; 앞의 '오른쪽' 가정을 고침) — KIRO 부호의 반대. 루트 +9 = 와이어가 루트면/베벨면
+                                        # 모서리 쪽, 충전 1 -20 = 직각면 모서리 쪽, 충전 2·캡 +7 = 토치가 직각 벽 쪽으로 조금 기울어 와이어가
+                                        # 베벨면을 본다. 횡 겨냥은 KIRO 의 관행 (루트 = 루트면/베벨면 모서리, 충전 1 = 루트 비드가 직각면과 만나는
+                                        # 모서리, 충전 2 = 그루브 지금 표면의 가로 중앙, 캡 = 그루브 상부 가로 중앙) — 잰 단면에서 (WPS_PROVENANCE["aim_rule"])
+  speed_limits: [1.0, 1.0]              # KIRO 설정은 그대로 (명령으로 보내지 않는다, 사용자 2026-10-12): 속도 적응 없음 -> 층 높이 = 고정 용착
+  weave_pattern: sine                   # 캡 위빙 (KIRO 실행기가 만든다; 패스 4 로그) — 우리 캡 모형도 +-4 mm (토치 y)
+  weave_axis: tool_y
+  weave_amplitude_mm: 4.0
+  weave_cycles: 16                      # KIRO 설정 (그 119.6 mm 패스에서 피치 7.48 mm)
+  weave_pitch_mm: 7.8                   # 설정 피치
+  weave_dwell_s: 0.2                    # 양 끝 (left / right) 머묾
+  weave_samples_per_cycle: 12
+  lead_in_mm: [1.0, 1.0, 0.0]           # 실행기 리드인·아웃·아크 끄기 지연 (캡은 0)
+  lead_out_mm: [6.0, 6.0, 0.0]
+  arc_off_delay_ms: [500.0, 500.0, 0.0]
+# ---- 용접 설계 (이음 설계 specimen 과 나란히; scan_core.weld_plan.WeldDesign — 그 기본값과 같은 값, test_weld_plan 이 대조) ----
+# 캡 보강 (판 상면 위 높이) 의 공칭·공차: 층 수를 고르는 설계 입력 (공차 안인 배치, 없으면 가장 가까운 배치 + 표시).
+# 기본 = KIRO 데이터셋에서 유도 (KIRO dataset 2026-09-15/16, weld_testspecimen_logs): KIRO root + 충전 2 + 캡을 잰 10T 그루브 (k20_2_a
+# 85.5 mm2) 에 볼록 비드 기하 (scan_core.bead_geometry, 2026-10-13 밤; 토우각 30 deg) 로 놓은 캡의 높이 1.87 mm (그루브 상부 모서리를 잇는
+# 선 위); 공차 = 같은 유도의 용착 효율 0.90..1.00 범위 (1.68..2.05 mm). 평평한 층·포물선 캡 띠 모형에서는 3.2 +- 0.65 mm 였다.
+weld_design:
+  cap_reinforcement_mm: {nominal: 1.87, tol: 0.19}
+  end_inset_mm: {start: 0.0, goal: 0.0}   # 용접선 끝 inset (사용자 2026-10-12): 모든 층의 시작·끝 (그 패스의 진행 방향) 을 잰 끝에서
+                                          # 심을 따라 이만큼 안쪽으로 — 계획 출력 (weld_plan.*, kiro/, 액션 결과 paths) 만; 0 = 잰 끝 그대로
+  source: KIRO-derived default (KIRO dataset 2026-09-15/16, weld_testspecimen_logs)
+teach: {}
+meta:
+  note: example (not taught)

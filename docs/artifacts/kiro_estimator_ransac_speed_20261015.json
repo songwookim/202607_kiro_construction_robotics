@@ -1,0 +1,30 @@
+{
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-215016_scan",
+  "points": 2378606,
+  "profiles": 1846,
+  "source_npz_sha256": "439c2b5401e363b7532ab14d7f9ee1aad5aa57bfe708977686c217fa146a5f62",
+  "before_seconds": {
+    "coverage": 0.7203515939909266,
+    "estimate": 15.651468178999494,
+    "teaching": 0.5062118719943101
+  },
+  "after_seconds": {
+    "coverage": 0.7734940020018257,
+    "estimate": 7.705936508995364,
+    "teaching": 0.5102462900104001
+  },
+  "compared_numeric_fields": 1067,
+  "max_numeric_delta": 0.0,
+  "comparison": "All estimate JSON, eight KIRO pass/info YAMLs and four final teaching YAMLs; creation timestamps excluded.",
+  "conditions": "Same saved data and interpreter, cProfile enabled, nice 19, RAM output. Concurrent system load affects elapsed times; not a hardware cycle measurement.",
+  "changes": [
+    "Avoid N x 2 allocation and BLAS dispatch in every 2D RANSAC trial",
+    "Count each inlier mask once and retain the winning count"
+  ],
+  "unchanged": [
+    "Scan trajectory, speed and both recorded directions",
+    "All input points, RNG draws and RANSAC iterations",
+    "Fit thresholds, QC and coverage checks",
+    "Saved correction, per-pass endpoint trims, tool attitudes and weave conditions"
+  ]
+}

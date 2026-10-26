@@ -1,0 +1,156 @@
+{
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-180308_scan",
+  "before_s": 24.490379162001773,
+  "after_s": 5.615444741997635,
+  "all_output_fields_match": true,
+  "max_numeric_delta": 0.0,
+  "measured": "2026-10-15T19:53:18.289678",
+  "python": "3.10.12",
+  "point_count": 2177479,
+  "scope": "estimate_groove only, same saved cloud and environment with cProfile enabled; excludes scan motion, file I/O, target export and IK/planning",
+  "source_npz_sha256": "fc9b9b6de95c9c2fb348c8be5538d41892c592bffa8a5f072eb8a1146cc8fd83",
+  "changes": [
+    "Use grouped exact per-profile medians instead of one full-cloud boolean mask per profile",
+    "Use reduced SVD, keeping the required right singular vectors without the unused square U"
+  ],
+  "unchanged": [
+    "Input points and sampling",
+    "RANSAC iterations and thresholds",
+    "Coverage and specimen quality checks",
+    "Calibration and pass endpoint adjustments"
+  ],
+  "before_output": {
+    "u": [
+      -0.04009151898264834,
+      -0.9990888939186453,
+      -0.014630521319564029
+    ],
+    "w": [
+      0.9991898791944754,
+      -0.04013827557791959,
+      0.002916187401537703
+    ],
+    "n": [
+      -0.0035007743420350794,
+      -0.014501754447281665,
+      0.9998887156563758
+    ],
+    "bevel_side": "left",
+    "S": [
+      0.0012629195745688681,
+      -1.5398276082331195,
+      0.5652572708152199
+    ],
+    "E": [
+      -0.006713747883155962,
+      -1.7386078008954209,
+      0.5623463608207688
+    ],
+    "corner1_S": [
+      0.0012629195745688681,
+      -1.5398276082331195,
+      0.5652572708152199
+    ],
+    "corner1_E": [
+      -0.006713747883155962,
+      -1.7386078008954209,
+      0.5623463608207688
+    ],
+    "length_mm": 198.96146766544678,
+    "end_resolution_mm": 0.05237060309456254,
+    "sections": 10,
+    "sections_skipped": {},
+    "sections_other_side": 0,
+    "corner1_line_rms_mm": 0.08126359856203554,
+    "plate_rms_mm": 0.11432912437256376,
+    "scan_skew_deg": 2.5960327808753796,
+    "end_side_difference_mm": [
+      1.8490539273793871,
+      1.7406940468101482
+    ],
+    "bottom_rms_mm": 0.07725478854190632,
+    "bevel_rms_mm": 0.06653421908261373,
+    "bevel_deg_from_vertical": 31.010296235129545,
+    "depth_mm": 10.018047964966122,
+    "root_gap_sections": 10,
+    "root_gap_from_face": 1,
+    "root_gap_mm": 6.2324109936098,
+    "corner2_S": [
+      0.007321612033489059,
+      -1.5400566503265194,
+      0.565161272329341
+    ],
+    "corner2_E": [
+      -0.00023818251032404342,
+      -1.7388541622814295,
+      0.5623542291738418
+    ]
+  },
+  "after_output": {
+    "u": [
+      -0.04009151898264834,
+      -0.9990888939186453,
+      -0.014630521319564029
+    ],
+    "w": [
+      0.9991898791944754,
+      -0.04013827557791959,
+      0.002916187401537703
+    ],
+    "n": [
+      -0.0035007743420350794,
+      -0.014501754447281665,
+      0.9998887156563758
+    ],
+    "bevel_side": "left",
+    "S": [
+      0.0012629195745688681,
+      -1.5398276082331195,
+      0.5652572708152199
+    ],
+    "E": [
+      -0.006713747883155962,
+      -1.7386078008954209,
+      0.5623463608207688
+    ],
+    "corner1_S": [
+      0.0012629195745688681,
+      -1.5398276082331195,
+      0.5652572708152199
+    ],
+    "corner1_E": [
+      -0.006713747883155962,
+      -1.7386078008954209,
+      0.5623463608207688
+    ],
+    "length_mm": 198.96146766544678,
+    "end_resolution_mm": 0.05237060309456254,
+    "sections": 10,
+    "sections_skipped": {},
+    "sections_other_side": 0,
+    "corner1_line_rms_mm": 0.08126359856203554,
+    "plate_rms_mm": 0.11432912437256376,
+    "scan_skew_deg": 2.5960327808753796,
+    "end_side_difference_mm": [
+      1.8490539273793871,
+      1.7406940468101482
+    ],
+    "bottom_rms_mm": 0.07725478854190632,
+    "bevel_rms_mm": 0.06653421908261373,
+    "bevel_deg_from_vertical": 31.010296235129545,
+    "depth_mm": 10.018047964966122,
+    "root_gap_sections": 10,
+    "root_gap_from_face": 1,
+    "root_gap_mm": 6.2324109936098,
+    "corner2_S": [
+      0.007321612033489059,
+      -1.5400566503265194,
+      0.565161272329341
+    ],
+    "corner2_E": [
+      -0.00023818251032404342,
+      -1.7388541622814295,
+      0.5623542291738418
+    ]
+  }
+}

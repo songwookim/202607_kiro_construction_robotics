@@ -1,0 +1,365 @@
+diff --git a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+index 313c086..08f27a1 100644
+--- a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
++++ b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+@@ -20,6 +20,7 @@
+ | 10 | B5 추종 기록 | JTC 경로 허용오차 중단 (134838) 의 원인을 기록에서 볼 수 없었음 | 관절 이동마다 기준−피드백 최대 오차를 기록 | c21c8df |
+ | 11 | B6 메시지 | 거부 이유가 현장에서 바로 이해되지 않음 | 세계 안 시작·90° 심 거부 메시지 보강 | c21c8df |
+ | 12 | 양방향 출력 | 한 번 센싱으로 두 방향 모두 용접할 수 있어야 함 | `directions/S_to_E/`, `directions/E_to_S/` 를 매 실행 출력 (D14 포함) | e1cf40f |
++| 13 | 센싱 자세 선택 = TCP 최소 이동 | 관절 이동 최소로 고른 획득 자세가 토치를 115° 돌려 베이스 반대쪽으로 보냄 → 와이어가 베이스에서 반대쪽까지 돌아감 (21:44) | 공구 자세를 토치 팁 TCP 의 회전 최소 → 토치 팁 거리 최소로 고르고, 관절 이동 시간은 그 자세의 팔 형태만 정함 | f0774b6 |
+ 
+ ---
+ 
+@@ -291,6 +292,47 @@ KIRO Servo-J 지연 약 0.5 s × 관절 상한 0.24 rad/s ≈ 0.12 rad 로, 평
+ 
+ ---
+ 
++## 13. 센싱 자세 선택: 관절 최소 → TCP (토치 팁) 최소 이동 (f0774b6)
++
++**왜**:
++- 현장 21:44 실행 (214451): 획득 자세의 두 공구 방향 (진행 부호 ±1, 판 법선 둘레 yaw 180° 차이) 이 모두 가능했다.
++  - 진행 −1: 관절 이동 시간 7.3 s (관절 합 156°), 토치 회전 115°, 토치 팁 이동 226 mm.
++  - 진행 +1: 관절 합 288°, 토치 회전 75°, 토치 팁 이동 418 mm.
++- 6절 (B1) 의 선택은 두 방향을 한 무리로 놓고 관절 이동 시간 최소를 골랐다. 그래서 −1 이 선택됐다.
++  - 시작 자세에서 토치는 플랜지 축 기준으로 로봇 베이스 쪽 (+122 mm) 에 있었다.
++  - −1 은 토치를 115° 돌려 베이스 반대쪽 (−238 mm) 으로 보낸다.
++  - 용접기·와이어 송급장치는 로봇 베이스에 있으므로 와이어가 베이스에서 반대쪽까지 돌아간다.
++- KIRO: 관절 최소 이동은 정상 동작이지만, 직관적인 이동은 TCP 최소 이동이다. 제약 (예: 케이블 쪽 금지 규칙) 을 추가하지 않고 선택 기준을 바꾼다 (사용자 결정).
++- TCP 는 토치 팁이다 (사용자). 중요한 것은 토치와 와이어가 돌아가지 않는 것이다.
++  - 토치 팁 거리만으로는 −1 (226 mm < 418 mm) 이 다시 뽑힌다.
++  - 시작 자세의 플랜지 축이 기울어 있어서, 돌아간 토치의 팁이 오히려 가까이 온다.
++  - 그래서 TCP 틀의 회전을 먼저 본다.
++
++**무엇을·어떻게** (`scan_l0/scan_l0/autoteach.py`):
++- `_tcp_in_flange`: TCP = 이 팔의 용접 토치 팁 (`weld_torch.tcp_frame`, KIRO: `right_manipulator_ee_point`, 로봇 모형의 플랜지 ← TCP). 토치가 이 팔에 없으면 센서 광학 원점.
++- `_tcp_motion(T_from, T_to)` → (토치 팁 직선 거리, TCP 틀 회전각).
++- `_plan_acquisition`: 공구 방향 (진행 부호) 을 다음 순서로 고른다.
++  1. 지금 자세에서 TCP 틀 회전이 작은 방향
++  2. 그다음 토치 팁 거리
++  - 그 방향의 IK 해 가운데 팔 형태는 이전처럼 관절 이동 시간 최소 (`_select_joint`, ψ_b 띠 선호 포함) 로 정한다.
++  - 그 방향에 쓸 수 있는 경로가 없을 때만 다른 방향으로 간다.
++- `_choose_visit_order` (어느 끝부터): 다음 순서로 고른다.
++  1. 회전이 작은 공구 방향 (두 순서 모두 같은 두 방향을 가진다)
++  2. 토치 팁 거리
++  3. 관절 이동 시간
++  - 가지치기: 지금 순서가 회전이 작은 방향이고, 다른 순서가 같은 방향에서 토치 팁 이동이 더 길면 계획하지 않는다 (자세만, 정확).
++- 이전의 관절 시간 하한 가지치기 (`_acquisition_duration_bound`) 는 `_acquisition_motions` 로 바뀌었다.
++- 기록: `visit_order.options[*].tcp_move_mm`·`tool_rot_deg`, `visit_order.tcp_move_mm`·`tcp`, `order_options[*].tcp_move_mm`·`tool_rotation_deg`.
++- 설정·상수 추가 없음. 이후 모든 패스는 이전과 같이 획득 때의 물리 공구 자세를 유지한다. 그래서 고른 토치 쪽이 끝까지 간다.
++
++**현장 영향**:
++- 시작 자세에 따라 토치 쪽이 정해진다.
++  - 21:44 시작 자세라면 +1 (토치 75° 회전, 베이스 쪽 유지) 이 선택된다.
++  - 토치를 베이스 쪽에 두고 시작하면 그 쪽이 유지된다.
++- 연구실 10-14 01:49 실행 (회전 54° vs 174°) 은 이전과 같은 −1 이다.
++
++---
++
+ ## KIRO 쪽에서 바뀌는 것
+ 
+ 1. **서버는 우리 런치 (`hongik_moveit.launch.py`) 로 띄운다.**
+@@ -326,6 +368,12 @@ KIRO Servo-J 지연 약 0.5 s × 관절 상한 0.24 rad/s ≈ 0.12 rad 로, 평
+     - 정밀 센싱 액션 전체 흐름 (가짜 팔): 획득 → 센싱 → 계획 → D14 → 양방향 출력.
+     - 시간 기준 관절 선택과 확인 궤적 전송.
+     - 서비스 호출과 종료 처리.
++- 13절 (TCP 최소 이동) 은 필수 시험만 돌렸다 (사용자 2026-10-14: 무거운 시험 제외).
++  - 통과: `test_sim_teach1g::test_i_dry_run_plans_only` (가상 팔에서 획득·방문 순서 계획), `test_joint_selection`, `test_autoteach_units`,
++    `test_autoteach_round4_units`, `test_autoteach_serpentine_units`, `test_post_weld_units`, `test_l0_config_plan`.
++  - `test_seam_end_identification::test_sporadic_ghost_points_beyond_a_real_end_do_not_make_it_occluded` 1개 실패 (길이 오차 1.43 mm > 1.0).
++    합성 패스 맞춤 (`fit_pass`) 시험이라 획득 계획 코드를 지나지 않는다.
++  - 가상 팔 종단 (`test_sim_teach1g` 전체)·가짜 move_group 종단은 돌리지 않았다.
+ - 이 환경에서 원래부터 실패하는 시험은 이번 변경과 무관하다.
+   - `test_seam_estimate` 시간 시험 2개
+   - `test_post_weld_action::test_cli_arguments_and_goal` (연구실 메시지 빌드)
+diff --git a/scan_stack/scan_l0/scan_l0/autoteach.py b/scan_stack/scan_l0/scan_l0/autoteach.py
+index bab49e1..6efbb51 100644
+--- a/scan_stack/scan_l0/scan_l0/autoteach.py
++++ b/scan_stack/scan_l0/scan_l0/autoteach.py
+@@ -3412,37 +3412,52 @@ class AutoTeach:
+         T_pre[:3, 3] += job.normal_unit * float(self.job0.safe_clearance_m)
+         return job, T_pre, T_in, T_out
+ 
+-    def _acquisition_duration_bound(self) -> Optional[float]:
+-        """지금 대략 순서의 획득 이동 시간 하한 [s]: 두 진행 부호의 물러난 자세 IK 해 (지금 관절에 가까운 2π 표현 포함, 허용 손목 형태만) 의
+-        joint_selection.duration_lower_bound (any joint path from the current joints, the platform's limits) 최솟값 — 추종·yaw 띠·포락선·
+-        경로 검사는 후보를 빼기만 하므로 _plan_acquisition 이 고를 이동 시간은 이 값 이상. 추종 없이 IK 만 (follow=[]). 지금 관절이나
+-        플랫폼 한계를 모르거나 해가 없으면 None."""
+-        q_now = self._q_now()
+-        if q_now is None or self._q_now_chain() is None or not callable(getattr(self.rs.backend, "path_timing_limits", None)):
+-            return None
+-        req = self._wrist2_required()
+-        v = min(float(self.transit_speed), self.cfg.v_eff_max_mps)
+-        best = None
++    def _tcp_in_flange(self) -> tuple:
++        """The robot's TCP in the flange frame: the weld torch tip (weld_torch TCP on this arm - KIRO: right_manipulator_ee_point, the
++        robot model's flange <- TCP); without a torch on this arm the sensor's optical origin (the tool it carries). -> (xyz [m], name)."""
++        wt = getattr(self, "weld_torch", None)
++        if wt is not None and getattr(wt, "on_this_arm", False):
++            return np.asarray(wt.flange_from_tcp.t, dtype=float).copy(), f"torch tip {wt.tcp_frame}"
++        return np.asarray(self.calib.T_flange_opt, dtype=float)[:3, 3].copy(), "the sensor optical frame"
++
++    def _tcp_motion(self, T_from, T_to) -> tuple:
++        """TCP motion between two flange poses: (straight-line distance of the TCP [m], tool rotation [deg])."""
++        tcp, _nm = self._tcp_in_flange()
++        A, B = np.asarray(T_from, dtype=float), np.asarray(T_to, dtype=float)
++        d = (B[:3, :3] @ tcp + B[:3, 3]) - (A[:3, :3] @ tcp + A[:3, 3])
++        return float(np.linalg.norm(d)), _rot_angle_deg(A[:3, :3], B[:3, :3])
++
++    def _acquisition_motions(self) -> dict:
++        """{progression sign: (TCP distance [m], tool rotation [deg])} from the current flange pose to each sign's retreat pose of the
++        current visiting order - poses only, no IK ({} without a current pose)."""
++        if self._q_now() is None:
++            return {}
++        T_now = self._T_now()
++        out = {}
+         for sign in self._progression_signs():
+             try:
+                 _job, T_pre, _T_in, _T_out = self._acquisition_poses(sign)
+             except (EnvelopeError, JobError):
+                 continue
+-            cands = [c for c in self.rs.reach_candidates(T_pre, follow=[], q_now=q_now, sigma_radius_m=self._lever_m())
+-                     if req == "any" or not wrist2_branch_problem(c.get("names") or [], np.asarray(c["q"]), req)]
+-            for b in self._duration_bounds(cands, v):
+-                best = b if best is None else min(best, b)
+-        return best
++            out[sign] = self._tcp_motion(T_now, T_pre)
++        return out
++
++    def _tool_side(self, sign: int) -> int:
++        """The physical tool orientation of a progression sign, in the taught S->E frame (the visiting order swaps the internal S/E:
++        sign +1 of the swapped job = the tool yaw of sign -1 of the taught one)."""
++        return int(sign) * (-1 if self.res.rough_swapped else 1)
+ 
+     def _plan_acquisition(self, name: str) -> Optional[dict]:
+         """거친 작업의 첫 드웰 (착점 S0) 로: 진행 부호 × IK 해마다 [물러난 자세 → 드웰 → E0 드웰] 을 직선으로 이어 따라가 보고 (플랫폼
+-        reach_candidates — IK 해는 지금 관절에 가장 가까운 2π 동치 표현도 후보), 두 진행 부호의 후보를 **한 무리로** (사용자 2026-10-09:
+-        진행 부호는 IK 해 개수가 아니라 시작 자세에서의 이동으로). 캘리브를 만든 팔 형태 집합이 정해져 있으면 (wrist2_branch_1g/3g) 그
+-        안에서만. The arm configuration (and with it the progression sign) = the shortest planned joint-space move from here
+-        (_select_joint, KIRO field 2026-10-14: duration under the platform's limits, not sum |dq| - run 134838 executed a 352 deg flange
+-        turn), and in that duration order the first one that also follows the +-psi_b rotations S_align may need (_prefer_yaw_band,
+-        within REACH_CANDIDATE_BUDGET; else the shortest). 물러남 = job.safe_clearance_m. 후보가 없거나 경로가 없으면 None
+-        (self._acq_fail = why when no joint path)."""
++        reach_candidates — IK 해는 지금 관절에 가장 가까운 2π 동치 표현도 후보). 캘리브를 만든 팔 형태 집합이 정해져 있으면
++        (wrist2_branch_1g/3g) 그 안에서만. The tool pose (progression sign = the tool yaw about the plate normal) = the least TCP
++        motion from here, TCP = the torch tip (KIRO field 2026-10-14: the least joint motion turned the torch 115 deg around to the
++        far side where 75 deg kept it - and its wire - on the robot's side; the torch and wire must not swing around): the smaller
++        rotation of the TCP frame first, then the torch tip's distance; the other sign only when this one has no usable path. For
++        that tool pose the arm configuration =
++        the shortest planned joint-space move (_select_joint: duration under the platform's limits), and in that duration order the
++        first one that also follows the +-psi_b rotations S_align may need (_prefer_yaw_band, within REACH_CANDIDATE_BUDGET; else
++        the shortest). 물러남 = job.safe_clearance_m. 후보가 없거나 경로가 없으면 None (self._acq_fail = why when no joint path)."""
+         q_now = self._q_now()
+         retreat = float(self.job0.safe_clearance_m)
+         T_now = self._T_now()
+@@ -3463,11 +3478,12 @@ class AutoTeach:
+                         c["ok"], c["reason"] = False, f"wrist2_branch ({self.res.position}): {why}"
+             for c in cands:
+                 c["sign"] = sign
+-            ctx[sign] = {"T_pre": T_pre, "T_in": T_in, "T_out": T_out, "job": job,
+-                         "tool_rot_deg": _rot_angle_deg(np.asarray(T_now)[:3, :3], T_pre[:3, :3])}
++            tcp_m, rot_deg = self._tcp_motion(T_now, T_pre)
++            ctx[sign] = {"T_pre": T_pre, "T_in": T_in, "T_out": T_out, "job": job, "tool_rot_deg": rot_deg, "tcp_move_m": tcp_m}
+             pool.extend(cands)
+             rows.append({"sign": sign, "n_ik": len(cands), "n_ok": sum(1 for c in cands if c.get("ok")),
+-                         "fails": sorted({c["reason"][:80] for c in cands if not c["ok"]}), "tool_rot_deg": ctx[sign]["tool_rot_deg"]})
++                         "fails": sorted({c["reason"][:80] for c in cands if not c["ok"]}), "tool_rot_deg": rot_deg,
++                         "tcp_move_mm": tcp_m * 1e3})
+         rejected = [c for c in pool if not c.get("ok")]
+         self._decide("acquisition_filter", f"{self._site_label(name)}: {len(pool) - len(rejected)} of {len(pool)} arm configurations "
+                                            "reach the acquisition pose and follow the coarse line (IK / follow / wrist2) - those go to "
+@@ -3482,13 +3498,18 @@ class AutoTeach:
+             r_["reach"] = self._reach_rows(mine)
+             if mine:
+                 r_["best_dist_deg"] = None if mine[0].get("dist_rad") is None else math.degrees(float(mine[0]["dist_rad"]))
+-        sel = None
+-        if ranked:
+-            sel = self._select_joint(ranked, f"acquire_{self._site_label(name)}", prefer=lambda search: self._prefer_yaw_band(search, ctx))
+-            if sel["cand"] is None:
+-                fails = [r_["reason"] for r_ in sel["rows"] if r_["checked"] and not r_["ok"]]
+-                self._acq_fail = (f"no collision-free joint-space path from the current pose to any of the {len(ranked)} arm "
+-                                  f"configurations of the acquisition: {fails[:2]}")
++        sel, fails = None, []
++        for sg in sorted(ctx, key=lambda k_: (ctx[k_]["tool_rot_deg"], ctx[k_]["tcp_move_m"])):     # least TCP motion first
++            mine = [c for c in ranked if c["sign"] == sg]
++            if not mine:
++                continue
++            sel = self._select_joint(mine, f"acquire_{self._site_label(name)}", prefer=lambda search: self._prefer_yaw_band(search, ctx))
++            if sel["cand"] is not None:
++                break
++            fails += [r_["reason"] for r_ in sel["rows"] if r_["checked"] and not r_["ok"]]
++        if ranked and (sel is None or sel["cand"] is None):
++            self._acq_fail = (f"no collision-free joint-space path from the current pose to any of the {len(ranked)} arm "
++                              f"configurations of the acquisition: {fails[:2]}")
+         best = None
+         if sel is not None and sel["cand"] is not None:
+             c0 = sel["cand"]
+@@ -3497,12 +3518,14 @@ class AutoTeach:
+             pl = sel["check"].get("plan") or {}
+             best = {"sign": sg, "ranked": same, "selection": sel, "T_pre": ctx[sg]["T_pre"], "T_in": ctx[sg]["T_in"], "retreat": retreat,
+                     "top_band": bool(c0.get("yaw_band_ok")), "tool_rot_deg": ctx[sg]["tool_rot_deg"],
++                    "tcp_move_m": ctx[sg]["tcp_move_m"],
+                     "duration_s": float(sel["duration_s"]), "bound_s": sel["bound_s"], "route": sel["route"],
+                     "joint_motion_deg": float(sum(pl.get("joint_rotation_deg") or [])) if pl.get("joint_rotation_deg") else None}
+-        opts = [{k_: r_.get(k_) for k_ in ("sign", "n_ik", "n_ok", "tool_rot_deg", "best_dist_deg", "error")} for r_ in rows]
++        opts = [{k_: r_.get(k_) for k_ in ("sign", "n_ik", "n_ok", "tcp_move_mm", "tool_rot_deg", "best_dist_deg", "error")} for r_ in rows]
+         self.res.visit_order["options"] = _jsonable(opts)
+         if best is not None:
+             self.res.visit_order.update(progression_sign=best["sign"], tool_rotation_deg=best["tool_rot_deg"],
++                                        tcp_move_mm=best["tcp_move_m"] * 1e3, tcp=self._tcp_in_flange()[1],
+                                         joint_motion_deg=best["joint_motion_deg"], duration_s=best["duration_s"],
+                                         duration_bound_s=best["bound_s"], route=best["route"],
+                                         joint_plan=_jsonable(sel["check"].get("plan")))
+@@ -3511,12 +3534,15 @@ class AutoTeach:
+                                 f"normal, then "
+                                 f"the coarse S0->E0 line): "
+                      + "; ".join(f"progression {r_['sign']:+d}: " + (r_["error"] if "error" in r_ else
+-                                 f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it, tool rotation from the current pose "
+-                                 f"{r_['tool_rot_deg']:.0f} deg, least joint motion {_fmtf(r_.get('best_dist_deg'), '.0f')} deg"
++                                 f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it, TCP motion from the current pose: "
++                                 f"rotation {r_['tool_rot_deg']:.0f} deg, {r_['tcp_move_mm']:.0f} mm; least joint motion "
++                                 f"{_fmtf(r_.get('best_dist_deg'), '.0f')} deg"
+                                  + (f" ({', '.join(r_['fails'][:2])})" if r_.get("fails") else ""))
+                                  for r_ in rows)
+-                     + (f" -> progression {best['sign']:+d}: the shortest planned joint-space move from here, {best['duration_s']:.1f} s "
+-                        f"({best['route']}; both signs pooled{'' if req == 'any' else ', wrist2 ' + req + ' only (the calibrated configuration)'}); "
++                     + (f" -> progression {best['sign']:+d}: the least TCP motion (rotation {best['tool_rot_deg']:.0f} deg, "
++                        f"{self._tcp_in_flange()[1]} {best['tcp_move_m'] * 1e3:.0f} mm); its arm configuration by the shortest planned joint-space "
++                        f"move, {best['duration_s']:.1f} s ({best['route']}"
++                        f"{'' if req == 'any' else '; wrist2 ' + req + ' only (the calibrated configuration)'}); "
+                         f"{band.get('text', '')}" if best is not None else f" -> none{(': ' + self._acq_fail) if self._acq_fail else ''}"),
+                      rows=_jsonable(rows), options=_jsonable(opts), wrist2_required=req)
+         return best
+@@ -3644,32 +3670,39 @@ class AutoTeach:
+ 
+     def _choose_visit_order(self, name: str, phase: str) -> tuple:
+         """1G 방문 순서 (D7): 두 순서 (지금 = 로봇 베이스에 가까운 착점부터, 다른 끝부터) 를 모두 이동 전에 계획해 보고 (_acquire_plan — IK·추종·
+-        경로 검사·yaw 띠·포락선), 되는 것 중 시작 자세에서의 획득 이동이 짧은 순서 — the same cost that chooses the arm configuration
+-        (the planned duration under the platform's limits; a straight joint line before an OMPL detour). An exact tie keeps the current
+-        order (the hit point nearer to the robot base). Pruning (exact): when the current order has a straight joint line of duration
+-        D, the other order is not planned if its duration lower bound (_acquisition_duration_bound, IK only) is not below D. 한 순서만
+-        되면 그 순서 (거부 사유와 상관없이 — IK·추종·경로·포락선 모두, D6).
++        경로 검사·yaw 띠·포락선), 되는 것 중 시작 자세에서의 획득 이동이 작은 순서 — the least TCP motion (TCP = the torch tip, KIRO field
++        2026-10-14): first the physical tool orientation with the smaller rotation of the TCP frame from the start pose (the torch and
++        its wire do not swing around; both orders offer the same two orientations), then the torch tip's distance (which end first),
++        then the planned joint-space duration. An exact tie keeps the current order (the hit point nearer to the robot base). Pruning
++        (exact): when the current order has the less-rotating orientation, the other order is not planned if its torch tip would
++        travel farther with that orientation (poses only). 한 순서만 되면 그 순서 (거부 사유와 상관없이 — IK·추종·경로·포락선 모두, D6).
+         → (best 또는 None, 사유). 고른 순서로 대략 작업을 남긴다."""
+         opts = []
++        rot_side = {self._tool_side(sg): m[1] for sg, m in self._acquisition_motions().items()}   # orientation -> TCP rotation
++        rank = {sd: k_ for k_, sd in enumerate(sorted(rot_side, key=lambda sd: rot_side[sd]))}
++
++        def side(o):
++            return int(o["best"]["sign"]) * (-1 if o["swapped"] else 1)
+ 
+         def key(o):
+-            return (o["best"]["route"] != "straight", float(o["best"]["duration_s"]))
++            return (rank.get(side(o), len(rank)), float(o["best"]["tcp_move_m"]), o["best"]["route"] != "straight",
++                    float(o["best"]["duration_s"]))
+         for i in range(2):
+             if i == 1:
+                 self._derive_jobs(self._swap_rough(self.job0))            # 다른 끝부터 (이동 전, 계획만)
+                 o0 = opts[0]
+-                if o0["best"] is not None and o0["best"]["route"] == "straight":
+-                    lb = self._acquisition_duration_bound()
+-                    if lb is not None and not (lb < float(o0["best"]["duration_s"])):
++                if o0["best"] is not None and rank.get(side(o0)) == 0:
++                    m1 = self._acquisition_motions().get(side(o0) * (-1 if self.res.rough_swapped else 1))
++                    if m1 is not None and m1[0] > float(o0["best"]["tcp_move_m"]):
+                         opts.append({"swapped": bool(self.res.rough_swapped), "first_visited": "end" if self.res.rough_swapped else "start",
+-                                     "best": None, "lb_s": lb, "vo": {},
++                                     "best": None, "lb_tcp_m": m1[0], "vo": {},
+                                      "d_first_m": float(np.linalg.norm(np.asarray(self.job0.start, dtype=float))),
+-                                     "why": (f"not planned: its shortest possible move (lower bound {lb:.1f} s, IK only) cannot beat "
+-                                             f"{float(o0['best']['duration_s']):.1f} s")})
++                                     "why": (f"not planned: with the same tool orientation its TCP would travel {m1[0] * 1e3:.0f} mm "
++                                             f"(> {float(o0['best']['tcp_move_m']) * 1e3:.0f} mm, poses only)")})
+                         continue
+             best, env_why = self._acquire_plan(name, phase)
+-            vo = {k_: self.res.visit_order.get(k_) for k_ in ("options", "progression_sign", "tool_rotation_deg", "joint_motion_deg",
+-                                                              "duration_s", "duration_bound_s", "route", "joint_plan")}
++            vo = {k_: self.res.visit_order.get(k_) for k_ in ("options", "progression_sign", "tcp_move_mm", "tcp", "tool_rotation_deg",
++                                                              "joint_motion_deg", "duration_s", "duration_bound_s", "route", "joint_plan")}
+             d_first = float(np.linalg.norm(np.asarray(self.job0.start, dtype=float)))
+             why = (env_why or getattr(self, "_acq_fail", "") or "no arm configuration reaches the acquisition pose and follows the coarse "
+                    "line") if best is None else ""
+@@ -3677,18 +3710,21 @@ class AutoTeach:
+                          "best": best, "why": why, "vo": vo, "d_first_m": d_first})
+         feas = [k_ for k_, o in enumerate(opts) if o["best"] is not None]
+         rec = [{"first_visited": o["first_visited"], "feasible": o["best"] is not None,
++                "tcp_move_mm": None if o["best"] is None else float(o["best"]["tcp_move_m"]) * 1e3,
++                "tool_rotation_deg": (o["best"] or {}).get("tool_rot_deg"),
+                 "duration_s": (o["best"] or {}).get("duration_s"), "route": (o["best"] or {}).get("route"),
+                 "joint_motion_deg": (o["best"] or {}).get("joint_motion_deg"),
+                 "progression_sign": (o["best"] or {}).get("sign"), "base_distance_m": o["d_first_m"], "why": o["why"],
+-                **({"pruned": True, "duration_lower_bound_s": o["lb_s"]} if "lb_s" in o else {})}
++                **({"pruned": True, "tcp_move_lower_bound_mm": o["lb_tcp_m"] * 1e3} if "lb_tcp_m" in o else {})}
+                for o in opts]
+         self.res.visit_order["order_options"] = _jsonable(rec)
+-        self.res.visit_order["order_rule"] = ("1G: the visiting order with the shortest planned joint-space move from the start pose to the "
+-                                              "acquisition (duration under the platform's limits - the cost that chooses the arm "
+-                                              "configuration; a straight joint line before an OMPL detour); an exact tie keeps the hit "
+-                                              "point nearer to the robot base; the other order is not planned when its duration lower "
+-                                              "bound cannot beat; an order whose acquisition is refused before motion (IK / follow / "
+-                                              "path / envelope) is not used")
++        self.res.visit_order["order_rule"] = ("1G: the visiting order with the least TCP motion (TCP = the torch tip) from the start pose "
++                                              "to the acquisition: the tool orientation with the smaller TCP rotation (the torch and wire "
++                                              "do not swing around), then the torch tip's distance, then the planned joint-space duration "
++                                              "of its arm configuration; an exact tie keeps "
++                                              "the hit point nearer to the robot base; the other order is not planned when its least "
++                                              "possible TCP motion is larger; an order whose acquisition is refused before motion (IK / "
++                                              "follow / path / envelope) is not used")
+         if not feas:
+             # 둘 다 안 된다: 지금 (다른 끝) 상태 → 원래 순서로 되돌리고 거부
+             self._derive_jobs(self._swap_rough(self.job0))
+@@ -3702,16 +3738,18 @@ class AutoTeach:
+         self.res.visit_order["first_visited"] = o["first_visited"]
+         near = opts[0]
+         tie = len(feas) == 2 and key(opts[0]) == key(opts[1])
+-        pruned = any("lb_s" in o_ for o_ in opts)
+-        why = ("the shortest planned move from the start pose (the other order's lower bound cannot beat it)" if pruned else
++        pruned = any("lb_tcp_m" in o_ for o_ in opts)
++        why = ("the least TCP motion from the start pose (the other order cannot move the TCP less)" if pruned else
+                "the only order whose acquisition is not refused before motion" if len(feas) == 1 else
+-               ("equal planned moves - the hit point nearer to the robot base first" if tie else
+-                "the shortest planned move from the start pose"))
++               ("equal moves - the hit point nearer to the robot base first" if tie else
++                "the least TCP motion from the start pose"))
+         self.res.visit_order["order_choice"] = why
+         self.res.visit_order["agrees_with_near_end"] = bool(k == 0)
+         self._decide("setup", f"visit order: taught {o['first_visited']} first - {why} ("
+-                     + "; ".join(f"{r_['first_visited']} first: " + (f"{r_['duration_s']:.1f} s ({r_['route']}), progression "
+-                                                                   f"{r_['progression_sign']:+d}" if r_["feasible"] else
++                     + "; ".join(f"{r_['first_visited']} first: " + (f"TCP {r_['tcp_move_mm']:.0f} mm, rotation "
++                                                                   f"{r_['tool_rotation_deg']:.0f} deg, {r_['duration_s']:.1f} s "
++                                                                   f"({r_['route']}), progression {r_['progression_sign']:+d}"
++                                                                   if r_["feasible"] else
+                                                                    (r_["why"] if r_.get("pruned") else f"refused: {r_['why']}"))
+                                  + f", base distance {r_['base_distance_m']:.3f} m" for r_ in rec)
+                      + ")" + ("" if k == 0 else f" - differs from the nearer-to-the-base order ({near['first_visited']} first)"),
+diff --git a/scan_stack/scan_l0/scan_l0/teach_1g.py b/scan_stack/scan_l0/scan_l0/teach_1g.py
+index f7ddb67..407ac94 100644
+--- a/scan_stack/scan_l0/scan_l0/teach_1g.py
++++ b/scan_stack/scan_l0/scan_l0/teach_1g.py
+@@ -23,7 +23,7 @@ precision_sensing (어느 교시 점이 S 인지는 res.s_taught_point 와 visit
+ AutoTeach 에서 물려받아 그대로 쓰는 것은 기반 원시뿐: 게이트·안전 정책·센서 시야 (_universal_inputs, _motion_config, _apply_safety_policy,
+ _sv, _check_position), 센서 (ensure_sensor), 이동 (_local_move, _joint_move), 획득 (_universal_ready, _go_start_pose,
+ _acquire_site → _choose_visit_order → _plan_acquisition → _prefer_yaw_band, _acquisition_poses,
+-_acquisition_duration_bound, _theta_goal_rad, _wrist2_required, _swap_rough, _set_progression, _legs_pass_envelope), 패스 작업 (_pass_job 1G
++_acquisition_motions, _theta_goal_rad, _wrist2_required, _swap_rough, _set_progression, _legs_pass_envelope), 패스 작업 (_pass_job 1G
+ 경로, _clear_plate), 구간 태그 (_leg_phase), 기록·사건·중단 (_decide, _event, _record_move, _confirm, _check_estop, _abort_path,
+ _clear_cell, _latch_*), 도착 허용 (_hit_tol_m, _origin_tol_m, _coarse_plate_m, _yaw_band_rad), 시각화 간격 (_vis_step_m). **쓰지 않는 것**:
+ AutoTeach 의 판정 층 (DECISION_LAYERS_NOT_USED: 국소화·장면 판정·프로브·보정 반복·S 추적/정렬·E 배치·탐색·충실도/병합 게이트·P8·길이 띠)
+diff --git a/scan_stack/scan_l0/tests/test_sim_teach1g.py b/scan_stack/scan_l0/tests/test_sim_teach1g.py
+index 402d57a..ccf2e01 100644
+--- a/scan_stack/scan_l0/tests/test_sim_teach1g.py
++++ b/scan_stack/scan_l0/tests/test_sim_teach1g.py
+@@ -462,7 +462,7 @@ def test_far_end_taught_first_S_is_the_first_visited_end_and_the_weld_direction_
+     near, far = np.asarray(taught_end_near), np.asarray(taught_start_far)
+     assert set(r.sites) == {"S", "E"} and abs(r.sites["S"]["s_m"]) < 0.06 < r.sites["E"]["s_m"]
+     assert [d["k"] for e, d in events if e == "pass_started"] == list(range(1, len(r.passes) + 1))
+-    assert vo["rule"].startswith("1G") and vo["order_rule"].startswith("1G: the visiting order with the shortest planned joint-space move")
++    assert vo["rule"].startswith("1G") and vo["order_rule"].startswith("1G: the visiting order with the least TCP motion")
+     # 출력은 같은 틀: extent·job_final·sections·weld_plan 의 S = 가까운 끝, s 는 S 에서
+     for X, P_true in (("S", near), ("E", far)):
+         e = r.extent[X]

@@ -1,0 +1,18 @@
+scan_dir: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-105216_scan
+archived: '2026-10-15T10:53:22'
+note: Scan + 4 Passes estimate
+ends_m:
+  S:
+    point:
+    - -0.014895310601099287
+    - -1.5770039427379556
+    - 0.5643200548898685
+    sigma: 0.0023043552496260274
+    two_sided: true
+  E:
+    point:
+    - -0.02079307383681777
+    - -1.7267547064691184
+    - 0.5624417683245113
+    sigma: 6.534073173650344e-05
+    two_sided: true

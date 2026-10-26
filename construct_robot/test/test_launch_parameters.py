@@ -48,3 +48,30 @@ def test_launch_parameter_names_values_and_types_are_preserved():
         assert {name: type(value) for name, value in actual.items()} == {
             name: type(value) for name, value in values.items()
         }
+
+
+def test_duplicate_hardware_launch_is_rejected_before_nodes_start(tmp_path):
+    import pytest
+    path = Path(__file__).parents[1] / "launch" / "weld_action_gui.launch.py"
+    spec = importlib.util.spec_from_file_location("weld_launch_duplicate_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._check_existing_controller_manager(None, tmp_path) == []
+    process = tmp_path / "123"
+    process.mkdir()
+    (process / "cmdline").write_bytes(b"/opt/ros/humble/lib/controller_manager/ros2_control_node\0--ros-args\0")
+    with pytest.raises(RuntimeError, match="already running.*PID 123"):
+        module._check_existing_controller_manager(None, tmp_path)
+    description = module.generate_launch_description()
+    from launch.actions import OpaqueFunction
+    assert isinstance(description.entities[0], OpaqueFunction)
+
+
+def test_srdf_end_effectors_reference_existing_groups():
+    import xml.etree.ElementTree as ET
+    path = Path(__file__).parents[2] / "construct_moveit_config" / "config" / "construct_robot_0528.srdf"
+    robot = ET.parse(path).getroot()
+    groups = {group.attrib["name"] for group in robot.findall("group")}
+    for effector in robot.findall("end_effector"):
+        assert effector.attrib["group"] in groups
+        assert effector.attrib["parent_group"] in groups

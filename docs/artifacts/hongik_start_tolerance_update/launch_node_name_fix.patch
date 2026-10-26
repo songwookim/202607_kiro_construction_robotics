@@ -1,0 +1,13 @@
+--- a/scan_stack/hongik_scan_ros/launch/hongik_moveit.launch.py
++++ b/scan_stack/hongik_scan_ros/launch/hongik_moveit.launch.py
+@@ -99,7 +99,9 @@
+     nodes = [
+         Node(package="tf2_ros", executable="static_transform_publisher", name="hongik_profiler_optical_tf", namespace=NS,
+              output="log", arguments=_static_tf_args(calib, laser, optical), parameters=[common]),
+-        Node(package="hongik_scan_ros", executable="hongik_auto_teach_server", name="hongik_auto_teach_server", namespace=NS,
++        # The server names its own node. A global __node remap would also rename
++        # its internal MoveIt adapter and make action introspection count it twice.
++        Node(package="hongik_scan_ros", executable="hongik_auto_teach_server", namespace=NS,
+              output="screen", parameters=[server_params], additional_env=env),
+     ]
+     if LaunchConfiguration("with_profiler_node").perform(context) == "true":

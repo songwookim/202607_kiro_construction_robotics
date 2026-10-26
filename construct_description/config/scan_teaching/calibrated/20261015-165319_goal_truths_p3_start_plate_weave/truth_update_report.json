@@ -1,0 +1,773 @@
+{
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-165319_before_goal_truths_p3_start",
+  "export_folder": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-165319_goal_truths_p3_start_plate_weave",
+  "calibration_source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-153517_scan",
+  "latest_export_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan",
+  "captured_truths": [
+    {
+      "pass": 1,
+      "label": "goal",
+      "position_m": {
+        "x": -0.0005023211030192355,
+        "y": -1.5287578519885894,
+        "z": 0.5847155802973127
+      },
+      "orientation_xyzw": {
+        "x": 0.6848207722317666,
+        "y": -0.6609703447432914,
+        "z": 0.18514156569085288,
+        "w": 0.24466571877433552
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.161917256584615,
+          1.237652850763342,
+          1.9579821324049387,
+          3.6152776650894998,
+          1.1914018652699903,
+          1.498418266269268
+        ]
+      },
+      "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_start; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml",
+      "saved": "2026-10-15T16:42:20.581+09:00",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792050140.5811706,
+        "joint_state_age_ms": 6.9955279905116186,
+        "tf_age_ms": 405.1246643066406,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 1.4869363178087686e-12,
+        "tf_fk_orientation_error_deg": 0.0
+      },
+      "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml",
+      "capture_sha256": "b530eb7296783b9870fef976b040b7228ac7296625e001c533b3dff990ee7bee",
+      "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+      "imported_at": "2026-10-15T16:53:19+09:00"
+    },
+    {
+      "pass": 2,
+      "label": "goal",
+      "position_m": {
+        "x": 0.004322089495999135,
+        "y": -1.528758553457835,
+        "z": 0.5842515294475672
+      },
+      "orientation_xyzw": {
+        "x": 0.6848335105233126,
+        "y": -0.660961855028734,
+        "z": 0.18513472481565485,
+        "w": 0.24465817527465494
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.167403901062396,
+          1.2380971991912217,
+          1.9557040644084849,
+          3.6209653782295823,
+          1.1896172810235282,
+          1.4977803060301396
+        ]
+      },
+      "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_start_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml",
+      "saved": "2026-10-15T16:42:36.413+09:00",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792050156.413136,
+        "joint_state_age_ms": 4.876316001173109,
+        "tf_age_ms": 398.32186698913574,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 0.0035841076893804317,
+        "tf_fk_orientation_error_deg": 0.00017855916012163116
+      },
+      "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml",
+      "capture_sha256": "160d283a9f76966303e8364ac0b0433220819150ef29b5086ba43a3e6560930d",
+      "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+      "imported_at": "2026-10-15T16:53:19+09:00"
+    },
+    {
+      "pass": 3,
+      "label": "goal",
+      "position_m": {
+        "x": -0.0033700284053381838,
+        "y": -1.528752078205895,
+        "z": 0.5901573475146038
+      },
+      "orientation_xyzw": {
+        "x": 0.6848309180957507,
+        "y": -0.6609649737910946,
+        "z": 0.18512975413649937,
+        "w": 0.24466076754320323
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.158636774753855,
+          1.2310727123419742,
+          1.9635409485482611,
+          3.6122400635501557,
+          1.1905475231922928,
+          1.497731037549973
+        ]
+      },
+      "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_wait_state.yaml",
+      "saved": "2026-10-15T16:42:59.045+09:00",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792050179.0452106,
+        "joint_state_age_ms": 2.5409220106666908,
+        "tf_age_ms": 400.36582946777344,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 0.0046519211507712495,
+        "tf_fk_orientation_error_deg": 0.0002984497641684735
+      },
+      "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_wait_state.yaml",
+      "capture_sha256": "81ef02b2cdf8c0e7f80e525ccc45b4231a0b68fa5c54eabfa3f7b523e05be73d",
+      "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+      "imported_at": "2026-10-15T16:53:19+09:00"
+    },
+    {
+      "pass": 4,
+      "label": "goal",
+      "position_m": {
+        "x": -0.0005047620119154259,
+        "y": -1.528725837194316,
+        "z": 0.5949214601121859
+      },
+      "orientation_xyzw": {
+        "x": 0.6848240201578808,
+        "y": -0.660981111591417,
+        "z": 0.18512586585352406,
+        "w": 0.24463941899489064
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.161913528159089,
+          1.2251722126307947,
+          1.9663127666108156,
+          3.616033203890755,
+          1.1876466749749242,
+          1.4963943969988625
+        ]
+      },
+      "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_end; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml",
+      "saved": "2026-10-15T16:43:07.709+09:00",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792050187.709109,
+        "joint_state_age_ms": 0.3411979996599257,
+        "tf_age_ms": 398.04935455322266,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 0.010627557933754722,
+        "tf_fk_orientation_error_deg": 0.0003956354281665193
+      },
+      "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml",
+      "capture_sha256": "76e26b7c4007f417dda9e309511c4c469f903f79f9f2a5d1d7d19688554ab7d0",
+      "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+      "imported_at": "2026-10-15T16:53:19+09:00"
+    },
+    {
+      "pass": 3,
+      "label": "start",
+      "position_m": {
+        "x": -0.010429975308719863,
+        "y": -1.7270066133866684,
+        "z": 0.5872907509893166
+      },
+      "orientation_xyzw": {
+        "x": 0.6848438587174001,
+        "y": -0.6609296611671845,
+        "z": 0.18514358303252118,
+        "w": 0.24470947228984274
+      },
+      "joint_state": {
+        "names": [
+          "right_manipulator_joint1",
+          "right_manipulator_joint2",
+          "right_manipulator_joint3",
+          "right_manipulator_joint4",
+          "right_manipulator_joint5",
+          "right_manipulator_joint6"
+        ],
+        "positions_rad": [
+          5.063826109418162,
+          1.2454974580702793,
+          1.742537593381654,
+          3.560559292068296,
+          1.002164096374603,
+          1.402825430521419
+        ]
+      },
+      "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_goal_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml",
+      "saved": "2026-10-15T16:43:44.645+09:00",
+      "capture_provenance": {
+        "capture_source": "measured_joint_fk",
+        "tcp_source": "moveit_fk",
+        "joint_state_timestamp": 1792050224.6453934,
+        "joint_state_age_ms": 1.0937990009551868,
+        "tf_age_ms": 401.2494087219238,
+        "tf_fresh": false,
+        "tf_fk_position_error_mm": 1.2490009027033011e-12,
+        "tf_fk_orientation_error_deg": 0.0
+      },
+      "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml",
+      "capture_sha256": "caf4e0cc1a0a797b269c7e498d97f0543590ec104500e8eb3b24b5aa03c71fcb",
+      "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+      "imported_at": "2026-10-15T16:53:19+09:00"
+    }
+  ],
+  "previous_calibration_differences": [
+    {
+      "pass": 1,
+      "end": "goal",
+      "measured_minus_previous_at_capture_attitude_mm": [
+        -1.224222327163866,
+        0.9202287133189824,
+        -0.9465443645713112
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "goal",
+      "measured_minus_previous_at_capture_attitude_mm": [
+        -2.5999289742579013,
+        0.9314917851042104,
+        -5.4609902151634415
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "goal",
+      "measured_minus_previous_at_capture_attitude_mm": [
+        -4.887538740722584,
+        0.9412494936082982,
+        -4.309303448801427
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "goal",
+      "measured_minus_previous_at_capture_attitude_mm": [
+        -2.0116707931111013,
+        0.9597915895034337,
+        0.4578375351993458
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "measured_minus_previous_at_capture_attitude_mm": [
+        -2.1871516730323766,
+        -0.20508740848046436,
+        -2.6068204442883935
+      ]
+    }
+  ],
+  "calibration_wire_tip_checks": [
+    {
+      "pass": 1,
+      "end": "start",
+      "reference_tcp_world_m": [
+        -0.0036486691055347686,
+        -1.7267368104431282,
+        0.5860772996186825
+      ],
+      "reference_orientation_xyzw": [
+        0.7006687038930904,
+        -0.6305855897307476,
+        0.11226010841516047,
+        0.31436101772853425
+      ],
+      "execution_tcp_world_m": [
+        -0.0036387782637952067,
+        -1.7267475449869385,
+        0.5860889725164925
+      ],
+      "execution_orientation_xyzw": [
+        0.7004563040920254,
+        -0.6310484564483534,
+        0.11195333758789938,
+        0.31401474786197614
+      ],
+      "expected_wire_tip_world_m": [
+        0.007832303920785629,
+        -1.7453033863901342,
+        0.5592899879027268
+      ],
+      "execution_wire_tip_world_m": [
+        0.00783230392078563,
+        -1.7453033863901342,
+        0.5592899879027268
+      ],
+      "wire_tip_reprojection_error_mm": 1.734723475976807e-15,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 0.07884119558342018
+    },
+    {
+      "pass": 2,
+      "end": "start",
+      "reference_tcp_world_m": [
+        0.0003417903846854031,
+        -1.7267498604999478,
+        0.5902381552481115
+      ],
+      "reference_orientation_xyzw": [
+        0.7006450114501187,
+        -0.630603545026744,
+        0.11228488569611796,
+        0.31436895739556947
+      ],
+      "execution_tcp_world_m": [
+        -0.009623108638948944,
+        -1.7267680523618107,
+        0.5812016729114865
+      ],
+      "execution_orientation_xyzw": [
+        -0.6614912109671243,
+        0.6828406231471064,
+        -0.256169819003496,
+        -0.17474291122971214
+      ],
+      "expected_wire_tip_world_m": [
+        0.011823104294615493,
+        -1.7453183360965843,
+        0.5614523064112055
+      ],
+      "execution_wire_tip_world_m": [
+        0.011823104294615493,
+        -1.7453183360965843,
+        0.5614523064112055
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        -2.0
+      ],
+      "capture_to_execution_rotation_deg": 24.207245752200407
+    },
+    {
+      "pass": 4,
+      "end": "start",
+      "reference_tcp_world_m": [
+        -0.002864071287473638,
+        -1.7267419345985824,
+        0.5948769001135013
+      ],
+      "reference_orientation_xyzw": [
+        0.7006470420141544,
+        -0.6306106907010626,
+        0.11227915565446801,
+        0.31435214409299905
+      ],
+      "execution_tcp_world_m": [
+        -0.008254337772024284,
+        -1.726761321894742,
+        0.5918685759274388
+      ],
+      "execution_orientation_xyzw": [
+        0.6846478582838523,
+        -0.6608529498879148,
+        0.18559911136728824,
+        0.2451196822604179
+      ],
+      "expected_wire_tip_world_m": [
+        0.00861756851432192,
+        -1.7453095919245,
+        0.568090623741375
+      ],
+      "execution_wire_tip_world_m": [
+        0.00861756851432192,
+        -1.7453095919245,
+        0.568090623741375
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 12.208303872481187
+    },
+    {
+      "pass": 1,
+      "end": "goal",
+      "reference_tcp_world_m": [
+        -0.0005023211030192355,
+        -1.5287578519885894,
+        0.5847155802973127
+      ],
+      "reference_orientation_xyzw": [
+        0.6848207722317666,
+        -0.6609703447432914,
+        0.18514156569085288,
+        0.24466571877433552
+      ],
+      "execution_tcp_world_m": [
+        0.004897936825883565,
+        -1.5287178488989566,
+        0.5877109482254577
+      ],
+      "execution_orientation_xyzw": [
+        0.7004563040920254,
+        -0.6310484564483534,
+        0.11195333758789938,
+        0.31401474786197614
+      ],
+      "expected_wire_tip_world_m": [
+        0.0163690190104644,
+        -1.5472736903021522,
+        0.5609119636116919
+      ],
+      "execution_wire_tip_world_m": [
+        0.016369019010464402,
+        -1.5472736903021522,
+        0.5609119636116919
+      ],
+      "wire_tip_reprojection_error_mm": 3.469446951953614e-15,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 12.190011384552877
+    },
+    {
+      "pass": 2,
+      "end": "goal",
+      "reference_tcp_world_m": [
+        0.004322089495999135,
+        -1.528758553457835,
+        0.5842515294475672
+      ],
+      "reference_orientation_xyzw": [
+        0.6848335105233126,
+        -0.660961855028734,
+        0.18513472481565485,
+        0.24465817527465494
+      ],
+      "execution_tcp_world_m": [
+        -0.0002524633308491932,
+        -1.5287231023549905,
+        0.580196723816688
+      ],
+      "execution_orientation_xyzw": [
+        -0.6614912109671243,
+        0.6828406231471064,
+        -0.256169819003496,
+        -0.17474291122971214
+      ],
+      "expected_wire_tip_world_m": [
+        0.021193749602715244,
+        -1.547273386089764,
+        0.5604473573164069
+      ],
+      "execution_wire_tip_world_m": [
+        0.021193749602715244,
+        -1.547273386089764,
+        0.5604473573164069
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 12.000801858657034
+    },
+    {
+      "pass": 3,
+      "end": "goal",
+      "reference_tcp_world_m": [
+        -0.0033700284053381838,
+        -1.528752078205895,
+        0.5901573475146038
+      ],
+      "reference_orientation_xyzw": [
+        0.6848309180957507,
+        -0.6609649737910946,
+        0.18512975413649937,
+        0.24466076754320323
+      ],
+      "execution_tcp_world_m": [
+        0.002030159713928871,
+        -1.5287111873625132,
+        0.5931519754452547
+      ],
+      "execution_orientation_xyzw": [
+        0.7004563040920254,
+        -0.6310484564483534,
+        0.11195333758789938,
+        0.31401474786197614
+      ],
+      "expected_wire_tip_world_m": [
+        0.013501241898509708,
+        -1.5472670287657089,
+        0.5663529908314889
+      ],
+      "execution_wire_tip_world_m": [
+        0.013501241898509708,
+        -1.5472670287657089,
+        0.5663529908314889
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 12.189104459482678
+    },
+    {
+      "pass": 4,
+      "end": "goal",
+      "reference_tcp_world_m": [
+        -0.0005047620119154259,
+        -1.528725837194316,
+        0.5949214601121859
+      ],
+      "reference_orientation_xyzw": [
+        0.6848240201578808,
+        -0.660981111591417,
+        0.18512586585352406,
+        0.24463941899489064
+      ],
+      "execution_tcp_world_m": [
+        -0.0005050711482927524,
+        -1.5286920629305756,
+        0.5948949335361746
+      ],
+      "execution_orientation_xyzw": [
+        0.6846478582838523,
+        -0.6608529498879148,
+        0.18559911136728824,
+        0.2451196822604179
+      ],
+      "expected_wire_tip_world_m": [
+        0.01636683513805345,
+        -1.5472403329603337,
+        0.5711169813501108
+      ],
+      "execution_wire_tip_world_m": [
+        0.01636683513805345,
+        -1.5472403329603337,
+        0.5711169813501108
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "capture_to_execution_rotation_deg": 0.08119623192566956
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "reference_tcp_world_m": [
+        -0.010429975308719863,
+        -1.7270066133866684,
+        0.5872907509893166
+      ],
+      "reference_orientation_xyzw": [
+        0.6848438587174001,
+        -0.6609296611671845,
+        0.18514358303252118,
+        0.24470947228984274
+      ],
+      "execution_tcp_world_m": [
+        -0.005030390635223557,
+        -1.726966991639265,
+        0.5882859383762312
+      ],
+      "execution_orientation_xyzw": [
+        0.7004563040920254,
+        -0.6310484564483534,
+        0.11195333758789938,
+        0.31401474786197614
+      ],
+      "expected_wire_tip_world_m": [
+        0.00644069154935728,
+        -1.7455228330424606,
+        0.5614869537624655
+      ],
+      "execution_wire_tip_world_m": [
+        0.00644069154935728,
+        -1.7455228330424606,
+        0.5614869537624655
+      ],
+      "wire_tip_reprojection_error_mm": 0.0,
+      "post_fit_trim_world_mm": [
+        0.0,
+        0.0,
+        -2.0
+      ],
+      "capture_to_execution_rotation_deg": 12.185193907181459
+    }
+  ],
+  "post_fit_endpoint_adjustments_world_m": {
+    "2": {
+      "start": [
+        0,
+        0,
+        -0.002
+      ]
+    },
+    "3": {
+      "start": [
+        0,
+        0,
+        -0.002
+      ]
+    }
+  },
+  "pass4_weave_geometry": {
+    "reference": "scan_plate_plane",
+    "normal_world": [
+      -0.0037118238331104746,
+      -0.014504283265824864,
+      0.9998879177841768
+    ],
+    "transverse_vector_world": [
+      -0.9992261967414457,
+      0.039206429454155305,
+      -0.003140642463254976
+    ]
+  },
+  "wire_tip_model_unchanged": true,
+  "welding_attitudes_unchanged": true,
+  "repeat_fit_idempotent": true,
+  "no_inferred_endpoints": true,
+  "robot_motion_executed": false,
+  "check_scope": "Offline reprojection using the saved wire-tip model; not a physical tip or hand-eye calibration validation.",
+  "native_four_pass_loader": "PASS: all four loaded without motion or IK",
+  "tests_passed": 178,
+  "relative_truth_geometry": [
+    {
+      "pass": 2,
+      "end": "start",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        3.9908003738298636,
+        -0.014949706450106959,
+        4.162318508478702
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        -0.20434074792718632,
+        4.007035236259181,
+        4.141680813102547
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        -1.3916123714283486,
+        -0.21944665232642713,
+        4.196965859738722
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        0.21283301719340667,
+        -1.3627988813509047,
+        4.206750000787207
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "start",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        0.7852645935362903,
+        -0.00620553436592175,
+        8.800635838648208
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        -0.15406368206362384,
+        0.8246971573356913,
+        8.795681277511662
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "goal",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        4.8247305922508446,
+        0.0003042123881691339,
+        -0.4646062952849972
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        -0.18474714746322185,
+        4.818761360953781,
+        -0.48917463921168824
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "goal",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        -2.8677771119546906,
+        0.0066615364433531,
+        5.441027219797001
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        0.027190102478482404,
+        -2.8411351807785796,
+        5.454922431103887
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "goal",
+      "untrimmed_tip_relative_to_root_world_mm": [
+        -0.00218387241094839,
+        0.03335734181852956,
+        10.205017738418864
+      ],
+      "untrimmed_tip_relative_to_root_seam_mm": [
+        -0.18298233165779898,
+        0.04266015020811015,
+        10.2033426925141
+      ]
+    }
+  ],
+  "extra_logging_and_executor_regression_tests_passed": 58,
+  "console_entry_point_imports_passed": 7,
+  "overlay_build": "PASS: /home/irs/hongik_field_ws, construct_robot",
+  "active_reference_hash_matches": true
+}

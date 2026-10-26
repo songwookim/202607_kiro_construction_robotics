@@ -3,6 +3,7 @@
 import ctypes
 import ctypes.util
 import os
+import threading
 import time
 
 import rclpy
@@ -16,6 +17,10 @@ ARROW_KEYSYMS = {
     0xFF52: 1 << 2,  # Up
     0xFF54: 1 << 3,  # Down
 }
+# Keyboard-jog axis selection keys (GUI keyboard_jog_selection_key), reported
+# as their character code on each press so the GUI node can re-aim a held jog
+# without waiting for the Tk event loop.
+SELECTION_KEYSYMS = {ord(c): ord(c) for c in "123456789asdv"}
 
 
 class X11KeyboardState:
@@ -43,16 +48,34 @@ class X11KeyboardState:
             self._x11.XKeysymToKeycode(self._display, keysym): bit
             for keysym, bit in ARROW_KEYSYMS.items()
         }
+        self._selection_keycodes = {
+            self._x11.XKeysymToKeycode(self._display, keysym): code
+            for keysym, code in SELECTION_KEYSYMS.items()
+        }
+        self._keys = (ctypes.c_ubyte * 32)()
+
+    def _query(self):
+        if not self._x11.XQueryKeymap(self._display, self._keys):
+            raise RuntimeError("XQueryKeymap failed")
+        return self._keys
+
+    @staticmethod
+    def _down(keys, keycode):
+        return keycode and keys[keycode >> 3] & (1 << (keycode & 7))
 
     def read_mask(self):
-        keys = (ctypes.c_ubyte * 32)()
-        if not self._x11.XQueryKeymap(self._display, keys):
-            raise RuntimeError("XQueryKeymap failed")
+        return self.read_state()[0]
+
+    def read_state(self):
+        """(arrow bit mask, set of selection-key codes held) from one query."""
+        keys = self._query()
         mask = 0
         for keycode, bit in self._keycodes.items():
-            if keycode and keys[keycode >> 3] & (1 << (keycode & 7)):
+            if self._down(keys, keycode):
                 mask |= bit
-        return mask
+        held = {code for keycode, code in self._selection_keycodes.items()
+                if self._down(keys, keycode)}
+        return mask, held
 
     def close(self):
         if self._display:
@@ -61,35 +84,67 @@ class X11KeyboardState:
 
 
 class KeyboardTeachingNode(Node):
+    """Poll the X11 keymap in a plain thread and publish arrow-state edges.
+
+    An rclpy timer pays the executor's dispatch cost on every poll (18% of a
+    core at 200 Hz on the Jetson); this loop only queries X11 and compares a
+    byte, so it polls at 500 Hz for less.  Publishing is thread-safe.
+    """
+
     def __init__(self):
         super().__init__("keyboard_teaching_node")
-        self.declare_parameter("poll_period_s", 0.01)
+        self.declare_parameter("poll_period_s", 0.002)
         self._keyboard = X11KeyboardState()
         self._publisher = self.create_publisher(
             UInt8, "/keyboard_teaching/arrow_state", 10
         )
-        self._last_mask = None
-        self._last_publish_at = 0.0
-        period = max(0.005, float(self.get_parameter("poll_period_s").value))
-        self.create_timer(period, self._poll)
+        self._selection_publisher = self.create_publisher(
+            UInt8, "/keyboard_teaching/selection_key", 10
+        )
+        self._period = max(0.001, float(self.get_parameter("poll_period_s").value))
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._poll_loop, name="x11-arrow-poll", daemon=True
+        )
+        self._thread.start()
         self.get_logger().info(
-            f"Physical arrow-key state polling active at {1.0 / period:.1f} Hz"
+            f"Physical arrow-key state polling active at {1.0 / self._period:.1f} Hz"
         )
 
-    def _poll(self):
-        mask = self._keyboard.read_mask()
-        now = time.monotonic()
-        # Publish every physical edge immediately. A low-rate unchanged-state
-        # heartbeat lets the GUI detect the node without flooding its Tk queue.
-        if mask == self._last_mask and now - self._last_publish_at < 0.1:
-            return
-        message = UInt8()
-        message.data = mask
-        self._publisher.publish(message)
-        self._last_mask = mask
-        self._last_publish_at = now
+    def _poll_loop(self):
+        last_mask = None
+        last_publish_at = 0.0
+        held_selection = set()
+        next_poll = time.monotonic()
+        while not self._stop.is_set() and rclpy.ok():
+            read_state = getattr(self._keyboard, "read_state", None)
+            if read_state is not None:
+                mask, selection = read_state()
+            else:
+                mask, selection = self._keyboard.read_mask(), set()
+            for code in sorted(selection - held_selection):
+                self._selection_publisher.publish(UInt8(data=code))
+            held_selection = selection
+            now = time.monotonic()
+            # Publish every physical edge immediately. A low-rate unchanged-state
+            # heartbeat lets the GUI detect the node without flooding its Tk queue.
+            if mask != last_mask or now - last_publish_at >= 0.1:
+                message = UInt8()
+                message.data = mask
+                self._publisher.publish(message)
+                last_mask = mask
+                last_publish_at = now
+            next_poll += self._period
+            delay = next_poll - time.monotonic()
+            if delay > 0.0:
+                self._stop.wait(delay)
+            else:
+                next_poll = time.monotonic()
 
     def destroy_node(self):
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=0.5)
         self._keyboard.close()
         return super().destroy_node()
 

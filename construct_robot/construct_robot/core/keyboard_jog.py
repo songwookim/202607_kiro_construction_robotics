@@ -4,6 +4,7 @@ import math
 
 from construct_robot.core.cartesian_path_common import _quaternion_rotate_vector
 
+KEYBOARD_LINEAR_SPEEDS_MM_S = (5.0, 15.0, 45.0)
 
 
 KEYBOARD_JOG_SELECTIONS = {

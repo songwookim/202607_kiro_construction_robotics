@@ -1,0 +1,22 @@
+{
+  "patch_sha256": "7c8f45bb2955e8495156eda7acdb7f711e4d43fa34838530c61256f4a14a5569",
+  "relay_sha256": "d0e1ab9c7a96b1bbcdcd73843d54afa6aec2de57483483df8ba768680a6eb3ae",
+  "source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field",
+  "files_after": {
+    "CHANGES_2026-10-14_kiro-1g-field.md": "3e12bb67b5880cea26e6fb0c9b8637028b4c557cc2e13aa92ce11bc0d802929c",
+    "hongik_scan_ros/hongik_scan_ros/moveit_adapter.py": "fff0f42a2caaaf3fcdc9397c9e8c5389d1f6a2ca2d947744e7be3cfa0ff8215d",
+    "hongik_scan_ros/test/test_moveit_checked_joint.py": "e1adbcacc6a3f28bdc3448e275d123043f70f4d8c6b8a783737aae6d711ce825",
+    "scan_l0/scan_l0/teach_1g.py": "f41a980d5c76b1ef86ae0e2aa91faa0ee1cff6e04050c20dc9c993153301e5fb"
+  },
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/docs/artifacts/hongik_start_tolerance_update/before_start_tolerance.tar.gz",
+  "additional_fix": {
+    "file": "hongik_scan_ros/package.xml",
+    "sha256": "a5a24c9a1bd7490fb626f8bcec2a76a41a1d5e2b218c97fbdc70a1dce5609453",
+    "reason": "Declare new rcl_interfaces GetParameters runtime dependency"
+  },
+  "launch_fix": {
+    "file": "hongik_scan_ros/launch/hongik_moveit.launch.py",
+    "sha256": "dc81df96605a76ee8b9465a76dc697e0665a41ede9751bd11a52e0fa58f9e039",
+    "reason": "Avoid global __node remap of the internal adapter; action info must count one server"
+  }
+}

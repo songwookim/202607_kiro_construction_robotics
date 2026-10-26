@@ -1,0 +1,24 @@
+{
+  "source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field",
+  "patch_sha256": "d81e29570ac5e6e8d968eade1f56eb1de76d9968cd0f0d290f827fed995adf91",
+  "files_after": {
+    "CHANGES_2026-10-14_kiro-1g-field.md": "fcf74b83d76169f4746728bb4c2f4f4362db819f77ad8337eec95e0989e2d35f",
+    "hongik_scan_msgs/action/PostWeldScan.action": "bd9a051f7306f627a26d0c514fd190e3a16e105e48d36316c8d1ec9dcfcbc7e6",
+    "hongik_scan_ros/hongik_scan_ros/auto_teach_server.py": "931aeeab51001110a0f23443312c1a992b4051fed373c1fc30207d11b939737c",
+    "hongik_scan_ros/hongik_scan_ros/post_weld_client.py": "b68592aa6d80305105762687a304361e5dbc3e79287cda01eae6eded22cd5d10",
+    "scan_l0/scan_l0/post_weld.py": "0c7e5f57a676607369b8dc1d1242e7152dc3bcd5a0515e72fbe273b161baa0cb",
+    "scan_l0/tests/test_post_weld_units.py": "5f117dd899229f230044ab9eb854dc03160c9cbb710384b0a41ae85b0f986dc4",
+    "scan_l0/tests/test_sim_post_weld.py": "a77dcb6ab1bd6ca90bf430ffdd3034aac0b3936f1065d39bf4e402867cea56d8"
+  },
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/docs/artifacts/hongik_post_weld_extra_update/before_post_weld_extra.tar.gz",
+  "gui_files_after": {
+    "construct_robot/construct_robot/gui/precision_sensing_test_panel.py": "8a36f8b369befc4203cfa8407ea4235ffabca7c0b84427b2b3520dc5e7d743cb",
+    "construct_robot/construct_robot/nodes/precision_sensing_test.py": "e96405eaf6c26ae4fe1c0c6a38e3f0ac806006adb07a0954bdbd3cc15d290f89",
+    "construct_robot/test/test_scanner_scan_task.py": "3963f071be45da085c2b5dff711816b8ddb4865618e3a89f9e78c7b3cda23085"
+  },
+  "activation_helper_after": {
+    "file": "/home/irs/ros2_ws/src/construct_robot_ros2/tools/activate_hongik_field.bash",
+    "sha256": "873038e5144853557f6b5768c7bc6891c0519b76a18211d62b2d10bdeb107946",
+    "reason": "Prioritize field overlay paths after repeatedly sourcing underlay and overlay"
+  }
+}

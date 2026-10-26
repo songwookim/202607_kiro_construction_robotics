@@ -1,0 +1,11 @@
+# pip install -e .  (Windows py3.14 / Ubuntu 22.04 py3.10 공통)
+# 메타데이터는 setup.py 에 둔다: Ubuntu 22.04 시스템 setuptools(59.6)는 PEP 621 [project] 를 읽지 못하고,
+# colcon(ament_python) 은 setup.py 를 직접 호출하기 때문. 여기서는 build-system 만 선언한다.
+[build-system]
+requires = ["setuptools>=59", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::UserWarning:vc3dz_driver.client"]

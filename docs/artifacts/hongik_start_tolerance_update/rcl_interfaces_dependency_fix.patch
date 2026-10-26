@@ -1,0 +1,10 @@
+--- a/scan_stack/hongik_scan_ros/package.xml
++++ b/scan_stack/hongik_scan_ros/package.xml
+@@ -15,6 +15,7 @@
+   <license>Apache-2.0</license>
+ 
+   <exec_depend>rclpy</exec_depend>
++  <exec_depend>rcl_interfaces</exec_depend>
+   <exec_depend>hongik_scan_msgs</exec_depend>
+   <exec_depend>welding_interfaces</exec_depend>
+   <exec_depend>scan_l0</exec_depend>

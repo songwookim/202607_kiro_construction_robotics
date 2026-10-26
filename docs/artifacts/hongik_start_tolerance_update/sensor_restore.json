@@ -1,0 +1,12 @@
+{
+  "original_backup": "/home/irs/scan_data/sensor_backup/backup_20261014-122707.txt",
+  "original_sha256": "d1678c98e4515fe381fd875f37f98f313fbf818ac3bcc02a1c252882cdeec5bd",
+  "CameraSNR": 4040760,
+  "parameters_verified": 37,
+  "parameters_expected": 37,
+  "reply_error": 0,
+  "mismatches": {},
+  "LaserMode": 0,
+  "DataMode": 0,
+  "AutoTriggerFPS": 50.0
+}

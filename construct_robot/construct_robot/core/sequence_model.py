@@ -117,7 +117,7 @@ class SequenceModel:
 
 
 WELD_SCENARIO_STAGE_ORDER = (
-    "start_wait", "start_safe", "start_contact", "touch_output_off",
+    "weld_wait", "start_wait", "start_safe", "start_contact", "touch_output_off",
     "arc_on", "custom_hot_start", "weld_motion", "software_crater",
     "arc_off", "goal_wait", "finish", "touch_output_on",
 )
@@ -136,7 +136,8 @@ def validate_managed_weld_sequence(steps, require_complete=False):
             scenarios.setdefault(scenario_id, []).append(step)
 
     motion_types = {
-        "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion",
+        "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion", "post_weld_scan",
+        "precision_sensing_scan", "hongik_post_weld_scan", "scan_weld_pass",
     }
     for slot, slot_steps in all_slots.items():
         arc_on = any(
@@ -263,6 +264,11 @@ def validate_managed_weld_sequence(steps, require_complete=False):
                     "Safe approach motion must not use the Fastech DI0 guard"
                 )
             elif stage == "start_contact":
+                if step.get("start_touch_probe") and (
+                    step.get("type") != "motion" or not step.get("touch_guard")
+                    or step.get("allow_initial_touch_motion", False)
+                ):
+                    raise ValueError("Scan start touch requires a guarded motion and a fresh input edge")
                 if step.get("touch_guard", False) and (
                     not step.get("continue_after_touch", False)
                     or step.get("accept_initial_touch", False)

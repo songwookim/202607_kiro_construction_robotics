@@ -10,6 +10,34 @@ from construct_robot.nodes import action_call
 from construct_robot.nodes.weld_runtime_node import WeldGuiNode
 
 
+def test_unchanged_io_skips_render_but_keeps_robot_feedback_fresh(monkeypatch):
+    from construct_robot.nodes import weld_runtime_node
+
+    node = object.__new__(WeldGuiNode)
+    node.latest_robot_motion_state = {}
+    node.last_motion_state_at = {}
+    node.legacy_node_touch_input_states = {}
+    node.legacy_node_digital_outputs = {}
+    node.expect_robot_feedback = {"right": True}
+    node.last_robot_feedback_at = {}
+    node.robot_feedback_seen = {}
+    node.ui = SimpleNamespace(post_latest=Mock(), update_control_box_io=Mock())
+    message = SimpleNamespace(robot_state=1, digital_in=[False] * 16, digital_out=[False] * 16)
+    monkeypatch.setattr(weld_runtime_node.time, "monotonic", lambda: 1.0)
+    node._system_state(message, "right")
+    monkeypatch.setattr(weld_runtime_node.time, "monotonic", lambda: 2.0)
+    message.robot_state = 3
+    node._system_state(message, "right")
+    node.ui.post_latest.assert_called_once()
+    assert node.latest_robot_motion_state["right"] == 3
+    assert node.last_motion_state_at["right"] == 2.0
+    assert node.last_robot_feedback_at["right"] == 2.0
+    message.digital_in[8] = True
+    node._system_state(message, "right")
+    assert node.ui.post_latest.call_count == 2
+    assert node.legacy_node_touch_input_states["right"]
+
+
 @pytest.fixture(params=("generic", "equipment", "legacy", "cancel", "stop", "switch"))
 def service_case(request):
     response = SimpleNamespace(success=True, message="ack", ok=True,

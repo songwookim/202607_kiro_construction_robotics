@@ -1,0 +1,199 @@
+schema: construct_robot_pass_teaching_v1
+status: scan_estimate_generated
+timestamp: '2026-10-15T14:44:00+09:00'
+pass: 4
+requires_ik: true
+poses:
+  weld_start_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.02625493452702082
+        y: -1.7273573137877358
+        z: 0.6005014281095042
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_start:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.02625493452702082
+        y: -1.7273573137877358
+        z: 0.5905014281095042
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_goal_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.017201342139253256
+        y: -1.5296792678981497
+        z: 0.6026288773444956
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_end:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.017201342139253256
+        y: -1.5296792678981497
+        z: 0.5926288773444955
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.02625493452702082
+        y: -1.7273573137877358
+        z: 0.6605014281095043
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+  weld_finish:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 4.945732491936343
+      - 1.2491160282014244
+      - 1.3751758262939437
+      - 5.1116378404683545
+      - 0.10445877365521042
+      - -0.24700128353077194
+    tcp_pose_world:
+      position_m:
+        x: -0.017201342139253256
+        y: -1.5296792678981497
+        z: 0.6626288773444955
+      orientation_xyzw:
+        x: 0.6846478582838523
+        y: -0.6608529498879148
+        z: 0.18559911136728824
+        w: 0.2451196822604179
+    capture_provenance:
+      capture_source: scan_estimate
+      joint_state: IK seed (pass orientation capture); requires_ik
+source_reference: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-113658_scan
+source_reference_kind: scan_estimate
+generated_from:
+  scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-113658_scan
+  relative_model: design_layout
+  correction_computed: '2026-10-15T14:44:00'
+  calib: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+  orientation: keyboard P capture 2026-10-14T23:10:06 (Scan tab, saved as P3 start
+    reference; joints = earlier seed)
+  orientation_captured_for:
+  - 4
+  wait: pass-4 wire tip of the end + 10 mm World Z
+  weld_wait / weld_finish: start / goal wait + 60 mm World Z, this pass's orientation

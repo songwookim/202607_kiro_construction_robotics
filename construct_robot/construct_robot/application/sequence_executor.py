@@ -22,12 +22,19 @@ from collections import Counter, defaultdict
 import threading
 import time
 import math
+from pathlib import Path
 from typing import Protocol
 
 from construct_robot.core.cartesian_path_common import pose_is_valid
-from construct_robot.core.sequence_model import SequenceModel
+from construct_robot.core.sequence_model import SequenceModel, validate_managed_weld_sequence
 from construct_robot.core.weld_config import validate_digital_weld_settings
 from construct_robot.io.hicomm_welder import BIT_GAS, BIT_FORWARD, BIT_REVERSE
+from construct_robot.io.scan_cycle_log import ScanCycleLog, record_cycle_event
+
+# Largest joint error between where the robot stopped after the contact
+# approach and the start the early weld plan assumed (~0.7 mm at the TCP).
+EARLY_PREPLAN_START_TOLERANCE_RAD = 0.001
+EARLY_PREPLAN_STAGES = ("weld_wait", "start_wait", "start_safe", "start_contact")
 
 
 class SequenceRuntimeHost(Protocol):
@@ -139,6 +146,8 @@ def record_step_conditions(steps, indices):
             "touch_guard",
             "continue_after_touch",
             "accept_initial_touch",
+            "start_touch_probe",
+            "weld_start_touch",
             "allow_initial_touch_motion",
             "command",
             "port",
@@ -165,6 +174,9 @@ def record_step_conditions(steps, indices):
             "weld_weave_left_dwell_s",
             "weld_weave_right_dwell_s",
             "weld_weave_axis",
+            "weld_weave_reference",
+            "weld_weave_transverse_vector",
+            "weld_plate_normal_world",
             "joint1_rad",
             "joint2_rad",
             "cleaner_source_index",
@@ -172,6 +184,11 @@ def record_step_conditions(steps, indices):
             "work_cycle_id",
             "work_cycle_number",
             "fake_arc_required",
+            "scan_weld_cycle_id",
+            "scan_cycle_phase",
+            "scan_cycle_pass",
+            "scan_cycle_run_dir",
+            "weld_tcp_speed_mm_s",
             "spray_kind",
             "distance_m",
             "radius_m",
@@ -183,6 +200,8 @@ def record_step_conditions(steps, indices):
                 condition[key] = step[key]
         if step.get("settings") is not None:
             condition["settings"] = copy.deepcopy(step["settings"])
+        if step.get("scan") is not None:
+            condition["scan"] = copy.deepcopy(step["scan"])
         if step.get("type") == "motion":
             points = step.get("points", ())
             condition["waypoint_count"] = len(points)
@@ -232,17 +251,28 @@ def attach_execution_conditions(steps, execution_conditions):
     """Give every ARC ON row its own copy of the Execute-time snapshot."""
     for step in steps:
         if (
-            step.get("type") == "digital_weld"
-            and step.get("command") == "on"
+            (step.get("type") == "digital_weld" and step.get("command") == "on")
+            or step.get("type") == "scan_weld_pass"
         ):
             step["execution_conditions"] = copy.deepcopy(
                 execution_conditions
             )
+            if step.get("scan_weld_cycle_id") and step.get("type") == "digital_weld":
+                effective = step["execution_conditions"]
+                effective["scan_cycle_pass"] = step.get("scan_cycle_pass")
+                motion = next((row for row in steps
+                               if row.get("weld_scenario_id") == step.get("weld_scenario_id")
+                               and row.get("weld_scenario_stage") == "weld_motion"), {})
+                for key, value in motion.items():
+                    if key.startswith(("weld_", "fixed_world_")) or key in (
+                        "seam_orientation_mode", "lead_in_mm", "lead_out_mm", "safe_approach_mm", "pre_start_lead_mm",
+                    ):
+                        effective[key] = copy.deepcopy(value)
 
 
 def contains_weld_command(steps):
     return any(
-        step["type"] in ("digital_weld", "gas", "software_crater", "custom_hot_start") for step in steps
+        step["type"] in ("digital_weld", "gas", "software_crater", "custom_hot_start", "scan_weld_pass") for step in steps
     )
 
 
@@ -270,10 +300,12 @@ class SequenceExecutor:
         for step in steps:
             if step["type"] == "planned_trajectory":
                 required_arms.update(step.get("required_arms", ()))
-            elif step["type"] in ("motion", "named_pose", "spray_motion", "software_crater", "custom_hot_start"):
+            elif step["type"] in ("motion", "named_pose", "spray_motion", "software_crater", "custom_hot_start", "scan_weld_pass"):
                 required_arms.add(
                     step["planning_group"].removesuffix("_manipulator")
                 )
+            elif step["type"] in ("precision_sensing_scan", "hongik_post_weld_scan", "post_weld_scan"):
+                required_arms.add("right")
             elif step["type"] == "dual_arm_pose":
                 required_arms.update(("left", "right"))
             elif (
@@ -307,7 +339,8 @@ class SequenceExecutor:
             step.get("parallel_slot", local_index + 1)
             for local_index, step in enumerate(steps)
             if step["type"] in (
-                "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion"
+                "motion", "named_pose", "planned_trajectory", "dual_arm_pose", "spray_motion",
+                "precision_sensing_scan", "hongik_post_weld_scan", "post_weld_scan", "scan_weld_pass",
             )
         )
         duplicate_motion_slots = [
@@ -357,19 +390,68 @@ class SequenceExecutor:
 
     def run_worker(self, steps, indices, execute_requested):
         host = self.host
+        host._scan_cycle_journal = None
+        host._scan_cycle_log_error = None
         try:
+            if any(step.get("type") in ("precision_sensing_scan", "scan_weld_pass") for step in steps):
+                from construct_robot.application.scan_weld_cycle import validate_scan_weld_cycle
+                validate_scan_weld_cycle(steps)
+                conditions = next((step.get("execution_conditions") for step in steps
+                                   if step.get("execution_conditions")), {})
+                initial_stage_type = steps[0]["type"]
+                if execute_requested:
+                    directory = (host._weld_feedback_directory() if hasattr(host, "_weld_feedback_directory")
+                                 else Path.home() / "ros2_ws" / "weld_feedback")
+                    host._scan_cycle_journal = ScanCycleLog(
+                        Path(directory), record_step_conditions(steps, indices),
+                        conditions, self.fake_arc(),
+                    )
+                    conditions = dict(conditions, scan_cycle_log_directory=str(host._scan_cycle_journal.directory))
+                    host.post(host.log, f"SCAN + 4 PASSES LOG · {host._scan_cycle_journal.directory}")
+                    if not record_cycle_event(host, "step_start", sequence_number=1, phase="precision", pass_number=0,
+                                              type=initial_stage_type):
+                        raise RuntimeError(host._scan_cycle_log_error)
+                scan_started = time.monotonic()
+                try:
+                    steps = host._prepare_scan_weld_cycle(steps, execute_requested)
+                except Exception as error:
+                    record_cycle_event(host, "step_end", sequence_number=1, phase="precision", pass_number=0,
+                                       type=initial_stage_type, success=False,
+                                       duration_s=time.monotonic() - scan_started, message=str(error))
+                    raise
+                if not record_cycle_event(host, "step_end", sequence_number=1, phase="precision", pass_number=0,
+                                          type=initial_stage_type, success=True,
+                                          duration_s=time.monotonic() - scan_started, message="scan and path generation completed"):
+                    raise RuntimeError(host._scan_cycle_log_error)
+                indices = list(range(len(steps)))
+                validate_managed_weld_sequence(steps, require_complete=True)
+                if execute_requested:
+                    error = self.execution_preflight_error(steps, False)
+                    if error:
+                        raise RuntimeError(error)
+                # Record the actual measured geometry and each pass recipe,
+                # rather than the placeholders visible before scanning.
+                conditions = dict(conditions, steps=record_step_conditions(steps, indices))
+                if host._scan_cycle_journal is not None:
+                    conditions["scan_cycle_log_directory"] = str(host._scan_cycle_journal.directory)
+                    host._scan_cycle_journal.prepared(conditions["steps"])
+                attach_execution_conditions(steps, conditions)
             if execute_requested:
                 arc_step = next((s for s in steps if s.get("type") == "digital_weld"
                                  and s.get("command") == "on"), None)
                 if arc_step is not None:
                     host._finish_weld_feedback_record("closed before new sequence")
-                    host._begin_weld_feedback_record(
-                        arc_step["settings"], arc_step.get("execution_conditions")
-                    )
+                    if host._scan_cycle_journal is None:
+                        host._begin_weld_feedback_record(
+                            arc_step["settings"],
+                            {**(arc_step.get("execution_conditions") or {}),
+                             "fake_arc": self.fake_arc()}
+                        )
             host._sequence_worker_body(steps, indices, execute_requested)
         except Exception as error:
             # Otherwise a worker traceback leaves sequence_running latched and
             # every later Plan/Execute reports "A sequence is already running".
+            stopped = host.sequence_stop_requested
             host.weld_motion_done_event.set()
             host.sequence_stop_requested = True
             client = host.hicomm_client
@@ -390,16 +472,118 @@ class SequenceExecutor:
                     )
                 except Exception as feedback_error:
                     host.post(host.error, f"Weld feedback cleanup failed: {feedback_error}")
+            record_cycle_event(host, "exception", message=str(error))
+            self._finish_cycle_log("STOPPED" if stopped else "FAILED", str(error))
             host.post(host._sequence_finished, False, f"internal sequence error: {error}")
         finally:
-            # Normal fake completion keeps recording until STOP or a new run.
-            if execute_requested and (
-                host.sequence_stop_requested or not self.fake_arc()
-            ):
+            # Close every execution session, including fake runs.
+            if execute_requested:
                 host._finish_weld_feedback_record(
                     "stopped" if host.sequence_stop_requested else "sequence ended",
                     host.hicomm_client.latest_status() if host.hicomm_client is not None else None,
                 )
+
+    def _finish_cycle_log(self, status, message):
+        journal = getattr(self.host, "_scan_cycle_journal", None)
+        if journal is None:
+            return True
+        try:
+            journal.finish(status, message)
+            return True
+        except (OSError, TypeError, ValueError) as error:
+            self.host._scan_cycle_log_error = f"Scan + 4 Passes log finalization failed: {error}"
+            self.host.post(self.host.error, self.host._scan_cycle_log_error)
+            return False
+
+    @staticmethod
+    def _weld_motion_for(steps, scenario_id):
+        return next((
+            step for step in steps
+            if step.get("type") == "motion"
+            and step.get("weld_scenario_id") == scenario_id
+            and step.get("weld_scenario_stage") == "weld_motion"
+        ), None) if scenario_id else None
+
+    @staticmethod
+    def _path_key(step):
+        return tuple(
+            (p.position.x, p.position.y, p.position.z,
+             p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w)
+            for p in step.get("points", ())
+        )
+
+    def start_early_weld_preplan(self, steps, trigger_step):
+        """Plan the weld path while the robot is still approaching START.
+
+        Started at the scenario's first approach stage (weld/start WAIT), so a
+        long weaving plan overlaps the approach motions instead of parking the
+        torch at START before ARC ON.  It plans from the joints IK gives for
+        the path start, seeded with the START WAIT joints (else the current
+        ones). preplan_weld_motion uses it only if the robot really stopped
+        there and the path did not change; otherwise it plans again from the
+        current state as before.
+        """
+        scenario_id = trigger_step.get("weld_scenario_id")
+        preplans = self.__dict__.setdefault("_early_preplans", {})
+        if scenario_id in preplans:
+            return
+        weld_motion = self._weld_motion_for(steps, scenario_id)
+        node = self.host.node
+        if weld_motion is None or not hasattr(node, "path_start_joints"):
+            return
+        start_wait = next((
+            step for step in steps
+            if step.get("weld_scenario_id") == scenario_id
+            and step.get("weld_scenario_stage") == "start_wait"
+            and step.get("joint_names") and step.get("positions")
+        ), None)
+        seed = (dict(zip(start_wait["joint_names"], map(float, start_wait["positions"])))
+                if start_wait is not None else None)
+        early = {"done": threading.Event(), "ok": False, "detail": "",
+                 "path": self._path_key(weld_motion), "started": time.monotonic()}
+        preplans[scenario_id] = early
+
+        def plan():
+            try:
+                early["names"], early["positions"] = node.path_start_joints(weld_motion, seed)
+                candidate = dict(weld_motion, start_joint_positions=early["positions"],
+                                 reuse_approved_plan=False)
+                early["ok"], early["detail"] = node.run_sequence_cartesian_motion(
+                    candidate, False, track_goal=False)
+            except Exception as error:
+                early["ok"], early["detail"] = False, f"{type(error).__name__}: {error}"
+            finally:
+                early["finished"] = time.monotonic()
+                early["done"].set()
+
+        threading.Thread(target=plan, daemon=True).start()
+
+    def _use_early_preplan(self, weld_motion, scenario_id):
+        early = self.__dict__.get("_early_preplans", {}).pop(scenario_id, None)
+        if early is None:
+            return False
+        waited = time.monotonic()
+        if not early["done"].wait(timeout=30.0):
+            reason = "still planning after 30 s"
+        elif not early["ok"]:
+            reason = early["detail"]
+        elif self._path_key(weld_motion) != early["path"]:
+            reason = "weld path changed after the approach started"
+        elif not self.host.node.joints_within(
+                early["names"], early["positions"], EARLY_PREPLAN_START_TOLERANCE_RAD):
+            reason = "robot did not stop at the planned start joints"
+        else:
+            weld_motion["start_joint_positions"] = list(early["positions"])
+            weld_motion["reuse_approved_plan"] = True
+            self.host.post(
+                self.host.log,
+                f"WELD PATH PRE-PLANNED during approach · "
+                f"{early['finished'] - early['started']:.2f} s planning · "
+                f"waited {time.monotonic() - waited:.2f} s at start · {early['detail']}",
+            )
+            return True
+        self.host.post(self.host.log, f"Early weld plan not used ({reason}) · planning from the current state")
+        return False
 
     def preplan_weld_motion(self, steps, arc_on_step):
         """Approve the scenario's weld path before its ARC ON is sent.
@@ -420,6 +604,9 @@ class SequenceExecutor:
         ), None)
         if weld_motion is None:
             return None
+        if self._use_early_preplan(weld_motion, scenario_id):
+            return None
+        weld_motion.pop("start_joint_positions", None)
         started = time.monotonic()
         planned, detail = host.node.run_sequence_cartesian_motion(weld_motion, False)
         if not planned:
@@ -440,6 +627,9 @@ class SequenceExecutor:
             host.sequence_model = SequenceModel()
         success = True
         message = "complete"
+        active_scenario_id = None
+        # Never reuse an early plan left by an aborted earlier run.
+        self.__dict__["_early_preplans"] = {}
         groups = defaultdict(list)
         for local_index, (stored_index, step) in enumerate(zip(indices, steps)):
             key = (
@@ -450,6 +640,9 @@ class SequenceExecutor:
             groups[key].append((stored_index, step))
 
         for group_index, (key, members) in enumerate(groups.items(), start=1):
+            if getattr(host, "_scan_cycle_log_error", None):
+                success, message = False, host._scan_cycle_log_error
+                break
             if host.sequence_stop_requested:
                 success, message = False, "stopped by operator"
                 break
@@ -474,6 +667,8 @@ class SequenceExecutor:
                 host.weld_motion_success = False
             if any(step.get("weld_scenario_stage") == "arc_on"
                    for _stored_index, step in members):
+                active_scenario_id = next(step.get("weld_scenario_id") for _stored_index, step in members
+                                          if step.get("weld_scenario_stage") == "arc_on")
                 host.weld_arc_established_event.clear()
                 host.weld_arc_on_done_event.clear()
                 host.weld_arc_on_success = False
@@ -489,6 +684,7 @@ class SequenceExecutor:
                     # arc for the whole planning time (1-4 s with weaving).
                     preplan_error = self.preplan_weld_motion(steps, arc_on_step)
                     if preplan_error is not None:
+                        record_cycle_event(host, "preplan_failed", pass_number=arc_on_step.get("scan_cycle_pass"), message=preplan_error)
                         success, message = False, preplan_error
                         break
                     if host.sequence_stop_requested:
@@ -498,7 +694,8 @@ class SequenceExecutor:
                     # HICOMM workers race each other to their first callback.
                     host._begin_weld_feedback_record(
                         arc_on_step.get("settings"),
-                        arc_on_step.get("execution_conditions"),
+                        {**(arc_on_step.get("execution_conditions") or {}),
+                         "fake_arc": self.fake_arc()},
                     )
             tcp_recorder = None
             if execute_requested and weld_motion_group:
@@ -516,17 +713,26 @@ class SequenceExecutor:
             def run_member(result_key, member_step):
                 member_result = (False, "sequence task did not run")
                 task_started = time.monotonic()
+                log_fields = dict(sequence_number=result_key + 2, type=member_step["type"],
+                                  phase=member_step.get("scan_cycle_phase"), pass_number=member_step.get("scan_cycle_pass"),
+                                  stage=member_step.get("weld_scenario_stage"), parallel_slot=member_step.get("parallel_slot"))
                 try:
-                    member_result = host._run_sequence_step(
-                        member_step, execute_requested
-                    )
+                    if not record_cycle_event(host, "step_start", **log_fields):
+                        member_result = False, host._scan_cycle_log_error
+                    else:
+                        member_result = host._run_sequence_step(member_step, execute_requested)
+                except Exception as error:
+                    member_result = False, f"{type(error).__name__}: {error}"
+                finally:
+                    if not record_cycle_event(host, "step_end", **log_fields, success=bool(member_result[0]),
+                                              message=str(member_result[1]), duration_s=time.monotonic() - task_started):
+                        member_result = False, host._scan_cycle_log_error
                     results[result_key] = member_result
                     if execute_requested and not member_result[0]:
                         client = host.hicomm_client
                         if client is not None and not self.fake_arc():
                             client.inhibit_outputs()
                         host.node.cancel_active_motion()
-                finally:
                     host.post(host.log,
                         f"SEQUENCE STEP TIMING · #{result_key + 1} · "
                         f"stage={member_step.get('weld_scenario_stage', member_step['type'])} · "
@@ -537,6 +743,10 @@ class SequenceExecutor:
                         host.weld_motion_success = bool(member_result[0])
                         host.weld_motion_done_event.set()
 
+            if execute_requested:
+                for _stored_index, step in members:
+                    if step.get("weld_scenario_stage") in EARLY_PREPLAN_STAGES:
+                        self.start_early_weld_preplan(steps, step)
             for stored_index, step in members:
                 worker = threading.Thread(
                     target=run_member,
@@ -563,6 +773,28 @@ class SequenceExecutor:
                     break
             if not success:
                 break
+            if execute_requested:
+                for _index, contact in members:
+                    if not contact.get("start_touch_probe") or not contact.get("start_touch_result"):
+                        continue
+                    try:
+                        from construct_robot.application.scan_start_touch import register_touch_height
+                        registration = register_touch_height(steps, contact)
+                        for arc in steps:
+                            if arc.get("weld_scenario_id") == contact.get("weld_scenario_id") and arc.get("weld_scenario_stage") == "arc_on":
+                                conditions = arc.setdefault("execution_conditions", {})
+                                conditions["weld_start_touch"] = copy.deepcopy(registration)
+                                conditions["steps"] = record_step_conditions(steps, indices)
+                        if not record_cycle_event(host, "artifact", kind="start_touch_registration",
+                                                  pass_number=contact.get("scan_cycle_pass"), **registration):
+                            raise RuntimeError(host._scan_cycle_log_error)
+                        host.post(host.log, f"START TOUCH · pass {contact.get('scan_cycle_pass')} · World Z "
+                                  f"{registration['delta_world_m'][2] * 1000:+.3f} mm · START/GOAL updated before ARC")
+                    except Exception as error:
+                        success, message = False, f"start touch registration failed: {error}"
+                        break
+                if not success:
+                    break
             if execute_requested and any(
                 step.get("weld_scenario_stage") == "arc_off"
                 and step.get("trigger_before_goal", False)
@@ -571,11 +803,17 @@ class SequenceExecutor:
                 if not self.fake_arc():
                     final_status = host._pending_weld_final_status()
                     host._finish_weld_feedback_record("completed", final_status)
+            if (execute_requested and self.fake_arc() and getattr(host, "_scan_cycle_journal", None) is not None
+                    and any(step.get("weld_scenario_stage") == "arc_off" for _index, step in members)):
+                host._finish_weld_feedback_record("completed (fake ARC)")
+        if execute_requested and success and not host.sequence_stop_requested and self.fake_arc():
+            host._finish_weld_feedback_record("completed")
         if execute_requested and (not success or host.sequence_stop_requested):
             client = host.hicomm_client
             if client is not None and not self.fake_arc():
                 client.clear_outputs()
-            software_step = next((step for step in steps if step.get("weld_scenario_stage") == "software_crater"), None)
+            software_step = next((step for step in steps if step.get("weld_scenario_stage") == "software_crater"
+                                  and step.get("weld_scenario_id") == active_scenario_id), None)
             if software_step is not None and client is not None:
                 try:
                     host._software_crater_restore(validate_digital_weld_settings(software_step["settings"]))
@@ -599,14 +837,23 @@ class SequenceExecutor:
                     off_ok, off_message = host._set_fastech_output_sync(port, False)
                 except Exception as error:
                     off_ok, off_message = False, str(error)
+                record_cycle_event(host, "cleaner_cleanup", port=port, value=False,
+                                   success=bool(off_ok), message=str(off_message))
                 if not off_ok:
                     success, message = False, f"Cleaner DO{port} cleanup OFF failed: {off_message}"
                     host.post(host.error, message)
+        if getattr(host, "_scan_cycle_log_error", None):
+            success, message = False, host._scan_cycle_log_error
+        if not self._finish_cycle_log("STOPPED" if host.sequence_stop_requested else "COMPLETED" if success else "FAILED", message):
+            success, message = False, host._scan_cycle_log_error
         host.post(host._sequence_finished, success, message)
 
     def run_step(self, step, execute_requested):
         host = self.host
         if step["type"] == "motion":
+            if step.get("start_touch_probe"):
+                from construct_robot.application.scan_start_touch import seek_start_touch
+                return seek_start_touch(host, step, execute_requested)
             if (
                 execute_requested
                 and step.get("weld_scenario_stage") == "weld_motion"
@@ -640,6 +887,10 @@ class SequenceExecutor:
             "planned_trajectory", "named_pose", "dual_arm_pose", "spray_motion", "head_motion",
         ):
             return getattr(host.node, f"run_sequence_{step['type']}")(step, execute_requested)
+        if step["type"] == "post_weld_scan":
+            return host._run_post_weld_scan(step, execute_requested)
+        if step["type"] == "hongik_post_weld_scan":
+            return host._run_hongik_post_weld_scan(step, execute_requested)
         if step["type"] == "sleep":
             if not execute_requested:
                 return True, "sleep planned (no wait)"

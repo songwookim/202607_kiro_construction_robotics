@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hongik_scan_ros</name>
+  <version>0.1.0</version>
+  <description>
+    Hongik 1G precision-sensing ROS 2 layer (namespace /hongik_fine_sensing) for the KIRO integration:
+    hongik_auto_teach_server (KIRO welding_interfaces/action/PrecisionSensing on precision_sensing, hongik_scan_msgs AutoTeach on
+    auto_teach; the 1G core through the MoveIt adapter 'moveit_jtc' = the platform's move_group + JointTrajectoryController +
+    /joint_states + TF), hongik_profiler_node (VC nano 3D-Z -> ~/profile), hongik_auto_teach_client (specimen input),
+    the launch file hongik_moveit.launch.py and the platform config hongik_kiro.yaml.
+    It does not talk to or configure the robot controller.
+  </description>
+  <maintainer email="jm68112@gmail.com">DBCM Lab (Hongik University)</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>hongik_scan_msgs</exec_depend>
+  <exec_depend>welding_interfaces</exec_depend>
+  <exec_depend>scan_l0</exec_depend>
+  <exec_depend>scan_core</exec_depend>
+  <exec_depend>vc3dz_driver</exec_depend>
+  <exec_depend>eoat_description</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>shape_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>                <!-- static_transform_publisher (launch) -->
+  <exec_depend>tf2_ros_py</exec_depend>             <!-- the python module tf2_ros (moveit_adapter) -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

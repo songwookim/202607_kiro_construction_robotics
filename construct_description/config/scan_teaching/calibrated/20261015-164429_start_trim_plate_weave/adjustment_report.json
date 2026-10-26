@@ -1,0 +1,110 @@
+{
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan",
+  "export_folder": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-164429_start_trim_plate_weave",
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-164428_before_start_trim_plate_weave",
+  "endpoint_changes": [
+    {
+      "pass": 1,
+      "end": "start",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass": 1,
+      "end": "goal",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "start",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        -2.0000000000000018
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "goal",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        -2.0000000000000018
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "goal",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "start",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "goal",
+      "tcp_delta_world_mm": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "pass4_weave_geometry": {
+    "reference": "scan_plate_plane",
+    "normal_world": [
+      -0.0037118238331104746,
+      -0.014504283265824865,
+      0.9998879177841768
+    ],
+    "transverse_vector_world": [
+      -0.9987667193030348,
+      0.04955913354789702,
+      -0.00298876138803796
+    ]
+  },
+  "all_goal_positions_unchanged": true,
+  "welding_attitudes_unchanged": true,
+  "unchanged_source_sha256": {
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/pass_orientations.yaml": "f97dd75207f5c961f40fda23861dd0a1c96dc8c0284dbf2ea7fc9c0044b5ecf7",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/wire_tip_offset.yaml": "7a793f1c79120291ddef103e14598233c96c16a6d29e89c4c4166bb0ae0fc6f2",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/estimate.json": "898e98f5d4dca073d00fd4515681945f0cfe5998bbb067ecf0bb4a389c39c056",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/calib_used.json": "39f8b81373f9da4429bfe446e352ccbfe79c9b07c90e8bbee043c2fa1b537f36",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_1_info.yaml": "9e6213d978bd67631ddfd0586f02d93ac816be950820111247983f068ed6aa39",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_2_info.yaml": "5fe15ac1bcf10471239fe541c29d09ec4501f93bd32c55050d33e49aa9ca69fa",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_2.yaml": "e4bcc349c51135138707224a3063529288ce47f00389177a0b0dd5b2532d844c",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_3_info.yaml": "3fbee88b6c9b40ea09b74f770468c27becbd29e97d198017f9ebabbbba27c533",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_3.yaml": "c0a74443235d5ed8db0e17e5afa18534cf316c8e69c33742f4fe64cd66199f4a",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_4_info.yaml": "37e61a472a3d949c45fd5f7b5291bbe424d0c2bb290058b4405ddfcfed3705d8",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_4.yaml": "d88498e1fd204242ee78129d51463a07307db59b803d771b7a589c68f748514a",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-162308_scan/hongik_estimate/kiro/pass_1.yaml": "c22dcab9c25d8d451d0778e973cea1c86fd5619e9b2d68a955ce6246e01bd42b"
+  },
+  "tests_passed": 134,
+  "robot_motion_executed": false
+}

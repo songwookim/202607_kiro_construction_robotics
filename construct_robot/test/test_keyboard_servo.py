@@ -247,6 +247,7 @@ def test_servo_disable_always_leaves_servo_even_if_still_moving():
 
 def test_command_stopped_follows_jtc_reference_changes():
     bridge = bridge_with()
+    bridge.watched_arms = {"right"}
     bridge._controller_state("right", reference_state([0.1] * 6))
     assert not bridge.command_stopped("right", timeout=0.02, stable_s=0.1)
     time.sleep(0.12)
@@ -302,7 +303,7 @@ def test_axis_key_switches_held_jog_without_stopping_in_servo_mode():
     assert gui.keyboard_jog_selection.get() == "X"
     assert gui.node.resolve_keyboard_velocity.call_args.args[1] == "X"
     gui.node.set_keyboard_velocity.assert_called_once_with(
-        "right", (0.09, 0.0, 0.0, 0.0, 0.0, 0.0))
+        "right", (0.09, 0.0, 0.0, 0.0, 0.0, 0.0), key="Up")
     gui.node.clear_keyboard_velocity.assert_not_called()
     assert gui.keyboard_velocity_active_key == "Up"
 
@@ -342,3 +343,55 @@ def test_servo_stop_check_uses_command_and_never_move_stop():
     gui.node.wait_until_arm_stopped.assert_not_called()
     gui.node.restart_keyboard_servo.assert_called_once_with("right")
     gui.node.request_direct_motion_stop.assert_not_called()
+
+
+def test_jog_latency_from_the_arrow_press_edge_to_the_velocity_command_is_logged():
+    import threading
+    import time as _time
+    node = SimpleNamespace(keyboard_velocity_lock=threading.Lock(), keyboard_velocity_publishers={},
+                           keyboard_velocity_command={}, ui=SimpleNamespace(post=Mock(), keyboard_arrow_state_received=Mock(), _ui_queue=SimpleNamespace(qsize=lambda: 7)),
+                           clear_keyboard_velocity=Mock())
+    logger = Mock()
+    node.get_logger = lambda: logger
+    WeldGuiNode._keyboard_arrow_state(node, SimpleNamespace(data=0x04))     # Up pressed (new edge)
+    node.keyboard_press_edge_monotonic -= 0.25                               # the GUI took 250 ms
+    WeldGuiNode.set_keyboard_velocity(node, "right", (0.01, 0, 0, 0, 0, 0))
+    message = logger.warning.call_args.args[0]
+    assert "KEYBOARD JOG LATENCY" in message and "Tk queue 7" in message
+    assert 240 <= int(message.split("command ")[1].split(" ms")[0]) <= 400
+    WeldGuiNode._keyboard_arrow_state(node, SimpleNamespace(data=0x04))     # held: not a new edge
+    assert node.keyboard_press_edge_monotonic is None
+    WeldGuiNode._keyboard_arrow_state(node, SimpleNamespace(data=0x00))
+    WeldGuiNode._keyboard_arrow_state(node, SimpleNamespace(data=0x04))
+    WeldGuiNode.set_keyboard_velocity(node, "right", (0.01, 0, 0, 0, 0, 0))
+    assert logger.info.call_args.args[0].startswith("KEYBOARD JOG LATENCY")
+
+
+def test_jtc_references_are_watched_only_during_keyboard_teaching():
+    bridge = bridge_with()
+    subscription = object()
+    bridge.node.create_subscription = Mock(return_value=subscription)
+    bridge.node.destroy_subscription = Mock()
+    bridge.state_subscriptions = {}
+    assert bridge.enable("right")[0]
+    bridge.node.create_subscription.assert_called_once()
+    assert bridge.node.create_subscription.call_args.args[1] == (
+        "/right_manipulator_controller/controller_state")
+    bridge._controller_state("right", reference_state([0.1] * 6))
+    assert bridge.disable("right")[0]
+    bridge.node.destroy_subscription.assert_not_called()  # never cross-thread
+    assert bridge.references["right"] is None
+    bridge._controller_state("right", reference_state([0.2] * 6))
+    assert bridge.references["right"] is None  # ignored while not teaching
+    assert bridge.enable("right")[0]
+    bridge.node.create_subscription.assert_called_once()  # reused
+
+
+def test_failed_enable_stops_watching_references():
+    bridge = bridge_with(start_ok=False)
+    bridge.node.create_subscription = Mock(return_value=object())
+    bridge.node.destroy_subscription = Mock()
+    bridge.state_subscriptions = {}
+    assert not bridge.enable("right")[0]
+    bridge.node.destroy_subscription.assert_not_called()
+    assert "right" not in bridge.watched_arms

@@ -1,0 +1,122 @@
+{
+  "created": "2026-10-15T20:55:57.842731+09:00",
+  "verification_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-204817_scan",
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-205557-538990_before_p2_p4_world_trim",
+  "teaching": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-205557-538990_p2_p4_world_trim",
+  "note": "Operator confirmed final World trims: P1/P3 START+GOAL X -2mm; P2/P4 START+GOAL X -1mm (replaces -2mm); P4 START+GOAL Z -1.5mm. Retain P2/P3 START Z -2mm. Post-fit position trims only; preserve original truth, fit, relative layout, tool attitudes and wire-tip model.",
+  "checks": [
+    {
+      "pass_number": 1,
+      "end": "start",
+      "change_since_previous_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 1,
+      "end": "goal",
+      "change_since_previous_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 2,
+      "end": "start",
+      "change_since_previous_mm": [
+        0.9999999999999991,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -1.0,
+        0.0,
+        -2.0
+      ]
+    },
+    {
+      "pass_number": 2,
+      "end": "goal",
+      "change_since_previous_mm": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -1.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 3,
+      "end": "start",
+      "change_since_previous_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -2.0,
+        0.0,
+        -2.0
+      ]
+    },
+    {
+      "pass_number": 3,
+      "end": "goal",
+      "change_since_previous_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "final_trim_world_mm": [
+        -2.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "pass_number": 4,
+      "end": "start",
+      "change_since_previous_mm": [
+        1.0,
+        0.0,
+        -1.4999999999999458
+      ],
+      "final_trim_world_mm": [
+        -1.0,
+        0.0,
+        -1.5
+      ]
+    },
+    {
+      "pass_number": 4,
+      "end": "goal",
+      "change_since_previous_mm": [
+        1.0,
+        0.0,
+        -1.4999999999999458
+      ],
+      "final_trim_world_mm": [
+        -1.0,
+        0.0,
+        -1.5
+      ]
+    }
+  ],
+  "hardware_executed": false
+}

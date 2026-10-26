@@ -1,0 +1,57 @@
+{
+  "tests_passed": 150,
+  "post_weld_runs": [
+    {
+      "name": "post_weld_scan_p2_20261015-024131",
+      "status": "OK",
+      "n_frames": 2240,
+      "direction": "E->S",
+      "moves": [
+        {
+          "name": "post_weld_lift",
+          "executed": true,
+          "rot_deg": 0.0
+        },
+        {
+          "name": "post_weld_approach",
+          "executed": true,
+          "rot_deg": 0.00028876487710419765
+        },
+        {
+          "name": "post_weld_descend",
+          "executed": true,
+          "rot_deg": 0.00016522229719935668
+        },
+        {
+          "name": "post_weld_scan",
+          "executed": true,
+          "rot_deg": 0.00010321131150238323
+        }
+      ]
+    },
+    {
+      "name": "post_weld_scan_final_20261015-024056",
+      "status": "OK",
+      "n_frames": 2240,
+      "direction": "E->S",
+      "moves": [
+        {
+          "name": "post_weld_approach",
+          "executed": true,
+          "rot_deg": 0.0003591638105742611
+        },
+        {
+          "name": "post_weld_descend",
+          "executed": true,
+          "rot_deg": 0.0002301264469911066
+        },
+        {
+          "name": "post_weld_scan",
+          "executed": true,
+          "rot_deg": 6.90343441513221e-05
+        }
+      ]
+    }
+  ],
+  "real_motion_goals_sent": 0
+}

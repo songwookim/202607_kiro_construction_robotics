@@ -9,28 +9,25 @@ joint_state:
   - right_manipulator_joint5
   - right_manipulator_joint6
   positions_rad:
-  - 5.537928970892902
-  - 1.0204845141454761
-  - 1.2955872571169256
-  - 5.450826026384116
-  - 0.8794570183574119
-  - -0.3293540308269673
+  - 5.449033718970494
+  - 0.9345740000147735
+  - 1.4115508783589
+  - 5.594561091473437
+  - 0.5006472871393461
+  - -0.3268404395216096
 tcp_pose_world:
   position_m:
-    x: 0.5728027248557745
-    y: -1.6040923467994328
-    z: 0.9933585369259349
+    x: 0.6009602603814174
+    y: -1.5351489173958357
+    z: 0.9889835965092177
   orientation_xyzw:
-    x: -0.5367388358535176
-    y: 0.7865454170989573
-    z: -0.12703955878378148
-    w: -0.2777025016654717
-capture_provenance:
-  capture_source: measured_joint_fk
-  tcp_source: moveit_fk
-  joint_state_timestamp: 1790937842.561473
-  joint_state_age_ms: 5.3723900055047125
-  tf_age_ms: 816.3299560546875
-  tf_fresh: false
-  tf_fk_position_error_mm: 1.2462222543165673e-12
-  tf_fk_orientation_error_deg: 0.0
+    x: 0.7258321190445357
+    y: -0.6877427225102736
+    z: -0.011420665817450985
+    w: -0.006873935536721755
+recovery_provenance:
+  source_log: /home/irs/ros2_ws/weld_feedback/weld_feedback_20261015_073323_019.log
+  source_log_sha256: d43a92c8abc20d2ad60f778ae728b78020c76b4ea049b9322b4c7f2b4e137376
+  source_sequence_number: 26
+  reason: Restore teaching overwritten by accidental keyboard capture on 2026-10-23
+    17:16-17:17

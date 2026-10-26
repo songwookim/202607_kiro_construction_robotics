@@ -1,0 +1,446 @@
+diff --git a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+index c42a9bb..77c20f9 100644
+--- a/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
++++ b/scan_stack/CHANGES_2026-10-14_kiro-1g-field.md
+@@ -22,6 +22,7 @@
+ | 12 | 양방향 출력 | 한 번 센싱으로 두 방향 모두 용접할 수 있어야 함 | `directions/S_to_E/`, `directions/E_to_S/` 를 매 실행 출력 (D14 포함) | e1cf40f |
+ | 13 | 센싱 자세 선택 = TCP 최소 이동 | 관절 이동 최소로 고른 획득 자세가 토치를 115° 돌려 베이스 반대쪽으로 보냄 → 와이어가 베이스에서 반대쪽까지 돌아감 (21:44) | 공구 자세를 토치 팁 TCP 의 회전 최소 → 토치 팁 거리 최소로 고르고, 관절 이동 시간은 그 자세의 팔 형태만 정함 | f0774b6 |
+ | 14 | 확인한 관절 계획의 시작 허용값 | 계획 시작과 보내기 직전 측정 관절이 0.054° 달라 실행 거부 (002753) — 재사용용 0.05°/0.1 mm 기준을 쓰고 있었음 | move_group 자신의 `allowed_start_tolerance` (실행 때 읽음, 없으면 MoveIt 기본 0.01 rad) 로 판정 | 34c5e37 |
++| 15 | 용접 후 재스캔: 용접 자세에서 시작·방향 선택 | 용접 직후 토치가 시편 근처라 시작 거부; 짧은 관절 경로가 막혀 플랜지 331° 회전 후보 선택; 방향·자세가 관절 최소·센싱 패스 자세로 강제 | 먼저 판 법선으로 곧게 올라감 (자세 유지), 방향·공구 자세 = TCP 최소 이동 (회전 → 토치 팁 거리), `--direction` 으로 지정 가능 | 0fa4d35 |
+ 
+ ---
+ 
+@@ -351,6 +352,28 @@ KIRO Servo-J 지연 약 0.5 s × 관절 상한 0.24 rad/s ≈ 0.12 rad 로, 평
+ 
+ ---
+ 
++## 15. 용접 후 재스캔: 용접 자세에서 시작, TCP 최소 이동, 방향 지정 (KIRO 현장 2026-10-15, 0fa4d35)
++
++**왜**:
++- 재스캔은 용접 직후에 부른다. 그래서 토치가 그루브에 있는 용접 자세에서 시작한다. 이 자세는 우리 세계의 시편 상자 (여유 C 50 mm) 안이라 시작 검사에서 거부됐다.
++- 다른 실행에서는 시편 근처라 짧은 관절 경로가 막혀 (eoat–hongik/specimen 접촉), 플랜지 331°·손목4 204° 를 도는 후보가 선택됐다. 사용자가 중지했다.
++- 방향 (어느 끝부터) 은 옛 '관절 이동 합 최소' 규칙으로, 공구 자세는 '센싱 패스와 같은 물리 자세' 로 강제됐다. E→S 로 용접한 뒤에는 토치를 거의 180° 돌려야 했다.
++
++**무엇을·어떻게**:
++- `teach_1g._apply_world(inside_ok=)`: 시작 자세가 우리 물체 (hongik/*) 안일 때만 거부하지 않고 기록한다. 다른 물체·자기 충돌은 그대로 거부한다. 재스캔만 이 옵션을 쓴다.
++- `post_weld.PostWeldScan._lift_clear`: 판 법선 방향으로 곧게 올라간다 (공구 자세 그대로).
++  - 거리는 도착 자세가 포락선의 판 거리 규칙을 만족하는 최소값이다: 툴 가장 낮은 점 ≥ safe_clearance, 광학 원점 ≥ standoff_min.
++  - 그루브는 위로 열려 있으므로, 이 직선에서 모든 툴 점이 판에서 멀어진다.
++  - 도착 자세는 포락선 전체를 통과해야 한다.
++  - MoveIt 은 이 한 직선만 우리 물체를 장면에서 빼고 검사한다 (로봇 자신·KIRO 고정 구조물은 그대로). 끝나면 다시 넣고, 팔이 물체 밖인지 다시 확인한다.
++- `post_weld._plan`: (방향 2개 × 진행 부호 2개) 가운데 지금 자세에서 TCP 최소 이동 (토치 회전 → 토치 팁 거리, 13절과 같은 규칙) 으로 고른다. 팔 형태는 그 자세 안에서 관절 이동 시간으로 정한다.
++- 방향 지정: `PostWeldScan.action` 에 `direction` ('S->E' | 'E->S' | '' = TCP 최소 이동), 클라이언트 `--direction S->E|E->S`, 서버 입력 검사.
++  - 새 액션 필드라 `hongik_scan_msgs` 를 다시 빌드해야 한다 (워크스페이스 전체 빌드에 포함된다).
++- 재스캔 선 자체는 그대로다: 실측 심 [S − 20, E + 20] mm, 그 실행 패스의 standoff·피치·속도, 원자료만 저장.
++- 시험 (필수만): `test_sim_post_weld` 에 용접 직후 자세 (토치 팁이 판 위 약 30 mm) 에서 E→S 지정 재스캔 → 올라가기·접근·하강·스캔 OK 를 추가했다. `test_post_weld_units` 와 `test_post_weld_action` (메시지 새로 빌드) 도 통과했다.
++
++---
++
+ ## KIRO 쪽에서 바뀌는 것
+ 
+ 1. **서버는 우리 런치 (`hongik_moveit.launch.py`) 로 띄운다.**
+diff --git a/scan_stack/hongik_scan_msgs/action/PostWeldScan.action b/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
+index a1b5197..2d8f563 100644
+--- a/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
++++ b/scan_stack/hongik_scan_msgs/action/PostWeldScan.action
+@@ -16,6 +16,8 @@ float64 measure_speed_mps              # measurement speed of the scan line [m/s
+ string confirm_mode                    # 'each' | 'large' | 'scan' | 'auto' | 'none' ('' = server parameter confirm_mode); ~/confirm_move
+ bool dry_run                           # plan the line and the moves only: nothing is sent, the sensor is not opened, no folder written
+ uint32 after_pass                      # the pass just completed (1..n of the run's weld plan); 0 = final / unspecified (after every pass)
++string direction                       # the scan direction: 'S->E' | 'E->S' (the run's S / E); '' = the least TCP motion from the
++                                       # current pose (torch rotation first, then the torch tip's distance)
+ ---
+ # ===================== result =====================
+ string status                          # OK | DRY_RUN | REFUSED | ABORTED | ERROR
+diff --git a/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py b/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
+index 63efeb9..c7ba855 100644
+--- a/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
++++ b/scan_stack/hongik_scan_ros/hongik_scan_ros/auto_teach_server.py
+@@ -269,8 +269,11 @@ def post_weld_inputs(goal, *, out_root: str, confirm_default: str) -> dict:
+     k = int(getattr(goal, "after_pass", 0) or 0)
+     if k < 0:
+         raise ValueError(f"after_pass must be >= 0 (0 = final), got {k}")
++    d = str(getattr(goal, "direction", "") or "").strip().replace(" ", "")
++    if d not in ("", "S->E", "E->S"):
++        raise ValueError(f"direction must be 'S->E', 'E->S' or '' (the least TCP motion), got {d!r}")
+     return {"run_dir": run_dir, "measure_speed_mps": v, "confirm": confirm,
+-            "dry_run": bool(getattr(goal, "dry_run", False)), "after_pass": k}
++            "dry_run": bool(getattr(goal, "dry_run", False)), "after_pass": k, "direction": d}
+ 
+ 
+ class AutoTeachServer(Node):
+@@ -981,6 +984,7 @@ class AutoTeachServer(Node):
+                   + (f"{float(goal.measure_speed_mps) * 1e3:g} mm/s (override)" if float(goal.measure_speed_mps or 0.0) > 0.0
+                      else "the run's measurement speed") + f", confirm '{goal.confirm_mode or self.confirm_mode}', "
+                   + (f"after pass {int(goal.after_pass)}" if int(goal.after_pass or 0) > 0 else "final (after every pass)")
++                  + f", direction {str(getattr(goal, 'direction', '') or '') or 'least TCP motion'}"
+                   + f", {'dry run' if goal.dry_run else 'scan'}")
+         if goal_handle.is_cancel_requested:
+             return finish("ABORTED", "cancel requested before the scan started (nothing sent)", "canceled")
+@@ -1021,7 +1025,7 @@ class AutoTeachServer(Node):
+         session = ScanSession(robot=self.platform, sensor=None, owned=False)
+         out_dir = out_dir_for(run.run_dir, inp["after_pass"])
+         pw = PostWeldScan(self.settings, run, calib, out_dir=str(out_dir), after_pass=inp["after_pass"],
+-                          confirm=inp["confirm"],
++                          direction=inp.get("direction", ""), confirm=inp["confirm"],
+                           dry_run=bool(inp["dry_run"]), measure_speed_mps=inp["measure_speed_mps"], confirm_source=self._confirm_source,
+                           log=self._log, on_event=self._on_event,
+                           local_speed_mps=self.local_speed if self.local_speed > 0 else None,
+diff --git a/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py b/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
+index 297379c..acc7af9 100644
+--- a/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
++++ b/scan_stack/hongik_scan_ros/hongik_scan_ros/post_weld_client.py
+@@ -69,6 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
+                          "(answer with ~/confirm_move)")
+     ap.add_argument("--after-pass", type=_pass_number, default=0, metavar="K",
+                     help="the pass just completed (1..n of the run's weld plan); default = final (after every pass)")
++    ap.add_argument("--direction", default="", choices=("", "S->E", "E->S"),
++                    help="scan direction along the run's measured seam (its S / E); default = the least TCP motion from the current "
++                         "pose (torch rotation first, then the torch tip's distance) - after a weld the torch keeps its side")
+     ap.add_argument("--dry-run", action="store_true", help="plan and print the line and the moves; nothing is sent")
+     ap.add_argument("--action", default=ACTION)
+     ap.add_argument("--server-timeout", type=float, default=30.0)
+@@ -96,6 +99,7 @@ def goal_from_args(a, *, cwd: Optional[Path] = None):
+     g.confirm_mode = str(a.confirm)
+     g.dry_run = bool(a.dry_run)
+     g.after_pass = int(getattr(a, "after_pass", 0) or 0)
++    g.direction = str(getattr(a, "direction", "") or "")
+     return g
+ 
+ 
+@@ -103,6 +107,7 @@ def goal_line(g) -> str:
+     return (f"post-weld scan goal: run {g.run_dir or '(the latest on the server)'}, measurement speed "
+             + (f"{g.measure_speed_mps * 1e3:g} mm/s (override)" if g.measure_speed_mps > 0 else "the run's measurement speed")
+             + f", {f'after pass {g.after_pass}' if g.after_pass > 0 else 'final (after every pass)'}"
++            + f", direction {g.direction or 'least TCP motion'}"
+             + f", confirm {g.confirm_mode}"
+             + (", DRY RUN (nothing sent)" if g.dry_run else "") + " (Ctrl-C = cancel = stop the scan)")
+ 
+diff --git a/scan_stack/scan_l0/scan_l0/post_weld.py b/scan_stack/scan_l0/scan_l0/post_weld.py
+index 21abcff..4f09e30 100644
+--- a/scan_stack/scan_l0/scan_l0/post_weld.py
++++ b/scan_stack/scan_l0/scan_l0/post_weld.py
+@@ -54,7 +54,8 @@ from typing import Optional
+ 
+ import numpy as np
+ 
+-from scan_core.path_gen import pass_overscan, sensor_frames
++from scan_core.path_gen import EnvelopeError, Waypoint, pass_overscan, sensor_frames, tool_keypoints
++from scan_core.tool_body import body_points_base
+ from scan_core.seam_estimate import _section_basis
+ from scan_core.types import JobError, ScanJob, _jsonable
+ from scan_core.g1_types import jsonable
+@@ -65,7 +66,10 @@ from .acquisition import rank_reach_candidates
+ from .autoteach import AutoTeach, _Abort, _rot_angle_deg, wrist2_branch_problem, move_plan_text
+ from .cell_world import CellWorld
+ from .config import attach_tool_body, job_to_dict
+-from .executor import STATUS_ABORTED, STATUS_ERROR, STATUS_OK, STATUS_REFUSED, ScanRunResult, gate_and_arm, raw_payload
++from .executor import (STATUS_ABORTED, STATUS_ERROR, STATUS_OK, STATUS_REFUSED, ScanRunResult, StartPoseMismatch, execute_leg,
++                       gate_and_arm, raw_payload)
++from .planning import make_local_move_plan
++from .ports import MotionError
+ from .ports import PlatformNotReady, ScanRefused
+ from .teach_1g import MOVE_MEASURE, MOVE_POSITION, Teach1G
+ 
+@@ -334,11 +338,15 @@ class PostWeldScan(Teach1G):
+     """One post-weld data-acquisition scan (module docstring). The motion primitives (world, envelope D3, MoveIt check D4,
+     confirmation, joint move, straight legs with sensor recording, cancel, abort path) are the 1G core's."""
+ 
+-    def __init__(self, settings, run: InputRun, calib, *, out_dir, after_pass: int = 0, **kw):
++    def __init__(self, settings, run: InputRun, calib, *, out_dir, after_pass: int = 0, direction: str = "", **kw):
+         job0, doc = run.job_and_doc()
+         kw.pop("max_passes", None)
+         super().__init__(settings, job0, doc, calib, out_dir=out_dir, **kw)
+         self.run_in = run
++        self.direction = str(direction or "").strip().replace(" ", "")
++        if self.direction not in ("", "S->E", "E->S"):
++            raise ValueError(f"direction must be 'S->E', 'E->S' or '' (the least TCP motion), got {direction!r}")
++        self._start_inside: Optional[dict] = None
+         self.after_pass = run.check_after_pass(after_pass)
+         self.vdir = self.out                          # no verification/: the sensor backup goes next to raw.npz
+         self.pw = PostWeldResult(run_dir=str(run.run_dir), after_pass=self.after_pass)
+@@ -445,7 +453,7 @@ class PostWeldScan(Teach1G):
+             raise _Abort(STATUS_REFUSED, str(e), category="config")
+         self.default_speed = float(init.default_speed)
+         self._latch_at_start = self._latch_last()
+-        self._apply_world(f"the run {run.name}'s world (its passes' scene)")
++        self._apply_world(f"the run {run.name}'s world (its passes' scene)", inside_ok=True)
+ 
+     # ---- the sensor: the run's settings, raw recording only -----------------------------------------------------------------
+     def _sensor(self) -> None:
+@@ -488,7 +496,7 @@ class PostWeldScan(Teach1G):
+                 self.res.notes.append(f"settling evidence of the input leg {lg['name']} not read: {type(e).__name__}: {e}")
+         return devs
+ 
+-    def _scan_job(self, line: dict, direction: str) -> tuple:
++    def _scan_job(self, line: dict, direction: str, sign: Optional[int] = None) -> tuple:
+         """The pass job on the measured line in the travel direction: the run's pass standoff / pitch / incidence, the progression
+         sign whose tool orientation is the run's pass orientation (the recorded pass job's flange rotation with this calib), the
+         measurement speed → (job, rotation from the run's pass orientation [deg]). The standoff is the recorded one as it is (it
+@@ -510,7 +518,7 @@ class PostWeldScan(Teach1G):
+         except (JobError, ValueError, KeyError) as e:
+             raise _Abort(STATUS_REFUSED, f"the run's pass job ({self.run_in.pass_leg}) is not usable: {e} (nothing sent)", category="input")
+         best = None
+-        for sign in (1, -1):
++        for sign in ((1, -1) if sign is None else (int(sign),)):
+             kw["progression_sign"] = sign
+             try:
+                 job = ScanJob(**kw)
+@@ -538,8 +546,10 @@ class PostWeldScan(Teach1G):
+         req = self._wrist2_required()
+         T_now = self._T_now()
+         rows, pool, ctx = [], [], {}
+-        for direction in ("S->E", "E->S"):
+-            job, rot = self._scan_job(line, direction)
++        options = [(d_, sg) for d_ in ((self.direction,) if self.direction else ("S->E", "E->S")) for sg in (1, -1)]
++        for direction, sign in options:
++            key = f"{direction} {sign:+d}"
++            job, rot = self._scan_job(line, direction, sign)
+             first = "S" if direction == "S->E" else "E"
+             ov_first, ov_last = line["span_m"] + ramp + settle, line["span_m"] + ramp
+             try:
+@@ -552,9 +562,9 @@ class PostWeldScan(Teach1G):
+             T_pre[:3, 3] += line["n"] * retreat
+             env_why = self._legs_pass_envelope(T_pre, [(T_from, "descend", "post_weld_descend", ""), (T_to, "scan", SCAN_MOVE, "")],
+                                                why=True)
+-            row = {"direction": direction, "first_end": first, "progression_sign": int(job.progression_sign),
+-                   "rotation_from_run_pass_deg": rot, "tool_rot_from_now_deg": _rot_angle_deg(T_now[:3, :3],
+-                                                                                                                  T_pre[:3, :3])}
++            tcp_m, rot_now = self._tcp_motion(T_now, T_pre)
++            row = {"direction": direction, "key": key, "first_end": first, "progression_sign": int(job.progression_sign),
++                   "rotation_from_run_pass_deg": rot, "tool_rot_from_now_deg": rot_now, "tcp_move_mm": tcp_m * 1e3}
+             if env_why:
+                 row["error"] = f"envelope (D3): {env_why}"
+                 rows.append(row)
+@@ -566,29 +576,33 @@ class PostWeldScan(Teach1G):
+                     if why:
+                         c["ok"], c["reason"] = False, f"wrist2_branch ({self.res.position}): {why}"
+             for c in cands:
+-                c["direction"] = direction
++                c["direction"], c["key"] = direction, key
+             pool.extend(cands)
+             row.update(n_ik=len(cands), n_ok=sum(1 for c in cands if c.get("ok")),
+                        fails=sorted({str(c.get("reason", ""))[:80] for c in cands if not c.get("ok")}))
+             rows.append(row)
+-            ctx[direction] = {"job": job, "ovs": ovs, "T_pre": T_pre, "T_from": T_from, "T_to": T_to, "first": first,
+-                              "ov": {"first_m": ov_first, "last_m": ov_last}}
++            ctx[key] = {"job": job, "ovs": ovs, "T_pre": T_pre, "T_from": T_from, "T_to": T_to, "first": first, "direction": direction,
++                        "ov": {"first_m": ov_first, "last_m": ov_last}, "tcp_m": tcp_m, "rot": rot_now}
+         ranked = rank_reach_candidates(pool)
+         for r_ in rows:
+-            mine = [c for c in ranked if c["direction"] == r_["direction"]]
++            mine = [c for c in ranked if c.get("key") == r_["key"]]
+             if mine:
+                 r_["least_joint_motion_deg"] = None if mine[0].get("dist_rad") is None else math.degrees(float(mine[0]["dist_rad"]))
+-        txt = "; ".join(f"{r_['direction']}: " + (r_["error"] if "error" in r_ else
+-                        f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it, least joint motion "
+-                        + ("-" if r_.get("least_joint_motion_deg") is None else f"{r_['least_joint_motion_deg']:.0f} deg")
++        txt = "; ".join(f"{r_['key']}: " + (r_["error"] if "error" in r_ else
++                        f"TCP motion: rotation {r_['tool_rot_from_now_deg']:.0f} deg, torch tip {r_['tcp_move_mm']:.0f} mm; "
++                        f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it"
+                         + (f" ({', '.join(r_['fails'][:2])})" if r_.get("fails") else "")) for r_ in rows)
+-        if not ranked:
++        # the tool pose and the direction: the least TCP motion from here (KIRO field 2026-10-15: after a weld the torch keeps its side
++        # - the rule of the acquisition), torch rotation first, then the torch tip's distance; the joint path of that pose by duration
++        usable = sorted((k_ for k_ in ctx if any(c.get("key") == k_ for c in ranked)), key=lambda k_: (ctx[k_]["rot"], ctx[k_]["tcp_m"]))
++        if not usable:
+             self._decide("plan", f"no direction can be planned: {txt}", options=_jsonable(rows))
+-            raise _Abort(STATUS_REFUSED, f"post-weld scan: no arm configuration reaches the scan start and follows the line in either "
+-                                         f"direction ({txt}) (nothing sent)", category="motion")
+-        direction = ranked[0]["direction"]
+-        cx = ctx[direction]
+-        same = [c for c in ranked if c["direction"] == direction]
++            raise _Abort(STATUS_REFUSED, f"post-weld scan: no arm configuration reaches the scan start and follows the line "
++                                         f"({txt}) (nothing sent)", category="motion")
++        key = usable[0]
++        cx = ctx[key]
++        direction = cx["direction"]
++        same = [c for c in ranked if c.get("key") == key]
+         job, ovs = cx["job"], cx["ovs"]
+         plan = {"direction": direction, "first_end": cx["first"], "ranked": same, "T_pre": cx["T_pre"], "T_from": cx["T_from"],
+                 "T_to": cx["T_to"], "job": job, "line": line, "depth_m": D, "retreat_m": retreat,
+@@ -606,13 +620,87 @@ class PostWeldScan(Teach1G):
+                              f"{ramp * 1e3:.2f} + settling v t_settle {settle * 1e3:.2f}: t_settle {float(st['t_settle_s']) * 1e3:.0f} ms "
+                              f"from {st['n_legs']} leg(s) of the run, {st['source']}), {ramp * 1e3:.2f} mm at the other end (speed ramp); "
+                              f"leg {L_leg * 1e3:.1f} mm at {float(job.speed_mps) * 1e3:.1f} mm/s, standoff {float(job.standoff_m) * 1e3:.1f} "
+-                             f"mm, pitch {float(job.pitch_deg):+.1f} deg, progression {int(job.progression_sign):+d} = the run's pass "
+-                             f"orientation; choice: {txt} -> {direction} (least joint motion from here among well-conditioned "
+-                             f"configurations, both directions pooled{'' if self._wrist2_required() == 'any' else ', wrist2 ' + self._wrist2_required()})",
++                             f"mm, pitch {float(job.pitch_deg):+.1f} deg, progression {int(job.progression_sign):+d}; "
++                             f"orientation choice: {txt} -> {key} (the least TCP motion from here: torch rotation "
++                             f"{cx['rot']:.0f} deg, torch tip {cx['tcp_m'] * 1e3:.0f} mm"
++                             + (f"; direction {self.direction} as asked" if self.direction else "; both directions")
++                             + f"{'' if self._wrist2_required() == 'any' else ', wrist2 ' + self._wrist2_required()})",
+                      plan=_jsonable({k_: v_ for k_, v_ in plan.items() if k_ not in ("ranked", "job", "line")}),
+                      line=_jsonable(line))
+         return plan
+ 
++    def _lift_clear(self) -> None:
++        """Start where the welding left the arm (KIRO field 2026-10-15: the post-weld scan follows a weld at once - the torch is at the
++        seam, inside our grown specimen objects): one straight move along the measured plate normal, the tool orientation unchanged,
++        until the tool's lowest point (keypoints and tool body) is at the plate top plus the safety clearance the envelope keeps
++        (job safe_clearance_m = the platform's clearance + the stopping distance). Every tool point moves straight away from the plate
++        (a groove opens upward), so the plate-distance rule holds along the line by construction; the end pose passes the full
++        envelope; MoveIt checks the line against the robot itself and everything that is not ours, with our grown objects out of the
++        scene for this one line only (they are put back right after, and the arm must then be clear of them)."""
++        n = np.asarray(self.world.plate_normal, dtype=float)
++        n = n / np.linalg.norm(n)
++        if float(n @ np.asarray(self.up, dtype=float)) < 0.0:
++            n = -n
++        P0 = np.asarray(self.world.plate_point, dtype=float)
++        T0 = self._T_now()
++        kp = tool_keypoints(T0, self.calib, self.job_ref)
++        pts = [np.asarray(v, dtype=float).reshape(-1, 3) for v in kp.values()]
++        body = body_points_base(T0 @ self.calib.T_flange_eoat, getattr(self.calib, "body_points_eoat", None))
++        if body is not None:
++            pts.append(np.asarray(body, dtype=float).reshape(-1, 3))
++        low = float(min(((p - P0) @ n).min() for p in pts))
++        need = float(self.job_ref.safe_clearance_m)
++        h_opt = float((np.asarray(kp["opt"], dtype=float).reshape(-1, 3)[0] - P0) @ n)
++        need_opt = float(self.job_ref.standoff_min_m)
++        deep = float((self._start_inside or {}).get("deep_m", 0.0))
++        # the envelope's plate-distance rule at the end pose: tool body / torch >= the clearance, optical origin >= standoff_min
++        L = max(need - low, need_opt - h_opt, deep, 0.0)
++        T1 = np.array(T0, dtype=float, copy=True)
++        T1[:3, 3] += n * L
++        name = "post_weld_lift"
++        v = self._class_speed(MOVE_POSITION)
++        try:                                                     # the end pose: the whole envelope (a resting pose there is a normal start)
++            T1b = np.array(T1, dtype=float, copy=True)
++            T1b[:3, 3] += n * 1e-4                               # a pose check: the end pose as the start of a tiny ascend
++            make_local_move_plan(T1, T1b, "ascend", self.job_ref, self.calib, specimen_top_z_m=self.plate_top, speed_mps=v,
++                                 accel_mps2=self.accel, name=name)
++        except (EnvelopeError, JobError, ValueError) as e:
++            raise _Abort(STATUS_REFUSED, f"post-weld scan: the pose {L * 1e3:.0f} mm above the current one along the plate normal does "
++                                         f"not pass the envelope: {e} - move the torch out of the groove and start again (nothing sent)",
++                         category="motion")
++        d = self._record_move(name, "ascend", T0, T1, {"lift_m": L, "lowest_tool_point_m": low, "clearance_m": need,
++                                                     "optical_origin_m": h_opt, "standoff_min_m": need_opt}, v)
++        self._decide("move", f"{name} (ascend): {L * 1e3:.1f} mm straight up along the plate normal, tool orientation kept - the tool's "
++                             f"lowest point {low * 1e3:+.1f} -> {(low + L) * 1e3:.1f} mm from the plate top (clearance {need * 1e3:.0f} mm), "
++                             f"optical origin {h_opt * 1e3:.1f} -> {(h_opt + L) * 1e3:.1f} mm (standoff_min {need_opt * 1e3:.0f} mm); our "
++                             "grown objects out of the MoveIt scene for this line only")
++        self._confirm(name, L, extra="(out of the weld pose, straight up)", rot_deg=0.0, kind="local")
++        ours = list(self.cell_ids)
++        self.rs.remove_scene_boxes(ours)
++        self._motion_sent = True
++        try:
++            w = Waypoint(name, "ascend", T1, float(v), float(self.accel), "move_l")
++            res = execute_leg(self.sess, w, v, timeout_s=self.motion_timeout_s, expected_start=T0,
++                              start_tol=(self.policy.goal_tol_m, self.policy.goal_tol_deg))
++        except StartPoseMismatch as e:
++            d["refused"] = str(e)
++            raise _Abort(STATUS_REFUSED, f"move '{name}': {e} (nothing sent)", category="motion")
++        except MotionError as e:
++            d["motion"] = {"error": str(e)}
++            raise _Abort(STATUS_ABORTED, f"move '{name}': {e}", safety=True, category="motion")
++        finally:
++            self.rs.set_scene_boxes(self.world.moveit_objects())
++        self.res.n_move_l += 1
++        d["motion"], d["executed"] = res.as_dict(), bool(res.ok)
++        if not res.ok:
++            raise _Abort(STATUS_ABORTED, f"move '{name}': {res.reason}", safety=True, category="motion")
++        self._p(f"      -> OK {res.reason} v_cmd={res.v_cmd:.1f} mm/s duration={res.motion_duration_s:.2f} s")
++        contacts, reason = self._arm_contacts()
++        if contacts or reason:
++            raise _Abort(STATUS_REFUSED, f"post-weld scan: after the lift the arm still touches the cell world "
++                                         f"({self.world.explain(contacts) or reason}) - nothing more sent", category="motion")
++        self._start_inside = None
++
+     # ---- World endpoints -------------------------------------------------------------------------------------------------
+     def _world_from_base(self) -> tuple:
+         """World ← base for the run log (the KIRO-format outputs' rule: the runtime MoveIt planning frame, the platform TF, the config
+@@ -743,9 +831,18 @@ class PostWeldScan(Teach1G):
+         try:
+             self._set_phase("setup")
+             self._setup()
++            sensor_open = False
++            if self._start_inside is not None and not self.dry_run:
++                self._set_phase("move")
++                self._sensor()                                    # before the first motion (a failure has sent nothing)
++                sensor_open = True
++                self._lift_clear()
+             self._set_phase("plan")
+             plan = self._plan()
+             if self.dry_run:
++                if self._start_inside is not None:
++                    self.res.notes.append("dry run: the arm starts inside the run's grown world - a real scan lifts it out along the plate "
++                                          "normal first (post_weld_lift); the plan above is from the current pose")
+                 self._dry_run_moves(plan)
+                 r.status = STATUS_DRY_RUN
+                 r.reason = (f"dry run: line {plan['direction']} over [S - {SPAN_M * 1e3:.0f}, E + {SPAN_M * 1e3:.0f}] mm, "
+@@ -753,7 +850,8 @@ class PostWeldScan(Teach1G):
+                             "no sensor, no folder")
+                 return pw
+             self._set_phase("move")
+-            self._sensor()                                        # before the first motion (a failure has sent nothing)
++            if not sensor_open:
++                self._sensor()                                    # before the first motion (a failure has sent nothing)
+             self._joint_move(plan["ranked"], plan["T_pre"], "post_weld_approach",
+                              f"{plan['retreat_m'] * 1e3:.0f} mm above the post-weld scan start (first end {plan['first_end']})")
+             self._leg(plan["T_from"], "descend", "post_weld_descend", speed_class=MOVE_POSITION,
+diff --git a/scan_stack/scan_l0/scan_l0/teach_1g.py b/scan_stack/scan_l0/scan_l0/teach_1g.py
+index 02375e3..5ffb9db 100644
+--- a/scan_stack/scan_l0/scan_l0/teach_1g.py
++++ b/scan_stack/scan_l0/scan_l0/teach_1g.py
+@@ -444,7 +444,7 @@ class Teach1G(AutoTeach):
+         from .cell_world import contact_pairs
+         return [{"link": a, "object": b, "kind": "world"} for a, b in contact_pairs(hit)], str(hit)
+ 
+-    def _apply_world(self, why: str) -> None:
++    def _apply_world(self, why: str, *, inside_ok: bool = False) -> None:
+         """세계 한 판을 모두에 건다: 포락선 기준, MoveIt 물체 ('hongik/' 이름공간 — 우리 것만 넣고, 이번 판에 없는 우리 것만 지운다),
+         WORLD 사건·결정 한 줄. 지금 팔 상태가 세계 안이면 (어느 링크가 어느 물체 안) 이동 전에 REFUSED — 세계를 줄이지 않는다."""
+         w = self.world
+@@ -490,6 +490,15 @@ class Teach1G(AutoTeach):
+         if contacts or reason:
+             ours = [c for c in contacts if c.get("kind") != "self" and str(c.get("object", "")).startswith("hongik/")]
+             where = "nothing sent"
++            if inside_ok and ours and len(ours) == len(contacts):
++                # a caller that starts where the work leaves the arm (the post-weld scan right after a weld: the torch at the seam)
++                # lifts it out first (PostWeldScan._lift_clear) - only our grown objects are touched, nothing else
++                deep = max((float(c.get("depth_m") or 0.0) for c in ours), default=0.0)
++                self._start_inside = {"deep_m": deep, "contacts": _jsonable(ours)}
++                self._decide("world", f"the arm at its current pose is inside the cell world v{w.version}: {w.explain(ours)} (deepest "
++                                      f"{deep * 1e3:.1f} mm into the objects grown by C {w.C * 1e3:.0f} mm) - it lifts out along the "
++                                      "plate normal first", world_contacts=_jsonable(ours))
++                return
+             if ours:
+                 deep = max((float(c.get("depth_m") or 0.0) for c in ours), default=0.0)
+                 gap = (f"{(w.C - deep) * 1e3:.1f} mm from the solid itself" if deep <= w.C else
+diff --git a/scan_stack/scan_l0/tests/test_sim_post_weld.py b/scan_stack/scan_l0/tests/test_sim_post_weld.py
+index 60ee937..dfe64ec 100644
+--- a/scan_stack/scan_l0/tests/test_sim_post_weld.py
++++ b/scan_stack/scan_l0/tests/test_sim_post_weld.py
+@@ -97,6 +97,21 @@ def test_post_weld_scan_after_a_1g_run_covers_S_minus_20_to_E_plus_20_at_the_mea
+         pw, res, lines = _post_weld(st, cell, run_dir, calib)
+         fps_streams = sorted({round(float(row[4]), 3) for row in cell.fs.stream_log[n_streams0:]})
+         boxes_left = dict(cell.arm.boxes)
++        # right after a weld the torch is at the seam, inside the run's grown world (KIRO field 2026-10-15): the scan lifts it out
++        # along the plate normal first, then scans; the direction asked for is the one scanned
++        T_e = cell.arm.pose.latest_pose().copy()
++        n_up = np.asarray(load_input_run(run_dir).n, dtype=float)
++        T_low = T_e.copy()
++        T_low[:3, 3] -= n_up * 0.12                       # the torch tip ~30 mm above the plate top (inside C = 50 mm)
++        q_low = next(np.asarray(c["q"]) for c in cell.arm.reach_candidates(T_low, avoid_collisions=False))
++        cell.arm.pose.place(q_low)
++        pw2, res2, lines2 = _post_weld(st, cell, run_dir, calib, after_pass=2, direction="E->S")
++    assert res2.status == "OK", (res2.status, res2.reason, lines2[-8:])
++    mv2 = executed(pw2.res)
++    assert [m["name"] for m in mv2] == ["post_weld_lift", "post_weld_approach", "post_weld_descend", "post_weld_scan"], \
++        [m["name"] for m in mv2]
++    assert mv2[0]["phase"] == "ascend" and mv2[0]["rot_deg"] < 1e-3 and mv2[0]["dist_mm"] > 0.0, mv2[0]
++    assert pw2.plan["direction"] == "E->S"
+     assert res.status == "OK" and res.category is None, (res.status, res.reason, lines[-8:])
+     out = run_dir / os.path.basename(res.out_dir)
+     assert out.name.startswith(OUT_PREFIX + "final_") and out.is_dir() and res.out_dir == str(out) and res.after_pass == 0
+@@ -105,7 +120,8 @@ def test_post_weld_scan_after_a_1g_run_covers_S_minus_20_to_E_plus_20_at_the_mea
+     # nothing else produced: the run folder gains exactly the post-weld folder; the post-weld folder holds the raw data, its log and
+     # the sensor's parameter backup - no estimate, no sections, no weld plan, no KIRO files
+     after = _files(run_dir)
+-    assert {k: v for k, v in after.items() if not k.startswith(out.name + os.sep)} == before
++    out2 = os.path.basename(res2.out_dir)                 # the second (lift) scan's folder
++    assert {k: v for k, v in after.items() if not k.startswith((out.name + os.sep, out2 + os.sep))} == before
+     assert sorted(os.listdir(out)) == ["raw.npz", "run_log.json", "sensor_backup"], sorted(os.listdir(out))
+     assert boxes_left == {} and fps_streams == [150.0], (boxes_left, fps_streams)
+     assert lines[-1].startswith("post-weld scan OK: run run, final (after every pass), line ") and f"-> {out}" in lines[-1], lines[-1]

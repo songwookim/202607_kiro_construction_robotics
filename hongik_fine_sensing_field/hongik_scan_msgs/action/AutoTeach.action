@@ -1,0 +1,57 @@
+# Adaptive self-teaching scan of a straight groove seam (hongik fine sensing; action /hongik_fine_sensing/auto_teach).
+# The robot starts from any collision-free pose, aligns itself on the rough start/end, scans the groove in serpentine passes
+# and returns the groove-floor (root) centreline in the base frame.
+# Invariants (always enforced): never below the measured plate top (1G) / never closer than the clearance (3G);
+# tilt-aware 3D geometry; corrections relative to the measured pose; every move envelope-checked and refused on violation.
+
+# ===================== goal =====================
+string frame_id                        # frame of rough_start/rough_end; '' = platform base_frame (otherwise transformed via TF)
+geometry_msgs/Point rough_start        # rough seam start on the plate top (a little inside the plate end) [m]
+geometry_msgs/Point rough_end          # rough seam end [m]
+string position                        # welding position: '1G' (required; never inferred)
+string job_file                        # optional job YAML (specimen + qc_targets [+ job defaults]); '' = server default job file
+# groove design (override the job file's specimen block when > 0 / non-empty)
+float64 weld_length_mm
+float64 thickness_mm
+float64 root_gap_mm
+float64 bevel_angle_deg
+string groove_kind                     # '' | single_bevel | single_v | square
+string bevel_side                      # '' | left | right | unknown
+string confirm_mode                    # 'each' | 'large' | 'scan' | 'auto' | 'none' ('' = server parameter confirm_mode); ~/confirm_move
+uint32 max_passes                      # 0 = platform config auto_teach.max_passes
+float64 measure_speed_mps              # measurement speed for this run [m/s]: the scan passes and the precise corrections at the
+                                       # dwell sites (positioning moves stay at the platform limits); 0 = the job file's speed_mps
+bool dry_run                           # gates + approach plan only, no motion
+string out_name                        # output folder name under the server's out_root ('' = <timestamp>_<position>;
+                                       # an existing non-empty folder gets a _<timestamp> suffix)
+string job_overrides                   # run-time job overrides: a JSON object {"<dotted path>": value} into the job document
+                                       # (e.g. {"precision.end_position_mm": 0.1, "weld_plan.travel_angle_deg": [10, 10, 10]}; nested
+                                       # objects merge the same way); applied after the server parameter job_overrides (site level),
+                                       # before anything is planned; an unknown key or a value the job parser refuses = REFUSED
+                                       # (nothing sent); '' = none. Recorded in verification/run_log.json job_overrides and
+                                       # verification/job_effective.yaml (scan_l0.job_overrides)
+---
+# ===================== result =====================
+string status                          # PASS | PASS_UNRESOLVED | SPEC_FAIL | DATA_FAIL | ALIGN_FAIL | ABORTED | REFUSED | ERROR |
+                                       # DRY_RUN (PASS_UNRESOLVED, 1G core: pass budget used, outputs written, some quantities
+                                       # still outside k sigma <= tol - listed in reason and sections.json)
+string reason
+hongik_scan_msgs/SeamPolyline root_centreline   # UNUSED: never filled (kept for interface compatibility; outputs are in out_dir)
+geometry_msgs/Point seam_start         # identified start end of the seam (root line) [m]
+geometry_msgs/Point seam_end
+float64 length_mm
+bool ends_observed                     # both plate ends observed in the same pass
+string converged                       # 'true' | 'false' | 'single_pass' | ''
+string refined_job_path                # job_refined.yaml (legacy pipeline only; '' for the 1G core)
+string out_dir                         # all outputs (autoteach_log.json, root_centreline.npz/json, pass_k/...)
+uint32 n_passes                        # scan passes (1G core: the passes only, not the dwell grabs / transit)
+uint32 n_moves
+float64 elapsed_s
+---
+# ===================== feedback =====================
+string phase                           # setup | gate | approach | move | confirm | probe | correct | site | transit | pass | fit | ends | job | ...
+uint32 pass_index                      # current scan pass (0 before the first pass)
+string progress_text                   # last operator line (CONFIRM prompts ask for ~/confirm_move)
+string[] residual_names
+float64[] residuals                    # last alignment residuals (deg / mm, tilt-aware)
+bool awaiting_confirmation             # true while a CONFIRM prompt waits for ~/confirm_move

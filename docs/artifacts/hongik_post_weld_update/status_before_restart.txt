@@ -1,0 +1,1 @@
+adapter=moveit_jtc base_frame=World running=False goal= phase=move pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=post-weld scan ABORTED: run 20261015-005527_kiro_1G, after pass 1 of 4, line S->E [S - 20, E + 20] mm, leg 248.8 mm at 30 mm/s, standoff 342.1 mm, 0 frames, 44.7 s in all -> /home/irs/hongik/runs/2026

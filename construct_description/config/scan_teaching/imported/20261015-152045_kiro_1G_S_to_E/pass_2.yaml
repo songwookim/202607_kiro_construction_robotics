@@ -1,0 +1,204 @@
+schema: construct_robot_pass_teaching_v1
+status: hongik_delivered_endpoint_import
+timestamp: '2026-10-15T15:29:30+09:00'
+pass: 2
+requires_ik: true
+poses:
+  weld_start:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.015047900879105205
+        y: -1.7239116518215214
+        z: 0.58770346937897
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+  weld_start_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.012047900879105206
+        y: -1.7239116518215214
+        z: 0.59070346937897
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+  weld_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.012047900879105206
+        y: -1.7239116518215214
+        z: 0.65070346937897
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+  weld_end:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.020586078141085054
+        y: -1.5246828089619513
+        z: 0.590242700897597
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+  weld_goal_wait:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.017586078141085055
+        y: -1.5246828089619513
+        z: 0.593242700897597
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+  weld_finish:
+    planning_group: right_manipulator
+    joint_state:
+      names:
+      - right_manipulator_joint1
+      - right_manipulator_joint2
+      - right_manipulator_joint3
+      - right_manipulator_joint4
+      - right_manipulator_joint5
+      - right_manipulator_joint6
+      positions_rad:
+      - 5.043235080501888
+      - 1.2537255605741882
+      - 1.9799857019633913
+      - 3.402498550843221
+      - 1.2364606867013679
+      - 1.7273345388247732
+    tcp_pose_world:
+      position_m:
+        x: 0.017586078141085055
+        y: -1.5246828089619513
+        z: 0.653242700897597
+      orientation_xyzw:
+        x: 0.5982135291647872
+        y: -0.7065774574829936
+        z: 0.35640732081331855
+        w: 0.12594717849857068
+    capture_provenance:
+      capture_source: hongik_delivered_endpoint_import
+      joint_state: saved pass-specific IK seed only; requires_ik
+source_reference: /home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_2.yaml
+source_reference_sha256: 0be7b35f9f9df3aa3e42ae0432def8d8d5f9e848ddef908687d301aac257d472
+source_reference_kind: hongik_kiro_endpoint
+generated_from:
+  run: /home/irs/hongik/runs/20261015-152045_kiro_1G
+  direction: S_to_E
+  endpoint_policy: original TCP XYZ and quaternion, unchanged; no calibration/correction
+    applied
+  tcp_frame: right_manipulator_ee_point
+  ik_seed_file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/pass_orientations.yaml
+  ik_seed_sha256: f97dd75207f5c961f40fda23861dd0a1c96dc8c0284dbf2ea7fc9c0044b5ecf7
+  tcp_to_aim_point_m_for_waits_only: 0.021200271
+  wait_lift_m: 0.01
+  additional_lift_m: 0.06
+  wait_offset_from_weld_m:
+  - -0.003
+  - 0.0
+  - 0.003

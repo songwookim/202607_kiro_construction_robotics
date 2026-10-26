@@ -1,0 +1,326 @@
+# Information for sharing (hongik fine sensing), KIRO pass 4: the KIRO settings our layer model assumed and the values
+# derived from them - not commands. The pass itself (straight line start -> goal, orientation): pass_4.yaml.
+schema: hongik.kiro_pass_info/1
+pass: 4
+pass_file: pass_4.yaml
+pass_file_location: <dirname(data_file_path)>/kiro/pass_4.yaml for the PrecisionSensing
+  action (data_file_path = the run's precision_sensing.npz, which embeds the same
+  text as kiro_pass_4_yaml)
+purpose: 'information for sharing: the KIRO settings our layer model assumed and the
+  values derived from them - not commands (KIRO''s executor keeps its own settings)'
+assumed_kiro_settings:
+  commanded:
+    current_a: 220
+    voltage: 26.0
+    material: FE-SOLID
+    diameter_mm: 1.2
+    mode: LSM
+    gas: CO2 100%
+  execution_conditions:
+    weld_tcp_speed_mm_s: 6.0
+    weld_weave_enabled: true
+    weld_weave_pattern: sine
+    weld_weave_pitch_mm: 7.8
+    weld_weave_left_dwell_s: 0.2
+    weld_weave_right_dwell_s: 0.2
+    weld_weave_amplitude_mm: 4.0
+    weld_weave_cycles: 16
+    weld_weave_samples_per_cycle: 12
+    weld_weave_axis: tool_y
+    weld_lead_in_mm: 0.0
+    weld_lead_out_mm: 0.0
+    weld_arc_off_delay_ms: 0.0
+derived:
+  role: cap
+  layer: 4
+  bead: 1
+  n_beads: 1
+  direction: E->S
+  wps_source: KIRO dataset 2026-09-15/16, weld_testspecimen_logs
+  straight_line:
+    length_mm: 199.38388983314147
+    s_start_mm: 199.3600124699993
+    s_goal_mm: 0.0
+    ends: the seam ends at the layer height (end-face model, G1WeldPlan.layer_ends)
+    s: distance from the measured S end along the seam axis
+    tip_base_m:
+      frame: World
+      start:
+      - -0.023130903071264204
+      - -1.7461552519137558
+      - 0.5776876598210826
+      goal:
+      - -0.012167127181950715
+      - -1.547096632017362
+      - 0.5807531105524162
+    measured_ends:
+      start:
+        end: E
+        s_mm: 199.3600124699993
+        sigma_mm: 0.05728047338296688
+        tip_base_m:
+        - -0.023130903071264204
+        - -1.7461552519137558
+        - 0.5776876598210826
+      goal:
+        end: S
+        s_mm: 0.0
+        sigma_mm: 0.06507701210376894
+        tip_base_m:
+        - -0.012167127181950715
+        - -1.547096632017362
+        - 0.5807531105524162
+    end_inset_mm:
+      start: 0.0
+      goal: 0.0
+      meaning: 'weld design input (job weld_design.end_inset_mm): start / goal moved
+        this far inside the measured ends along the seam; sensing and the measured
+        ends unchanged'
+    measured_seam_deviation:
+      max_lateral_mm: -0.1088660791317738
+      at_s_lateral_mm: 144.51335259780151
+      max_vertical_mm: 0.21139810042498333
+      at_s_vertical_mm: 84.70023503970101
+      rms_mm: 0.1287349630185832
+      n_sections: 39
+      note: our layer-plan aim points along the measured seam minus KIRO's straight
+        line start -> goal (lateral along w, vertical along the plate normal); information
+        only - the executor runs the straight line
+  area_mm2:
+    deposited_along_seam:
+      min: 30.442032813285092
+      median: 30.442032813285092
+      max: 30.442032813285092
+    required_along_seam:
+      min: 25.894302235144025
+      median: 27.44507765139473
+      max: 28.75392271957318
+    required_seam_mean: 27.485472799649393
+    layer_deposited_seam_mean: 30.44203281328509
+    model: deposited = eta x wire area x WFS / v at the assumed settings; required
+      = the area to the planned layer top (equal groove-area fraction at every section)
+  layer_mm:
+    bottom:
+      min: 9.730194897769127
+      median: 10.04073827002445
+      max: 10.181748678101581
+    top:
+      min: 11.934063744676315
+      median: 12.11350870603112
+      max: 12.216750931628654
+    toe_left_z:
+      min: 9.887050092640841
+      median: 10.12167447127882
+      max: 10.349353749515101
+    toe_right_z:
+      min: 10.033865417385742
+      median: 10.11066590041009
+      max: 10.19559043660469
+    toe_left_x:
+      min: -18.119532737505118
+      median: -17.751504466754586
+      max: -17.444320930718924
+    toe_right_x:
+      min: 11.739216827457216
+      median: 12.21119046169307
+      max: 12.67994763097353
+    crown_x:
+      min: -3.416738746536841
+      median: -2.687527152883367
+      max: -2.385474851436379
+    crown_ratio:
+      min: 0.06592769222712408
+      median: 0.06592769222712408
+      max: 0.06592769222712408
+    z: 'above the backing-bar top along the plate normal; the pass''s convex bead
+      (bead_geometry): bottom = the lowest point of the surface under it, top = its
+      crown (the highest point of its free surface), toes = where its free surface
+      meets the walls / earlier beads (x along w from the root-gap centre); heights
+      follow the deposits at the assumed settings'
+  aim_offset_mm:
+    frame: x along w = n x u from the root-gap centre (+x = left looking S->E), z
+      along the plate normal from the backing-bar top
+    rule:
+      vertical: 'the wire end meets the current surface at the aim point: the specimen
+        before the pass - the plates, the backing and the earlier passes'' convex
+        beads (bead_geometry; weld_scene shows the same solids)'
+      lateral: 'KIRO''s practice (user + KIRO 2026-10-13 night, their description
+        of the September welds), from the measured section''s features - any single-bevel
+        geometry, mirrored with the bevel side resolved from the scan: root = the
+        corner of the root face and the bevel face (the bevel-side wall at the root-face
+        height); fill 1 = the corner where the root bead meets the square face (the
+        root bead''s toe on the square wall); fill 2 = about the lateral centre of
+        the groove at its current surface (midway between fill 1''s toes); cap = the
+        lateral centre of the groove top (midway between the two groove top edges
+        at the plate surfaces - the cap band''s centre)'
+      this_pass: kiro_practice
+      why: 'KIRO practice, cap: the lateral centre of the groove top (midway between
+        the groove top edges)'
+      toward_bevel: section -x (bevel plate on the left in the section = on the right
+        looking S->E)
+      verification_0922:
+        k: 4
+        pass: cap
+        rule_toward_bevel_from_root_mm: 0.3465247544893737
+        kiro_0922_toward_bevel_from_root_mm: -0.1354012195
+        lateral_difference_mm: 0.4819259739893737
+        rule_rise_from_root_mm: 11.105547404484778
+        kiro_0922_rise_from_root_mm:
+        - 13.1
+        - 13.9
+        rise_outside_0922_mm: 1.994452595515222
+    start:
+      x: -2.8525520457179327
+      z: 11.142591640556008
+    goal:
+      x: -2.7197925417440345
+      z: 11.688842502576351
+    x_along_seam:
+      min: -2.875644012421647
+      median: -2.77261740324953
+      max: -2.66567138279854
+    z_along_seam:
+      min: 11.142591621095105
+      median: 11.470539855886113
+      max: 11.688842531094545
+  speed_mm_s:
+    assumed_setting: 6.0
+    required_along_seam:
+      min: 6.35225317467299
+      median: 6.65518965549104
+      max: 7.053760136923598
+    constant_for_required_mean: 6.0
+    current_for_required_mean_at_the_setting_speed_a: 203.48943365901886
+    note: 'information only: the speed (or, on the settings line WFS(I), the current)
+      that would deposit the seam-mean required area; the assumed settings are not
+      changed'
+  orientation:
+    plan_travel_angle_deg: -44.0
+    plan_work_angle_deg: 7.0
+    written_travel_angle_deg: -44.129415604227475
+    written_work_angle_deg: 7.002171041387675
+    angles: 'AWS A3.0 travel / work angles of the torch axis (the ee <- tip z axis)
+      to this pass''s seam: travel + = push, work + = toward the bevel face (our convention)'
+    torch_roll_deg: 180.0
+    torch_roll_reason: 'roll 180 deg: the torch neck bends with the WPS travel angle
+      (NECK_RULE: drag side; the straight body beyond the nozzle on the same side
+      along the travel)'
+    wps_nominal_travel_angle_deg: -44.0
+    wps_nominal_work_angle_deg: 7.0
+    deviation_from_wps_deg: null
+    clearance_mm: null
+    required_clearance_mm: null
+    clearance_by_role: {}
+    clearance_roles: 'process = the gas nozzle + contact tip (required 0 mm: no interpenetration,
+      KIRO practice), other = every other tool part (required k x the combined sigma)'
+    limiting_part: null
+    orientation_choice: not chosen by a weld-pose clearance search (the WPS angles
+      as planned)
+    deviation_why: null
+    checked_on: no D14 on this line (no weld-pose clearance search for this plan)
+  frames:
+    world_frame: World
+    base_frame: World
+    world_from_base: the runtime planning frame is World (identity)
+    world_from_base_status: runtime planning frame
+    tcp_frame: right_manipulator_ee_point
+    tcp_definition: the TCP is the torch tip end centre (the contact-tip end, recessed
+      nozzle_end_mm inside the gas nozzle); each written pose = the bead aim point
+      (the wire end) moved back along -z_TCP by nozzle_end_mm + stick_out_mm (the
+      stick-out is measured from the gas nozzle end); z_TCP = the torch axis toward
+      the work
+    stick_out_mm: 20.0
+    stick_out_source: 'job weld_plan.stick_out_mm 20 mm (the wire stick-out from the
+      GAS NOZZLE END (the nozzle rim) to the wire end along the torch axis (welding
+      practice; user 2026-10-13: KIRO''s 15-20 mm and our 20 mm are nozzle end ->
+      wire end); provisional 20.0 mm (KIRO''s range 15-20 mm; not in KIRO''s weld
+      logs - checked 1.log-4.log and pass_1-4.yaml: no stick-out / CTWD, wire_consumable_alpha_mm
+      is a wire-consumption term); replace with KIRO''s value. The TCP (the contact-tip
+      end face centre) is recessed inside the nozzle: TCP -> wire end = the torch''s
+      nozzle end (weld_torch.nozzle_end_mm, derived from the robot''s URDF collision
+      geometry: our torch''s CAD 1.2 mm) + stick_out_mm. KIRO''s executor does not
+      apply a stick-out (user 2026-10-12 night): our TCP poses are the bead aim points
+      moved back along -z_TCP by that sum)'
+    stick_out_definition: gas nozzle end -> wire end along the torch axis
+    nozzle_end_mm: 1.2002709999999999
+    nozzle_end_source: 'derived offline from the URDF''s collision geometry (the tool
+      parts the torch axis passes through, farthest along +z_TCP = the gas nozzle
+      rim; right_manipulator_ee_point tool: 37168 triangles (right_manipulator_link6,
+      hongik_eoat_base_link; URDF collision geometry rigid with the TCP: right_manipulator_link6
+      (right_manipulator_link6_optimized.stl), hongik_eoat_base_link (hongik_eoat_base_link_collision.stl)))'
+    tcp_to_aim_point_mm: 21.200271
+    aim_point_World_m:
+      start:
+      - -0.023130903071264204
+      - -1.7461552519137558
+      - 0.5776876598210826
+      goal:
+      - -0.012167127181950715
+      - -1.547096632017362
+      - 0.5807531105524162
+    ee_from_tip: 'our torch''s TCP frame (eoat.xacro torch_tcp): +z = the nozzle axis
+      toward the work, x in the bend plane = the plan''s travel x (roll 0); the tip
+      offset along +z = the torch''s nozzle end (derived from the robot''s URDF collision
+      geometry) + the process stick-out measured from the nozzle end (job weld_plan.stick_out_mm)'
+    ee_from_tip_xyz_mm:
+    - 0.0
+    - 0.0
+    - 21.200271
+    ee_from_tip_status: axes of our torch's TCP (CAD); the stick-out (nozzle end ->
+      wire end) is a process input
+    weld_torch:
+      model: 'our 1st-bracket torch (user + KIRO agreement 2026-10-12: the bracket
+        at KIRO is our 1st bracket - same bracket, torch, VC nano 3D-Z and RB20 arm
+        as the lab EOAT; KIRO''s URDF 2nd bracket and chiseling gun were never manufactured)'
+      status: nominal TCP = the CAD contact-tip end of our torch (KIRO's TCP = the
+        torch tip end, KIRO 2026-10-12); the plan's tip (bead aim point) = the wire
+        end, the nozzle end (the contact-tip end is recessed inside the gas nozzle)
+        + the process stick-out (job weld_plan.stick_out_mm, from the nozzle end)
+        further along the torch axis; KIRO re-calibrates the TCP on site
+      flange_frame: hongik_flange
+      flange_from_tcp_xyz_mm:
+      - -0.4521202956022176
+      - 237.8568670647346
+      - 297.1720033278718
+      flange_from_tcp_rpy_deg:
+      - -9.779803500501371e-06
+      - -29.99995555933547
+      - -89.99999245066283
+      flange_from_tcp_source: 'construct_robot_0528_hongik_v2.urdf r4 (2026-10-13,
+        KIRO''s setup identified from its September weld logs): our torch CAD contact-tip
+        end (eoat.xacro torch_tcp, 30.0 deg from the flange axis) turned 180 deg in
+        its clamp about the straight torch body axis (eoat_description/scripts/make_torch_turned_mesh.py),
+        EOAT mounted at eoat_yaw -90 deg (eoat_kiro_01.yaml)'
+      flange_from_tcp_status: nominal CAD; KIRO re-calibrates the TCP on site
+      on_this_arm: true
+      reachability_d14: 'checked on this arm (D14: flange <- TCP from the robot''s
+        TF)'
+  reinforcement_mm:
+    min: 1.9298953616277128
+    median: 1.97592319997384
+    max: 2.030529832981827
+  weave:
+    lateral_amplitude_mm: 3.970181073027245
+    band_width_mm:
+      min: 13.119795239870788
+      median: 13.410017663090848
+      max: 13.633678642891041
+    pitch_with_the_cycles_mm: 12.461493114571342
+    cycles_at_the_set_pitch: 26
+    note: 'the assumed amplitude along tool_y projected on the section''s lateral
+      axis for this orientation; 16 cycles over this 199.4 mm line (KIRO''s pass 4:
+      16 cycles over 119.6 mm = 7.48 mm pitch, set pitch 7.8 mm)'
+  comparison_kiro_cap_vs_pass3:
+    kiro_mm:
+      lateral: 6.42
+      up: 3.89
+    ours_mm:
+      lateral: -0.7664624581916533
+      up: 2.810147024409801
+      previous_pass: 3
+    note: 'comparison only: KIRO''s offsets are of the right_manipulator_ee_point
+      of KIRO''s old URDF (the chiseling-gun frame of a part that was never manufactured
+      - not our torch''s wire tip; the logs were not recorded with this frame''s tool)
+      and their lateral sign is not tied to our section frame; source KIRO dataset
+      2026-09-15/16 (fsv1_work/kiro_dataset/interpass_offsets_summary.csv: n 23, sd
+      0.09 / 0.18 mm)'

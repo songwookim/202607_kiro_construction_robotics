@@ -299,6 +299,29 @@ def linear_pose_waypoints(start, end, count):
     ]
 
 
+# A World axis this close to the seam is the seam's nominal direction, not a
+# weave direction: projecting it onto the seam normal leaves a tiny, unstable
+# residual (World Y vs a seam taught along World Y).  The taught START/GOAL
+# then re-align the World plane instead: the weave stays horizontal and
+# perpendicular to the actual seam.
+NOMINAL_SEAM_AXIS_COS = math.cos(math.radians(45.0))
+
+
+def _world_axis_weave_direction(axis, tangent, orientation):
+    """Weave direction for a World X/Y axis that runs along the seam, else None."""
+    if abs(sum(a * b for a, b in zip(axis, tangent))) < NOMINAL_SEAM_AXIS_COS or axis[2] != 0.0:
+        return None
+    horizontal = (-tangent[1], tangent[0], 0.0)  # World Z x seam
+    try:
+        horizontal = _normalize_vector(horizontal)
+    except ValueError:
+        return None  # vertical seam: no horizontal weave plane
+    lateral = _quaternion_rotate(orientation, (0.0, 1.0, 0.0))  # torch tool Y keeps +A's side
+    if sum(a * b for a, b in zip(horizontal, lateral)) < 0.0:
+        horizontal = tuple(-value for value in horizontal)
+    return horizontal
+
+
 def weaving_from_path(
     source_points,
     amplitude,
@@ -389,6 +412,9 @@ def weaving_from_path(
             preferred = axis_vectors[transverse_axis]
             if transverse_axis.startswith("tool_"):
                 preferred = _quaternion_rotate(pose.orientation, preferred)
+            else:
+                preferred = _world_axis_weave_direction(
+                    preferred, tangent, pose.orientation) or preferred
         dot = sum(a * b for a, b in zip(preferred, tangent))
         transverse = tuple(
             preferred[index] - dot * tangent[index] for index in range(3)
@@ -536,6 +562,9 @@ def circular_weaving_from_path(
             preferred = axis_vectors[radial_axis]
             if radial_axis.startswith("tool_"):
                 preferred = _quaternion_rotate(pose.orientation, preferred)
+            else:
+                preferred = _world_axis_weave_direction(
+                    preferred, tangent, pose.orientation) or preferred
         projection = sum(a * b for a, b in zip(preferred, tangent))
         primary = tuple(
             preferred[index] - projection * tangent[index]
@@ -641,8 +670,55 @@ def scale_trajectory_speed(trajectory, velocity_scale: float):
     return trajectory
 
 
+def tcp_progress(trajectory, fk_position, joint_names):
+    """Cumulative TCP distance in metres, with joints resolved by name.
+
+    Stationary samples and pure rotations cannot define a translational speed
+    profile and are rejected instead of adding fictitious TCP travel.
+    """
+    points = trajectory.joint_trajectory.points
+    names = list(trajectory.joint_trajectory.joint_names)
+    if (len(set(names)) != len(names) or len(joint_names) != len(names)
+            or set(names) != set(joint_names)):
+        raise ValueError("TCP progress requires exactly the arm's unique joint names")
+    order = [names.index(name) for name in joint_names]
+    previous_xyz = None
+    progress = []
+    for point in points:
+        if len(point.positions) != len(names):
+            raise ValueError("TCP progress needs one position per joint")
+        q = [point.positions[i] for i in order]
+        xyz = fk_position(q)
+        if len(xyz) != 3 or not all(math.isfinite(value) for value in (*q, *xyz)):
+            raise ValueError("TCP progress requires finite joint positions and FK coordinates")
+        if previous_xyz is None:
+            progress.append(0.0)
+        else:
+            step = math.dist(xyz, previous_xyz)
+            if step <= 1e-12:
+                raise ValueError("Constant TCP speed requires translation between every sample; stationary or rotation-only segment")
+            progress.append(progress[-1] + step)
+        previous_xyz = xyz
+    return progress
+
+
+def max_joint_speeds(trajectory):
+    """Largest |dq/dt| per joint over the trajectory's own timing (rad/s)."""
+    points = trajectory.joint_trajectory.points
+    count = len(points[0].positions) if points else 0
+    peak = [0.0] * count
+    for a, b in zip(points, points[1:]):
+        dt = (b.time_from_start.sec + b.time_from_start.nanosec * 1e-9
+              - a.time_from_start.sec - a.time_from_start.nanosec * 1e-9)
+        if dt > 1e-9:
+            for j in range(count):
+                peak[j] = max(peak[j], abs(b.positions[j] - a.positions[j]) / dt)
+    return peak
+
+
 def retime_trajectory_constant_velocity(
-    trajectory, ramp_fraction=0.2, ramp_duration_s=None
+    trajectory, ramp_fraction=0.2, ramp_duration_s=None, progress=None,
+    target_speed=None,
 ):
     """Reshape a RobotTrajectory's timing into a constant-velocity trapezoid.
 
@@ -661,6 +737,13 @@ def retime_trajectory_constant_velocity(
     end; together the two half-speed ramps add one ramp duration to the total
     trajectory time.  This mode is intended for a physical TCP-speed target:
     the target is the steady welding speed, not the whole-path average.
+
+    ``progress`` (cumulative distance per point, e.g. tcp_progress()) sets what "constant" means: TCP path length
+    gives a constant TCP speed. Default: joint-space distance (constant joint speed; the TCP speed then drifts
+    with the arm posture - 20261019: 8.3 -> 11.2 mm/s along a 10 mm/s weld).
+
+    ``target_speed`` sets the cruise distance/second explicitly and requires
+    a fixed ramp and a supplied progress metric.
     """
     if not 0.0 < ramp_fraction <= 0.5:
         raise ValueError("ramp_fraction must be in (0.0, 0.5]")
@@ -672,18 +755,30 @@ def retime_trajectory_constant_velocity(
     if total_time <= 1e-9:
         return trajectory
 
-    # Cumulative joint-space Euclidean distance as a path-progress metric.
-    # This needs no forward kinematics and stays monotonic along the path.
-    distances = [0.0]
-    for previous, current in zip(points, points[1:]):
-        step = math.sqrt(sum(
-            (b - a) ** 2
-            for a, b in zip(previous.positions, current.positions)
-        ))
-        distances.append(distances[-1] + step)
+    if progress is not None:
+        distances = [float(d) for d in progress]
+        if (len(distances) != len(points) or not all(math.isfinite(value) for value in distances)
+                or distances[0] != 0.0
+                or any(second <= first for first, second in zip(distances, distances[1:]))):
+            raise ValueError("progress must start at zero and give one finite strictly increasing distance per point")
+    else:
+        # Cumulative joint-space Euclidean distance as a path-progress metric.
+        # This needs no forward kinematics and stays monotonic along the path.
+        distances = [0.0]
+        for previous, current in zip(points, points[1:]):
+            step = math.sqrt(sum(
+                (b - a) ** 2
+                for a, b in zip(previous.positions, current.positions)
+            ))
+            distances.append(distances[-1] + step)
     total_distance = distances[-1]
     if total_distance <= 1e-9:
         return trajectory
+
+    if target_speed is not None:
+        if (progress is None or ramp_duration_s is None or not math.isfinite(target_speed)
+                or target_speed <= 0.0):
+            raise ValueError("target_speed needs positive finite speed, TCP progress and a fixed ramp")
 
     if ramp_duration_s is None:
         ramp_time = ramp_fraction * total_time
@@ -692,7 +787,7 @@ def retime_trajectory_constant_velocity(
         requested_ramp_time = float(ramp_duration_s)
         if not math.isfinite(requested_ramp_time) or requested_ramp_time <= 0.0:
             raise ValueError("ramp_duration_s must be finite and greater than zero")
-        nominal_duration = total_time
+        nominal_duration = total_time if target_speed is None else total_distance / target_speed
         ramp_time = min(requested_ramp_time, nominal_duration)
         cruise_speed = total_distance / nominal_duration
         total_time = nominal_duration + ramp_time
@@ -827,6 +922,15 @@ def named_tcp_linear_waypoints(start, goal):
         math.ceil(distance / 0.005) + 1,
         math.ceil(angle / math.radians(2.0)) + 1,
     )
+    if distance < 1e-9:
+        # Re-orientation in place is a valid named-pose transition; only weld
+        # lines (linear_pose_waypoints) require distinct endpoints.
+        if not pose_is_valid(start) or not pose_is_valid(goal):
+            raise ValueError("Named TCP endpoints must be finite and valid")
+        return [
+            _interpolate_pose(start, goal, index / (count - 1))
+            for index in range(count)
+        ]
     return linear_pose_waypoints(start, goal, count)
 
 

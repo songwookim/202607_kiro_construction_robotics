@@ -1,0 +1,17 @@
+--- a/scan_stack/scan_l0/tests/test_sim_post_weld.py
++++ b/scan_stack/scan_l0/tests/test_sim_post_weld.py
+@@ -145,8 +145,12 @@
+     # the run's world, as its passes used it: the same MoveIt objects and envelope (user decision 2026-10-13: nothing for the bead)
+     w_run, w_pw = run_log0["world"][-1], log["world"][-1]
+     assert log["after_pass"] == 0 and log["after_pass_label"] == "final (after every pass)" and "weld_surface" not in log
+-    assert w_pw["envelope"] == pytest.approx(w_run["envelope"]) and [o["id"] for o in w_pw["objects"]] == [o["id"] for o in
+-                                                                                                       w_run["objects"]]
++    # pytest 6 does not approximately compare list values inside a dict. Check
++    # each field with the same tolerances, including vector-valued plate geometry.
++    assert set(w_pw["envelope"]) == set(w_run["envelope"])
++    for key, value in w_run["envelope"].items():
++        assert w_pw["envelope"][key] == pytest.approx(value)
++    assert [o["id"] for o in w_pw["objects"]] == [o["id"] for o in w_run["objects"]]
+     for a_, b_ in zip(w_pw["objects"], w_run["objects"]):
+         assert np.allclose(a_["size_m"], b_["size_m"]) and np.allclose(a_["pose"]["position_m"], b_["pose"]["position_m"]), a_["id"]
+     assert log["scan"]["standoff_m"] == float(pj["standoff_m"])                     # the run's recorded standoff, exactly

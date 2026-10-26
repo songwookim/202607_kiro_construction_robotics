@@ -30,6 +30,24 @@ def test_cancel_stop_keeps_controller_active():
     node.request_direct_motion_stop.assert_not_called()
 
 
+def test_guarded_contact_bounce_keeps_the_first_edge_pose(monkeypatch):
+    first, second = object(), object()
+    node = SimpleNamespace(active_touch_probe=None, active_touch_guard=("right", "start touch"),
+                           fastech_touch_input_state=False, node_touch_input_states={"left": False, "right": False},
+                           touch_guard_triggered=threading.Event(),
+                           _current_tcp_pose=Mock(side_effect=[first, second]), stop_touch_guarded_motion=Mock(),
+                           ui=SimpleNamespace(post=Mock(), update_touch_input=Mock()))
+    worker = Mock()
+    factory = Mock(return_value=worker)
+    monkeypatch.setattr(weld_runtime_node.threading, "Thread", factory)
+    for value in (True, False, True):
+        WeldGuiNode.update_fastech_touch_input(node, value)
+    assert node.touch_guard_edge_pose is first
+    node._current_tcp_pose.assert_called_once()
+    factory.assert_called_once()
+    worker.start.assert_called_once()
+
+
 def test_deactivation_stop_does_not_repeat_direct_stop():
     node = node_stub()
     node.wait_until_arm_stopped.side_effect = [False, True]

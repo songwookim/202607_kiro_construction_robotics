@@ -1,0 +1,18 @@
+scan_dir: /home/irs/ros2_ws/scan_data/kiro_scan/20261016-114953_scan
+archived: '2026-10-16T11:50:07'
+note: Hongik estimate
+ends_m:
+  S:
+    point:
+    - -0.0007019068198354699
+    - -1.5535618019822992
+    - 0.5646093716647841
+    sigma: 4.869426069014171e-05
+    two_sided: true
+  E:
+    point:
+    - -0.012329218165540407
+    - -1.7536297457522794
+    - 0.5624322104950137
+    sigma: 4.869426069014171e-05
+    two_sided: true

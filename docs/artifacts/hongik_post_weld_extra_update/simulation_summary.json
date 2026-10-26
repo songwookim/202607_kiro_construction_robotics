@@ -1,0 +1,31 @@
+{
+  "tests_passed": 154,
+  "post_weld_runs": [
+    {
+      "name": "post_weld_scan_p2_20261015-034440",
+      "status": "OK",
+      "n_frames": 2240,
+      "direction": "E->S",
+      "tool_orientation": "pass",
+      "moves": [
+        "post_weld_lift",
+        "post_weld_approach",
+        "post_weld_descend",
+        "post_weld_scan"
+      ]
+    },
+    {
+      "name": "post_weld_scan_final_20261015-034406",
+      "status": "OK",
+      "n_frames": 2240,
+      "direction": "E->S",
+      "tool_orientation": "pass",
+      "moves": [
+        "post_weld_approach",
+        "post_weld_descend",
+        "post_weld_scan"
+      ]
+    }
+  ],
+  "real_motion_goals_sent": 0
+}

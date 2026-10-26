@@ -1,0 +1,22 @@
+{
+  "reason": "Backup of accidental captures before restoring saved poses from execution logs",
+  "original_capture_interval": "2026-10-23 17:16-17:17 Asia/Seoul",
+  "restored": [
+    {
+      "pose": "clear1_1",
+      "source": "weld_feedback/weld_feedback_20261023_155750_146.log",
+      "source_sha256": "0e8245aebb853c9e298036389fe000e79256f04de940b2b4a57a9da9ef10a98a"
+    },
+    {
+      "pose": "clear2_top",
+      "source": "weld_feedback/weld_feedback_20261015_073323_019.log",
+      "source_sha256": "d43a92c8abc20d2ad60f778ae728b78020c76b4ea049b9322b4c7f2b4e137376"
+    },
+    {
+      "pose": "clear3_top",
+      "source": "weld_feedback/weld_feedback_20261015_073323_019.log",
+      "source_sha256": "d43a92c8abc20d2ad60f778ae728b78020c76b4ea049b9322b4c7f2b4e137376"
+    }
+  ],
+  "note": "Rebuild existing cleaner sequences to reload restored YAML. Original source logs are unchanged."
+}

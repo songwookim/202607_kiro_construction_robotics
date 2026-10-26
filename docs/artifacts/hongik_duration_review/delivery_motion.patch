@@ -1,0 +1,527 @@
+diff --git a/scan_l0/scan_l0/autoteach.py b/scan_l0/scan_l0/autoteach.py
+--- a/scan_l0/scan_l0/autoteach.py
++++ b/scan_l0/scan_l0/autoteach.py
+@@ -3129,25 +3129,113 @@
+         js = self._joints_now()
+         return None if js is None else {n: float(v) for n, v in zip(js[0], js[1])}
+ 
+-    def _joint_move(self, ranked: list, T_goal: np.ndarray, name: str, what: str) -> None:
+-        """관절 공간 이동 (MoveIt: 관절 직선을 상태 검사, 막히면 OMPL): 후보 순서대로 보내지 않고 계획해 보고 첫 번째로 되는 해 → 확인 →
+-        같은 JTC 감시 경로로 실행 (판에서 먼 이동; 장면 상자가 시편·바닥을 피한다)."""
++    def _checked_joint_candidates(self, ranked: list, name: str) -> tuple:
++        """Compare straight checked-path durations; defer OMPL to one selected fallback."""
++        from construct_robot.core.hongik_joint_selection import PATH_ORDER, joint_path_cost
++        be = self.rs.backend
++        if not callable(getattr(be, "move_checked_joint", None)):
++            raise MotionError("duration selection requires the KIRO checked-joint MoveIt backend")
++        v = min(float(self.transit_speed), self.cfg.v_eff_max_mps)
++        feasible, blocked, attempts = [], [], []
++        for rank, c in enumerate(ranked, 1):
++            self._check_estop(f"planning candidate {rank}/{len(ranked)} for '{name}'")
++            chk = be.check_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s, allow_ompl=False)
++            summary = chk.get("plan") or {}
++            estimate = bool(summary.get("estimate_only"))
++            row = {"rank": rank, "q_goal_deg": np.degrees(c["q"]).tolist(), "joint_names": c.get("names"),
++                   "progression_sign": c.get("sign"), "condition_rel": c.get("condition_rel"),
++                   "yaw_band_ok": c.get("yaw_band_ok"), "ok": bool(chk.get("ok")), "reason": str(chk.get("reason") or ""),
++                   "plan": chk.get("plan"), "selected": False, "estimate_only": estimate, "eligible_for_ompl": False}
++            if row["ok"] or estimate:
++                try:
++                    score = joint_path_cost(summary)
++                    if row["ok"] and self.motion_timeout_s is not None and score[0] >= float(self.motion_timeout_s):
++                        raise ValueError(f"planned {score[0]:.1f} s >= explicit motion timeout {self.motion_timeout_s:.1f} s")
++                    if row["ok"] and chk.get("_checked_plan") is None:
++                        raise ValueError("backend did not retain the checked trajectory")
++                    c["_joint_check"], c["_joint_path_cost"] = chk, score
++                    c["_joint_needs_ompl"] = estimate
++                    row["path_cost"] = list(score)
++                    if estimate:
++                        row["eligible_for_ompl"] = True
++                        blocked.append(c)
++                    else:
++                        feasible.append(c)
++                except (KeyError, TypeError, ValueError) as e:
++                    row["ok"], row["reason"] = False, str(e)
++            attempts.append(row)
++            self._decide("joint_candidate", f"{name}: candidate {rank}/{len(ranked)} "
++                         + (f"straight checked duration {row['path_cost'][0]:.3f} s" if row["ok"] else
++                            f"straight estimate {row['path_cost'][0]:.3f} s; {row['reason']}" if row["eligible_for_ompl"] else
++                            f"rejected: {row['reason']}"), candidate=_jsonable(row), path_order=list(PATH_ORDER))
++        usable = feasible if feasible else blocked
++        usable.sort(key=lambda c: c["_joint_path_cost"])  # stable: duration ties keep the supplied rank
++        if usable:
++            winner_rank = next(i for i, c in enumerate(ranked, 1) if c is usable[0])
++            for row in attempts:
++                row["selected"] = row["rank"] == winner_rank
++                if row["ok"]:
++                    row["reason"] = "selected: shortest checked duration" if row["selected"] else "not selected: longer duration or later original rank"
++                elif row["selected"]:
++                    row["reason"] += "; selected for deferred OMPL planning (not executable yet)"
++        for c in usable:
++            c["_joint_candidates"] = attempts
++        self._decide("joint_selection", f"{name}: {len(feasible)} straight checked paths; {len(blocked)} blocked estimates; "
++                     + (f"shortest duration {usable[0]['_joint_path_cost'][0]:.3f} s" if usable else "none"),
++                     candidates=_jsonable(attempts), path_order=list(PATH_ORDER))
++        return usable, attempts
++
++    def _finalize_joint_candidate(self, c: dict, name: str) -> None:
++        """Only the selected blocked candidate may invoke OMPL; failure ends the request."""
++        if not c.get("_joint_needs_ompl"):
++            return
++        from construct_robot.core.hongik_joint_selection import joint_path_cost
++        self._check_estop(f"before selected OMPL planning for '{name}'")
++        v = min(float(self.transit_speed), self.cfg.v_eff_max_mps)
++        chk = self.rs.backend.check_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s, allow_ompl=True)
++        why = str(chk.get("reason") or "")
++        if chk.get("ok"):
++            try:
++                score = joint_path_cost(chk["plan"])
++                if chk.get("_checked_plan") is None:
++                    raise ValueError("backend did not retain the selected trajectory")
++                if self.motion_timeout_s is not None and score[0] >= float(self.motion_timeout_s):
++                    raise ValueError(f"selected path {score[0]:.1f} s >= explicit motion timeout {self.motion_timeout_s:.1f} s")
++            except (KeyError, TypeError, ValueError) as e:
++                why = str(e)
++        else:
++            why = why or "selected OMPL planning failed"
++        row = next(r for r in c["_joint_candidates"] if r["selected"])
++        row.update(ok=not bool(why), plan=chk.get("plan"), estimate_only=False,
++                   reason=why or "selected: finalized trajectory", eligible_for_ompl=False)
++        if not why:
++            c["_joint_check"], c["_joint_path_cost"], c["_joint_needs_ompl"] = chk, score, False
++            row["path_cost"] = list(score)
++        self._decide("joint_ompl_selection", f"{name}: selected candidate " + (f"rejected: {why}" if why else f"final duration {score[0]:.3f} s"),
++                     candidate=_jsonable(row))
++        if why:
++            raise _Abort(STATUS_REFUSED, f"{name}: {why} (nothing sent)", category="motion")
++
++
++    def _joint_move(self, ranked: list, T_goal: np.ndarray, name: str, what: str) -> dict:
++        """Compare checked physical paths; confirm and consume the selected trajectory without replanning."""
+         be = self.rs.backend
+         self._check_estop(f"before move '{name}'")
+         T_from = self._T_now()
+         v = min(float(self.transit_speed), self.cfg.v_eff_max_mps)
+-        pick, fails = None, []
+-        for c in ranked:
+-            chk = be.check_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s)
+-            if chk.get("ok"):
+-                pick = (c, chk)
+-                break
+-            fails.append(str(chk.get("reason")))
+-        if pick is None:
+-            self._record_move(name, "joint", T_from, T_goal, {}, v, refused="; ".join(fails))
+-            raise _Abort(STATUS_REFUSED, f"{name}: no collision-free joint-space path from the current pose to any of the {len(ranked)} arm "
+-                                         f"configurations for {what}: {fails[:2]} (nothing sent)", category="motion")
+-        c, chk = pick
++        if ranked and all("_joint_check" in c for c in ranked):
++            feasible = sorted(ranked, key=lambda c: c["_joint_path_cost"])
++            attempts = feasible[0]["_joint_candidates"]
++        else:
++            feasible, attempts = self._checked_joint_candidates(ranked, name)
++        fails = [r["reason"] for r in attempts if not r["ok"]]
++        if not feasible:
++            d = self._record_move(name, "joint", T_from, T_goal, {}, v, refused="; ".join(fails))
++            d["joint_candidates"] = _jsonable(attempts)
++            raise _Abort(STATUS_REFUSED, f"{name}: no usable checked joint path for {what}: {fails[:2]} (nothing sent)", category="motion")
++        c = feasible[0]
++        self._finalize_joint_candidate(c, name)
++        chk = c["_joint_check"]
+         dur = float((chk.get("plan") or {}).get("duration_s") or 0.0)
+         if self.motion_timeout_s is not None and dur >= float(self.motion_timeout_s):
+             self._record_move(name, "joint", T_from, T_goal, {}, v, refused=f"planned {dur:.1f} s >= --motion-timeout")
+@@ -3156,6 +3244,9 @@
+         d = self._record_move(name, "joint", T_from, T_goal, {}, v)
+         d["joint_goal"] = [float(x) for x in c["q"]]
+         d["joint_plan"] = _jsonable(chk.get("plan"))
++        d["joint_candidates"] = _jsonable(attempts)
++        d["joint_selection_rule"] = "shortest duration_s; exact ties preserve original rank; OMPL only for selected fallback"
++        d["joint_path_cost"] = list(c["_joint_path_cost"])
+         pl = chk.get("plan") or {}
+         pt = move_plan_text(pl)                     # 계획한 경로 종류·플랜지 경로와 회전 (따로)·시간·가장 많이 도는 관절 (확인과 같은 문구)
+         how = "" if pl.get("route") == "straight" or not pl.get("how") else f" [{pl['how']}]"     # 우회면 왜 (막힌 곳) 도
+@@ -3171,7 +3262,7 @@
+         self._event("move", name=name, phase="joint", streaming=False)
+         self._motion_sent = True
+         try:
+-            res = be.move_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s)
++            res = be.move_checked_joint(chk, c["q"], v, self.accel, timeout_s=self.motion_timeout_s)
+         except MotionError as e:
+             d["motion"] = {"error": str(e)}
+             raise _Abort(STATUS_ABORTED, f"move '{name}': {e}", safety=True, category="motion")
+@@ -3182,6 +3273,7 @@
+         if not res.ok:
+             raise _Abort(STATUS_ABORTED, f"move '{name}': {res.reason}", safety=True, category="motion")
+         self._p(f"      -> OK {res.reason} duration={res.motion_duration_s:.2f} s")
++        return c
+ 
+     def _support_probe(self) -> None:
+         """3G: 아래 착점 옆 판 면을 내려다보는 정지 측정 한 번 → 지지면 (테이블·지그 윗면). 자세는 계산 (acquisition.plan_support_probe:
+@@ -3318,12 +3410,7 @@
+         return best
+ 
+     def _plan_acquisition(self, name: str) -> Optional[dict]:
+-        """거친 작업의 첫 드웰 (착점 S0) 로: 진행 부호 × IK 해마다 [물러난 자세 → 드웰 → E0 드웰] 을 직선으로 이어 따라가 보고 (플랫폼
+-        reach_candidates — IK 해는 지금 관절에 가장 가까운 2π 동치 표현도 후보), 두 진행 부호의 후보를 **한 무리로** 순위 매긴다 (rank_reach_
+-        candidates: 특이점·한계 여유가 무리 안에서 고른 해 중 지금 관절에서의 관절 이동 Σ|Δq| 최소 — 사용자 2026-10-09: 진행 부호 (판 법선
+-        둘레 툴 방향) 는 시작 자세에서 관절 이동이 가장 적은 쪽, IK 해 개수가 아니라; 실기 2026-10-08 은 26/31 실행이 센서를 163–180° 뒤집었다).
+-        캘리브를 만든 팔 형태 집합이 정해져 있으면 (wrist2_branch_1g/3g) 그 안에서만. 그 순서에서 S_align 이 돌 수 있는 ±ψ_b 회전 자세도
+-        따라가는 첫 후보를 고른다 (_prefer_yaw_band — 전 과정 도달). 물러남 = job.safe_clearance_m. 없으면 None."""
++        """Pool both progression signs after existing IK/follow/wrist/yaw checks; rank actual checked approach paths."""
+         q_now = self._q_now()
+         retreat = float(self.job0.safe_clearance_m)
+         T_now = self._T_now()
+@@ -3348,8 +3435,12 @@
+             pool.extend(cands)
+             rows.append({"sign": sign, "n_ik": len(cands), "n_ok": sum(1 for c in cands if c.get("ok")),
+                          "fails": sorted({c["reason"][:80] for c in cands if not c["ok"]}), "tool_rot_deg": ctx[sign]["tool_rot_deg"]})
++        self._decide("acquisition_filter", f"{name}: IK/follow/wrist eligibility before motion planning",
++                     rejected=_jsonable([{"sign": c.get("sign"), "q_goal_deg": np.degrees(c["q"]).tolist(),
++                                          "reason": c.get("reason")} for c in pool if not c.get("ok")]))
+         ranked = rank_reach_candidates(pool)
+         band = self._prefer_yaw_band(ranked, ctx) if ranked else {"text": "no candidate"}
++        ranked, attempts = self._checked_joint_candidates(ranked, f"acquisition_{name}")
+         for r_ in rows:
+             if "error" in r_:
+                 continue
+@@ -3364,25 +3455,28 @@
+             sg = int(c0["sign"])
+             same = [c for c in ranked if c["sign"] == sg]
+             best = {"sign": sg, "ranked": same, "T_pre": ctx[sg]["T_pre"], "T_in": ctx[sg]["T_in"], "retreat": retreat,
+-                    "top_band": bool(c0.get("yaw_band_ok")), "tool_rot_deg": ctx[sg]["tool_rot_deg"]}
++                    "top_band": bool(c0.get("yaw_band_ok")), "tool_rot_deg": ctx[sg]["tool_rot_deg"],
++                    "path_cost": c0["_joint_path_cost"], "joint_plan": c0["_joint_check"]["plan"],
++                    "needs_ompl": bool(c0.get("_joint_needs_ompl"))}
+         opts = [{k_: r_.get(k_) for k_ in ("sign", "n_ik", "n_ok", "tool_rot_deg", "best_dist_deg", "best_condition_rel", "error")}
+                 for r_ in rows]
+         self.res.visit_order["options"] = _jsonable(opts)
+         if best is not None:
+             self.res.visit_order.update(progression_sign=best["sign"], tool_rotation_deg=best["tool_rot_deg"],
+-                                        joint_motion_deg=(None if ranked[0].get("dist_rad") is None else math.degrees(float(ranked[0]["dist_rad"]))))
++                                        joint_motion_deg=sum(best["joint_plan"]["joint_rotation_deg"]),
++                                        joint_path_cost=list(best["path_cost"]), joint_plan=_jsonable(best["joint_plan"]))
+         self._decide("acquire", f"{self._site_label(name)}: acquisition (dwell at the hit point, {retreat * 1e3:.0f} mm back along the plate "
+                                 f"normal, then "
+                                 f"the coarse S0->E0 line): "
+                      + "; ".join(f"progression {r_['sign']:+d}: " + (r_["error"] if "error" in r_ else
+                                  f"{r_['n_ok']}/{r_['n_ik']} arm configurations follow it, tool rotation from the current pose "
+-                                 f"{r_['tool_rot_deg']:.0f} deg, least joint motion {_fmtf(r_.get('best_dist_deg'), '.0f')} deg"
++                                 f"{r_['tool_rot_deg']:.0f} deg, selected goal joint distance {_fmtf(r_.get('best_dist_deg'), '.0f')} deg"
+                                  + (f" ({', '.join(r_['fails'][:2])})" if r_.get("fails") else ""))
+                                  for r_ in rows)
+-                     + (f" -> progression {best['sign']:+d}: the least joint motion from here among well-conditioned configurations "
++                     + (f" -> progression {best['sign']:+d}: the shortest straight planned duration (blocked estimates require selected OMPL) "
+                         f"(both signs pooled{'' if req == 'any' else ', wrist2 ' + req + ' only (the calibrated configuration)'}); "
+                         f"{band['text']}" if best is not None else " -> none"),
+-                     rows=_jsonable(rows), options=_jsonable(opts), wrist2_required=req)
++                     rows=_jsonable(rows), options=_jsonable(opts), wrist2_required=req, joint_candidates=_jsonable(attempts))
+         return best
+ 
+     def _yaw_band_rad(self) -> float:
+@@ -3500,83 +3594,44 @@
+         return best, ""
+ 
+     def _choose_visit_order(self, name: str, phase: str) -> tuple:
+-        """1G 방문 순서 (D7): 두 순서 (지금 = 로봇 베이스에 가까운 착점부터, 다른 끝부터) 를 모두 이동 전에 계획해 보고 (_acquire_plan — IK·추종·
+-        yaw 띠·포락선), 되는 것 중 시작 자세에서의 획득 비용 (고른 팔 형태의 관절 이동 Σ|Δq| — 진행 부호를 고르는 것과 같은 비용) 이 작은
+-        순서. 베이스 거리는 비용이 같을 때만 (차이 ≤ 도착 자세 허용 θ_goal — 지금 순서). 한 순서만 되면 그 순서 (거부 사유와 상관없이 —
+-        IK·추종·포락선 모두, D6).
+-        → (best 또는 None, 사유). 고른 순서로 대략 작업을 남긴다."""
++        """Compare both ends using the same checked-path cost as arm/progression selection."""
+         opts = []
+-        res = self._theta_goal_rad()
+         for i in range(2):
+-            if i == 1:
+-                self._derive_jobs(self._swap_rough(self.job0))            # 다른 끝부터 (이동 전, 계획만)
+-                if opts[0]["best"] is not None and opts[0]["cost_rad"] is not None and math.isfinite(opts[0]["cost_rad"]):
+-                    # 가지치기 (정확): 다른 끝의 비용 하한 (IK 만) 이 지금 순서의 비용 − θ_goal 보다 작지 않으면 그 순서는 이길 수 없다 —
+-                    # 추종 계획 (획득 계획 시간의 대부분) 을 하지 않는다
+-                    lb = self._acquisition_cost_bound()
+-                    if lb is not None and not (lb < opts[0]["cost_rad"] - res):
+-                        opts.append({"swapped": bool(self.res.rough_swapped), "first_visited": "end" if self.res.rough_swapped else "start",
+-                                     "best": None, "cost_rad": None, "cost_lb_rad": lb, "vo": {},
+-                                     "d_first_m": float(np.linalg.norm(np.asarray(self.job0.start, dtype=float))),
+-                                     "why": (f"not planned: its least possible joint motion (IK only) {math.degrees(lb):.0f} deg cannot beat "
+-                                             f"{math.degrees(opts[0]['cost_rad']):.0f} deg by more than theta_goal")})
+-                        continue
++            if i:
++                self._derive_jobs(self._swap_rough(self.job0))
+             best, env_why = self._acquire_plan(name, phase)
+-            vo = {k_: self.res.visit_order.get(k_) for k_ in ("options", "progression_sign", "tool_rotation_deg", "joint_motion_deg")}
+-            c0 = (best or {}).get("ranked", [{}])[0] if best is not None else {}
+-            cost = float(c0["dist_rad"]) if (best is not None and c0.get("dist_rad") is not None) else (math.inf if best is not None else None)
+-            d_first = float(np.linalg.norm(np.asarray(self.job0.start, dtype=float)))
+-            why = (env_why or "no arm configuration reaches the acquisition pose and follows the coarse line") if best is None else ""
+-            opts.append({"swapped": bool(self.res.rough_swapped), "first_visited": "end" if self.res.rough_swapped else "start",
+-                         "best": best, "cost_rad": cost, "why": why, "vo": vo, "d_first_m": d_first})
+-        feas = [k_ for k_, o in enumerate(opts) if o["best"] is not None]
+-        rec = [{"first_visited": o["first_visited"], "feasible": o["best"] is not None,
+-                "joint_motion_deg": (math.degrees(o["cost_rad"]) if (o["cost_rad"] is not None and math.isfinite(o["cost_rad"])) else None),
+-                "progression_sign": (o["best"] or {}).get("sign"), "base_distance_m": o["d_first_m"], "why": o["why"],
+-                **({"pruned": True, "joint_motion_lower_bound_deg": math.degrees(o["cost_lb_rad"])} if "cost_lb_rad" in o else {})}
+-               for o in opts]
+-        self.res.visit_order["order_options"] = _jsonable(rec)
+-        self.res.visit_order["order_rule"] = ("1G: the visiting order with the least joint motion sum|dq| from the start pose to the "
+-                                              "acquisition (the cost that ranks the arm configurations); the robot-base distance only "
+-                                              "breaks a tie (difference <= the arrival orientation tolerance theta_goal); an order whose "
+-                                              "acquisition is refused before motion (IK / follow / envelope) is not used")
+-        if not feas:
+-            # 둘 다 안 된다: 지금 (다른 끝) 상태 → 원래 순서로 되돌리고 거부
++            vo = {k: self.res.visit_order.get(k) for k in
++                  ("options", "progression_sign", "tool_rotation_deg", "joint_motion_deg", "joint_path_cost", "joint_plan")}
++            opts.append({"best": best, "vo": vo, "first_visited": "end" if self.res.rough_swapped else "start",
++                         "base_distance_m": float(np.linalg.norm(np.asarray(self.job0.start, dtype=float))),
++                         "why": (env_why or "no eligible collision-free acquisition path") if best is None else ""})
++        feasible = [i for i, opt in enumerate(opts) if opt["best"] is not None and not opt["best"].get("needs_ompl")]
++        if not feasible:
++            feasible = [i for i, opt in enumerate(opts) if opt["best"] is not None]
++        rec = [{"first_visited": opt["first_visited"], "feasible": opt["best"] is not None,
++                "path_cost": list(opt["best"]["path_cost"]) if opt["best"] is not None else None,
++                "joint_plan": _jsonable(opt["best"]["joint_plan"]) if opt["best"] is not None else None,
++                "base_distance_m": opt["base_distance_m"], "why": opt["why"]} for opt in opts]
++        self.res.visit_order["order_options"] = rec
++        self.res.visit_order["order_rule"] = "shortest straight duration_s; exact ties preserve order; selected fallback alone uses OMPL"
++        if not feasible:
+             self._derive_jobs(self._swap_rough(self.job0))
+             self.res.visit_order.update(opts[0]["vo"])
+             return None, opts[0]["why"] + f" (the other end first: {opts[1]['why']})"
+-        # 비용이 같다 = 차이가 플랫폼 도착 자세 허용 θ_goal 이하 (팔이 도착에서 가를 수 없는 관절 이동 차 — IK 수렴 오차 수준의 차로 순서가
+-        # 뒤집히지 않게): 그때는 베이스에 가까운 착점부터 (지금 순서, 앞)
+-        if len(feas) == 2 and opts[1]["cost_rad"] < opts[0]["cost_rad"] - res:
+-            k = 1
+-        else:
+-            k = feas[0]
+-        if k == 0:
+-            self._derive_jobs(self._swap_rough(self.job0))                # 원래 순서로
+-        o = opts[k]
+-        self.res.visit_order.update(o["vo"])
+-        self.res.visit_order["first_visited"] = o["first_visited"]
+-        near = opts[0]
+-        tie = len(feas) == 2 and (opts[0]["cost_rad"] == opts[1]["cost_rad"] or abs(opts[0]["cost_rad"] - opts[1]["cost_rad"]) <= res)
+-        pruned = any("cost_lb_rad" in o_ for o_ in opts)
+-        why = ("least joint motion from the start pose (the other order's lower bound cannot beat it)" if pruned else
+-               "the only order whose acquisition is not refused before motion" if len(feas) == 1 else
+-               (f"equal joint motion (difference <= the arrival orientation tolerance {math.degrees(res):.2f} deg) - the hit point "
+-                "nearer to the robot base first" if tie else "least joint motion from the start pose"))
+-        self.res.visit_order["order_choice"] = why
+-        self.res.visit_order["agrees_with_near_end"] = bool(k == 0)
+-        self._decide("setup", f"visit order: taught {o['first_visited']} first - {why} ("
+-                     + "; ".join(f"{r_['first_visited']} first: " + (f"sum|dq| {_fmtf(r_['joint_motion_deg'], '.0f')} deg, progression "
+-                                                                   f"{r_['progression_sign']:+d}" if r_["feasible"] else
+-                                                                   (r_["why"] if r_.get("pruned") else f"refused: {r_['why']}"))
+-                                 + f", base distance {r_['base_distance_m']:.3f} m" for r_ in rec)
+-                     + ")" + ("" if k == 0 else f" - differs from the nearer-to-the-base order ({near['first_visited']} first)"),
+-                     visit_order=_jsonable(self.res.visit_order))
+-        return o["best"], ""
++        selected = min(feasible, key=lambda i: opts[i]["best"]["path_cost"])
++        if selected == 0:
++            self._derive_jobs(self._swap_rough(self.job0))
++        opt = opts[selected]
++        self.res.visit_order.update(opt["vo"])
++        self.res.visit_order.update(first_visited=opt["first_visited"], order_choice="shortest planned duration_s",
++                                    agrees_with_near_end=selected == 0)
++        self._decide("setup", f"visit order: taught {opt['first_visited']} first - shortest planned duration_s "
++                     f"{list(opt['best']['path_cost'])}; both ends planned before motion", visit_order=_jsonable(self.res.visit_order))
++        return opt["best"], ""
++
+ 
+     def _acquire_site(self, name: str, postures: Optional[list] = None) -> None:
+-        """postures (3G: 끝 자세 후보, 좋은 순서): 도달되는 첫 자세로. 1G 는 자세 하나 (센서 ∥ 중력) — S 는 두 방문 순서 중 시작 자세에서의
+-        획득 비용이 작은 것 (_choose_visit_order). → MoveIt 관절 이동으로 물러난 자세 → 판 쪽 직선 (포락선) 으로 드웰."""
++        """Choose the acquisition by checked path cost, then execute that exact joint path and the checked straight legs."""
+         L = self._site_label                                    # 로그·이동 이름의 끝 이름 (legacy: 내부 이름 그대로)
+         best = None
+         phase = "approach_normal" if self.orientation == "vertical_3G" else "descend"
+@@ -3616,15 +3671,23 @@
+                 raise _Abort(STATUS_REFUSED, f"{L(name)}: no arm configuration reaches the acquisition pose and follows the coarse line - the "
+                                              "specimen is out of reach or too close to the robot for this tool"
+                                              + ("" if self._motion_sent else " (nothing sent)"), category="motion")
++        self._finalize_joint_candidate(best["ranked"][0], f"acquire_{L(name)}")
++        selected = best["ranked"][0]
++        best.update(path_cost=selected["_joint_path_cost"], joint_plan=selected["_joint_check"]["plan"], needs_ompl=False)
++        self.res.visit_order.update(joint_path_cost=list(best["path_cost"]), joint_plan=_jsonable(best["joint_plan"]),
++                                    joint_motion_deg=sum(best["joint_plan"]["joint_rotation_deg"]))
+         self._set_progression(best["sign"])
+-        c0 = best["ranked"][0]
+-        self._decide("acquire", f"{L(name)}: progression {best['sign']:+d}, arm configuration {np.round(np.degrees(c0['q']), 1).tolist()} deg "
+-                                f"(kept for the whole job: the following moves are continuous) - joint-space move to "
+-                                f"{best['retreat'] * 1e3:.0f} mm in front of the dwell, then {phase} to the dwell", chosen=_jsonable(c0))
++
++        def kept(c):
++            self._decide("acquire", f"{L(name)}: progression {best['sign']:+d}, arm configuration {np.round(np.degrees(c['q']), 1).tolist()} deg "
++                                    f"(kept for the whole job: the following moves are continuous) - joint-space move to "
++                                    f"{best['retreat'] * 1e3:.0f} mm in front of the dwell, then {phase} to the dwell", chosen=_jsonable({k: v for k, v in c.items() if not k.startswith("_")}))
+         if self.dry_run:
++            kept(best["ranked"][0])                             # checked preview only; no sensor connection or trajectory sent
+             return
+         self._sensor()                                          # 센서 연결·초기화는 첫 이동 전에 (실패하면 아무것도 보내지 않았다)
+-        self._joint_move(best["ranked"], best["T_pre"], f"acquire_{L(name)}", f"{best['retreat'] * 1e3:.0f} mm in front of the {L(name)} dwell")
++        kept(self._joint_move(best["ranked"], best["T_pre"], f"acquire_{L(name)}",
++                              f"{best['retreat'] * 1e3:.0f} mm in front of the {L(name)} dwell"))
+         self._local_move(best["T_in"], phase, f"acquire_{L(name)}_in", speed=self.descend_speed,
+                          extra=f"(onto the {L(name)} dwell, {best['retreat'] * 1e3:.0f} mm toward the plate)")
+ 
+diff --git a/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py b/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
+--- a/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
++++ b/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py
+@@ -743,7 +743,7 @@
+                 "last_plan": last_plan, "t_planned": time.monotonic()}
+ 
+     # ---- 관절 공간 이동 (2026-10-07: 임의 초기 자세 — 운송용 접힌 자세 — 에서 획득 자세로) ----
+-    def _first_invalid(self, names, Q: np.ndarray, stride_rad: float = 0.05) -> Optional[str]:
++    def _first_invalid(self, names, Q: np.ndarray, stride_rad: float = 0.05, *, joint_state=None) -> Optional[str]:
+         """조밀 관절 경로를 stride_rad 간격으로 move_group /check_state_validity (자기·장면 충돌, 관절 한계) — 처음 막힌 곳 설명 또는 None."""
+         mj = self.p.mj
+         last = None
+@@ -753,8 +753,11 @@
+             last = q
+             req = GetStateValidity.Request()
+             req.group_name = mj.move_group_name
+-            req.robot_state.joint_state.name = list(names)
+-            req.robot_state.joint_state.position = [float(v) for v in q]
++            state = dict(zip(joint_state.name, joint_state.position)) if joint_state is not None else {}
++            state.update(zip(names, [float(v) for v in q]))
++            req.robot_state.joint_state.name = list(state)
++            req.robot_state.joint_state.position = [float(v) for v in state.values()]
++            req.robot_state.is_diff = True
+             r = call_service(self.p.validity_client, req, 5.0, wait_service_s=2.0)
+             if r is None:
+                 raise MotionError(f"move_group {mj.state_validity_service} did not answer (is move_group running?)")
+@@ -799,7 +802,7 @@
+         return W
+ 
+     def _build_joint_plan(self, q_goal: np.ndarray, v_mps: float, a_mps2: float, timeout_s: Optional[float], js: JointState,
+-                          T0: np.ndarray) -> dict:
++                          T0: np.ndarray, *, allow_ompl: bool = True) -> dict:
+         """측정 관절 → q_goal 관절 공간 이동 계획 (전송 전 모든 검사): 관절 공간 직선 보간이 move_group 상태 검사 (충돌·한계) 를 통과하면
+         그것 (가장 예측 가능한 경로), 막히면 MoveIt OMPL 계획 (같은 상태 검사로 다시 확인). TCP 속도 v·가속 a 와 관절 한계로 재시간."""
+         p = self.p
+@@ -826,17 +829,17 @@
+         if d0 > mj.path_check_tol_m or _rot_deg(T0_fk[:3, :3], T0[:3, :3]) > FRAME_ROT_TOL_DEG:
+             raise MotionError(f"FK of the planning start joints differs from the measured start pose by {d0 * 1e3:.2f} mm - refusing")
+         Wd = densify_joint_path([q0, q_goal], 0.01)
+-        blocked = self._first_invalid(names, Wd)
++        blocked = self._first_invalid(names, Wd, joint_state=js)
+         how = route_text = "joint-space straight line"
+         route, n_wp = "straight", 2
+-        if blocked is not None:
++        if blocked is not None and allow_ompl:
+             # OMPL 은 확률적이고 자기 검사 간격이 이 조밀 검사보다 성기다 — 조밀 검사에 걸리면 몇 번 다시 계획한다 (통과한 것만)
+             bad = None
+             for attempt in range(1, 4):
+                 W = self._ompl_waypoints(js, names, q_goal)
+                 W[0] = q0
+                 Wd = densify_joint_path(W, 0.01)
+-                bad = self._first_invalid(names, Wd)
++                bad = self._first_invalid(names, Wd, joint_state=js)
+                 if bad is None:
+                     break
+             if bad is not None:
+@@ -861,6 +864,8 @@
+         last_plan = {"kind": "joint", "route": route, "route_text": route_text, "n_waypoints": n_wp, "how": how, "n_points": N + 1,
+                      "path_length_m": rt.S, "duration_s": rt.duration, "v_cruise_mps": rt.v_cruise, "time_scale": rt.time_scale,
+                      "q_goal_deg": np.degrees(q_goal).tolist(), "notes": list(rt.notes), **st}
++        last_plan["straight_blocked_reason"] = blocked
++        last_plan["estimate_only"] = bool(blocked is not None and not allow_ompl)
+         script = (f"moveit_jtc joint ({how}) -> {N + 1} pts, flange {st['flange_translation_m'] * 1e3:.0f} mm / "
+                   f"{st['flange_rotation_deg']:.0f} deg, T {rt.duration:.1f} s, goal {np.round(np.degrees(q_goal), 1).tolist()} deg")
+         timeout = float(timeout_s) if timeout_s is not None else max(cfg.default_timeout_s, rt.duration * 1.5 + mj.goal_time_margin_s)
+@@ -878,23 +883,69 @@
+         return {"key": None, "names": names, "q0": q0.copy(), "rt": rt, "goal": goal, "script": script, "timeout_s": timeout,
+                 "last_plan": last_plan, "t_planned": time.monotonic()}
+ 
+-    def check_joint(self, q_goal, v_mps: float, a_mps2: float, *, timeout_s: Optional[float] = None) -> dict:
++    def check_joint(self, q_goal, v_mps: float, a_mps2: float, *, timeout_s: Optional[float] = None,
++                    allow_ompl: bool = True) -> dict:
+         """move_joint 와 같은 계획·검사를 보내지 않고 → {ok, reason, plan}."""
+         p = self.p
+         if not self._busy.acquire(blocking=False):
+             return {"ok": False, "reason": "motion backend busy", "plan": None}
+         try:
+             js = self._fresh_joint_state("before planning")
+-            plan = self._build_joint_plan(np.asarray(q_goal, dtype=float), v_mps, a_mps2, timeout_s, js, p.pose.latest_pose())
++            plan = self._build_joint_plan(np.asarray(q_goal, dtype=float), v_mps, a_mps2, timeout_s, js, p.pose.latest_pose(), allow_ompl=allow_ompl)
+             # 이 계획을 move_joint 가 그대로 쓴다 (같은 목표·속도, 팔이 그 뒤 움직이지 않았으면) — OMPL 은 확률적이라 다시 계획하면 다른 경로
+             plan["key"] = (np.array(q_goal, dtype=float), float(v_mps), float(a_mps2), timeout_s)
+             plan["t_planned"] = time.monotonic()
++            if plan["last_plan"].get("estimate_only"):
++                self._prepared_joint = None
++                return {"ok": False, "reason": "straight path blocked: " + str(plan["last_plan"]["straight_blocked_reason"]),
++                        "plan": dict(plan["last_plan"]), "_checked_plan": None}
+             self._prepared_joint = plan
+-            return {"ok": True, "reason": "", "plan": dict(plan["last_plan"])}
++            return {"ok": True, "reason": "", "plan": dict(plan["last_plan"]), "_checked_plan": plan}
+         except MotionError as e:
+             return {"ok": False, "reason": str(e), "plan": None}
+         finally:
+             self._busy.release()
++
++    def _validate_checked_joint_start(self, plan, js) -> None:
++        """Require the measured joint representation AND flange to match the checked start."""
++        m = dict(zip(js.name, js.position))
++        try:
++            q = np.array([float(m[n]) for n in plan["names"]])
++        except KeyError as e:
++            raise MotionError(f"checked joint plan: missing measured joint {e} - nothing sent") from e
++        if not np.all(np.isfinite(q)):
++            raise MotionError("checked joint plan: non-finite measured joints - nothing sent")
++        dq_deg = float(np.max(np.abs(np.degrees(q - plan["q0"]))))
++        Ta, Tb = self.p.fk()(plan["q0"]), self.p.fk()(q)
++        dp_mm = float(np.linalg.norm(Tb[:3, 3] - Ta[:3, 3])) * 1e3
++        dr_deg = _rot_deg(Ta[:3, :3], Tb[:3, :3])
++        mj = self.p.mj
++        if dq_deg > mj.prepared_start_tol_deg or dp_mm > mj.prepared_start_tol_mm or dr_deg > mj.prepared_start_tol_deg:
++            raise MotionError(f"checked joint plan start changed: max joint {dq_deg:.4f} deg, flange {dp_mm:.3f} mm / "
++                              f"{dr_deg:.4f} deg - rerun planning and confirmation (nothing sent)")
++
++    def move_checked_joint(self, check, q_goal, v_mps: float, a_mps2: float, *, timeout_s: Optional[float] = None) -> MotionResult:
++        """Consume this candidate's exact checked/confirmed trajectory; never silently replan."""
++        plan = check.get("_checked_plan")
++        q_goal = np.asarray(q_goal, dtype=float)
++        if not check.get("ok") or plan is None or plan.get("checked_consumed"):
++            raise MotionError("checked joint plan is unavailable or already consumed - nothing sent")
++        kq, kv, ka, kto = plan["key"]
++        if not (np.array_equal(kq, q_goal) and kv == float(v_mps) and ka == float(a_mps2) and kto == timeout_s):
++            raise MotionError("checked joint plan target/speed/timeout changed - nothing sent")
++        T_target = self.p.fk()(q_goal)
++
++        def planner(js, T0, res):
++            self._validate_checked_joint_start(plan, js)
++            plan["used_prepared"] = True
++            plan["validate_before_send"] = lambda fresh: self._validate_checked_joint_start(plan, fresh)
++            res.monitor_events.append("selected checked joint trajectory used unchanged; no replanning")
++            return plan
++
++        # Mark once even if the common execution path returns already-at-goal or refuses.
++        plan["checked_consumed"] = True
++        self._prepared_joint = None
++        return self._move(T_target, planner, joint_goal=q_goal)
+ 
+     def move_joint(self, q_goal, v_mps: float, a_mps2: float, *, timeout_s: Optional[float] = None) -> MotionResult:
+         """관절 공간 이동 (MoveIt 상태 검사 / OMPL 계획 → 같은 JTC 전송·감시·래치 경로)."""
+@@ -1046,6 +1097,25 @@
+             if self._abort.is_set():
+                 res.aborted, res.reason = True, "aborted before start"
+                 return res
++            validator = plan.get("validate_before_send")
++            if validator is not None:
++                # Also recheck after confirmation / action-server waits, using the latest complete robot state.
++                fresh = self._fresh_joint_state("before sending the checked joint trajectory")
++                validator(fresh)
++                invalid = self._first_invalid(plan["names"], rt.positions, joint_state=fresh)
++                if invalid is not None:
++                    raise MotionError(f"selected checked joint trajectory is no longer collision-free: {invalid} - nothing sent")
++                after = self._fresh_joint_state("after checked trajectory collision validation")
++                validator(after)
++                before_map, after_map = dict(zip(fresh.name, fresh.position)), dict(zip(after.name, after.position))
++                for joint, value in before_map.items():
++                    if joint in plan["names"]:
++                        continue
++                    latest = after_map.get(joint)
++                    if latest is None or not math.isfinite(float(latest)) or abs(math.degrees(float(latest) - float(value))) > mj.prepared_start_tol_deg:
++                        raise MotionError(f"other joint {joint} changed during checked trajectory collision validation - nothing sent")
++                if p.latch.is_set or self._abort.is_set():
++                    raise MotionError("stopped during checked trajectory validation - nothing sent")
+             t_send = _now_ns()
+             res.t_send_ns = t_send
+             fut = self._action.send_goal_async(goal)

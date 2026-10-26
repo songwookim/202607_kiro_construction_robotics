@@ -1,0 +1,247 @@
+[
+  {
+    "pass": 1,
+    "label": "goal",
+    "position_m": {
+      "x": -0.0005023211030192355,
+      "y": -1.5287578519885894,
+      "z": 0.5847155802973127
+    },
+    "orientation_xyzw": {
+      "x": 0.6848207722317666,
+      "y": -0.6609703447432914,
+      "z": 0.18514156569085288,
+      "w": 0.24466571877433552
+    },
+    "joint_state": {
+      "names": [
+        "right_manipulator_joint1",
+        "right_manipulator_joint2",
+        "right_manipulator_joint3",
+        "right_manipulator_joint4",
+        "right_manipulator_joint5",
+        "right_manipulator_joint6"
+      ],
+      "positions_rad": [
+        5.161917256584615,
+        1.237652850763342,
+        1.9579821324049387,
+        3.6152776650894998,
+        1.1914018652699903,
+        1.498418266269268
+      ]
+    },
+    "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_start; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml",
+    "saved": "2026-10-15T16:42:20.581+09:00",
+    "capture_provenance": {
+      "capture_source": "measured_joint_fk",
+      "tcp_source": "moveit_fk",
+      "joint_state_timestamp": 1792050140.5811706,
+      "joint_state_age_ms": 6.9955279905116186,
+      "tf_age_ms": 405.1246643066406,
+      "tf_fresh": false,
+      "tf_fk_position_error_mm": 1.4869363178087686e-12,
+      "tf_fk_orientation_error_deg": 0.0
+    },
+    "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_state.yaml",
+    "capture_sha256": "b530eb7296783b9870fef976b040b7228ac7296625e001c533b3dff990ee7bee",
+    "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+    "imported_at": "2026-10-15T16:53:19+09:00"
+  },
+  {
+    "pass": 2,
+    "label": "goal",
+    "position_m": {
+      "x": 0.004322089495999135,
+      "y": -1.528758553457835,
+      "z": 0.5842515294475672
+    },
+    "orientation_xyzw": {
+      "x": 0.6848335105233126,
+      "y": -0.660961855028734,
+      "z": 0.18513472481565485,
+      "w": 0.24465817527465494
+    },
+    "joint_state": {
+      "names": [
+        "right_manipulator_joint1",
+        "right_manipulator_joint2",
+        "right_manipulator_joint3",
+        "right_manipulator_joint4",
+        "right_manipulator_joint5",
+        "right_manipulator_joint6"
+      ],
+      "positions_rad": [
+        5.167403901062396,
+        1.2380971991912217,
+        1.9557040644084849,
+        3.6209653782295823,
+        1.1896172810235282,
+        1.4977803060301396
+      ]
+    },
+    "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_start_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml",
+    "saved": "2026-10-15T16:42:36.413+09:00",
+    "capture_provenance": {
+      "capture_source": "measured_joint_fk",
+      "tcp_source": "moveit_fk",
+      "joint_state_timestamp": 1792050156.413136,
+      "joint_state_age_ms": 4.876316001173109,
+      "tf_age_ms": 398.32186698913574,
+      "tf_fresh": false,
+      "tf_fk_position_error_mm": 0.0035841076893804317,
+      "tf_fk_orientation_error_deg": 0.00017855916012163116
+    },
+    "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_start_wait_state.yaml",
+    "capture_sha256": "160d283a9f76966303e8364ac0b0433220819150ef29b5086ba43a3e6560930d",
+    "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+    "imported_at": "2026-10-15T16:53:19+09:00"
+  },
+  {
+    "pass": 3,
+    "label": "goal",
+    "position_m": {
+      "x": -0.0033700284053381838,
+      "y": -1.528752078205895,
+      "z": 0.5901573475146038
+    },
+    "orientation_xyzw": {
+      "x": 0.6848309180957507,
+      "y": -0.6609649737910946,
+      "z": 0.18512975413649937,
+      "w": 0.24466076754320323
+    },
+    "joint_state": {
+      "names": [
+        "right_manipulator_joint1",
+        "right_manipulator_joint2",
+        "right_manipulator_joint3",
+        "right_manipulator_joint4",
+        "right_manipulator_joint5",
+        "right_manipulator_joint6"
+      ],
+      "positions_rad": [
+        5.158636774753855,
+        1.2310727123419742,
+        1.9635409485482611,
+        3.6122400635501557,
+        1.1905475231922928,
+        1.497731037549973
+      ]
+    },
+    "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_wait_state.yaml",
+    "saved": "2026-10-15T16:42:59.045+09:00",
+    "capture_provenance": {
+      "capture_source": "measured_joint_fk",
+      "tcp_source": "moveit_fk",
+      "joint_state_timestamp": 1792050179.0452106,
+      "joint_state_age_ms": 2.5409220106666908,
+      "tf_age_ms": 400.36582946777344,
+      "tf_fresh": false,
+      "tf_fk_position_error_mm": 0.0046519211507712495,
+      "tf_fk_orientation_error_deg": 0.0002984497641684735
+    },
+    "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_wait_state.yaml",
+    "capture_sha256": "81ef02b2cdf8c0e7f80e525ccc45b4231a0b68fa5c54eabfa3f7b523e05be73d",
+    "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+    "imported_at": "2026-10-15T16:53:19+09:00"
+  },
+  {
+    "pass": 4,
+    "label": "goal",
+    "position_m": {
+      "x": -0.0005047620119154259,
+      "y": -1.528725837194316,
+      "z": 0.5949214601121859
+    },
+    "orientation_xyzw": {
+      "x": 0.6848240201578808,
+      "y": -0.660981111591417,
+      "z": 0.18512586585352406,
+      "w": 0.24463941899489064
+    },
+    "joint_state": {
+      "names": [
+        "right_manipulator_joint1",
+        "right_manipulator_joint2",
+        "right_manipulator_joint3",
+        "right_manipulator_joint4",
+        "right_manipulator_joint5",
+        "right_manipulator_joint6"
+      ],
+      "positions_rad": [
+        5.161913528159089,
+        1.2251722126307947,
+        1.9663127666108156,
+        3.616033203890755,
+        1.1876466749749242,
+        1.4963943969988625
+      ]
+    },
+    "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_end; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml",
+    "saved": "2026-10-15T16:43:07.709+09:00",
+    "capture_provenance": {
+      "capture_source": "measured_joint_fk",
+      "tcp_source": "moveit_fk",
+      "joint_state_timestamp": 1792050187.709109,
+      "joint_state_age_ms": 0.3411979996599257,
+      "tf_age_ms": 398.04935455322266,
+      "tf_fresh": false,
+      "tf_fk_position_error_mm": 0.010627557933754722,
+      "tf_fk_orientation_error_deg": 0.0003956354281665193
+    },
+    "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_end_state.yaml",
+    "capture_sha256": "76e26b7c4007f417dda9e309511c4c469f903f79f9f2a5d1d7d19688554ab7d0",
+    "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+    "imported_at": "2026-10-15T16:53:19+09:00"
+  },
+  {
+    "pass": 3,
+    "label": "start",
+    "position_m": {
+      "x": -0.010429975308719863,
+      "y": -1.7270066133866684,
+      "z": 0.5872907509893166
+    },
+    "orientation_xyzw": {
+      "x": 0.6848438587174001,
+      "y": -0.6609296611671845,
+      "z": 0.18514358303252118,
+      "w": 0.24470947228984274
+    },
+    "joint_state": {
+      "names": [
+        "right_manipulator_joint1",
+        "right_manipulator_joint2",
+        "right_manipulator_joint3",
+        "right_manipulator_joint4",
+        "right_manipulator_joint5",
+        "right_manipulator_joint6"
+      ],
+      "positions_rad": [
+        5.063826109418162,
+        1.2454974580702793,
+        1.742537593381654,
+        3.560559292068296,
+        1.002164096374603,
+        1.402825430521419
+      ]
+    },
+    "source": "Operator GOAL P1-P4 then revised P3 START, 2026-10-15; accepted measured-joint FK: weld_goal_wait; /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml",
+    "saved": "2026-10-15T16:43:44.645+09:00",
+    "capture_provenance": {
+      "capture_source": "measured_joint_fk",
+      "tcp_source": "moveit_fk",
+      "joint_state_timestamp": 1792050224.6453934,
+      "joint_state_age_ms": 1.0937990009551868,
+      "tf_age_ms": 401.2494087219238,
+      "tf_fresh": false,
+      "tf_fk_position_error_mm": 1.2490009027033011e-12,
+      "tf_fk_orientation_error_deg": 0.0
+    },
+    "imported_from": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/right_manipulator_weld_goal_wait_state.yaml",
+    "capture_sha256": "caf4e0cc1a0a797b269c7e498d97f0543590ec104500e8eb3b24b5aa03c71fcb",
+    "imported_log": "/home/irs/.ros/log/python3_1563651_1792048890768.log",
+    "imported_at": "2026-10-15T16:53:19+09:00"
+  }
+]

@@ -119,3 +119,36 @@ def test_cartesian_cancel_is_scoped_to_its_parent_goal():
     CartesianPathActionServer.cancel_callback(server, parent)
     calls[bytes([1] * 16)].handle.cancel_goal_async.assert_called_once()
     calls[bytes([2] * 16)].handle.cancel_goal_async.assert_not_called()
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_executing_the_approved_weld_plan_skips_the_preview(approved):
+    """Markers and PLAN PREVIEW feedback were published when the plan was approved before ARC ON; repeating
+    them for a 600-waypoint weave parked the torch ~0.8 s at the weld start (2026-10-15)."""
+    from geometry_msgs.msg import Pose
+    from moveit_msgs.msg import RobotTrajectory
+    from construct_robot.nodes.cartesian_path_server import CartesianPathActionServer
+    waypoints = []
+    for i in range(50):
+        p = Pose()
+        p.position.y, p.orientation.w = 0.004 * i, 1.0
+        waypoints.append(p)
+    request = SimpleNamespace(waypoints=waypoints, visualize_path=True, execute_requested=True, planning_group="right_manipulator",
+                              reuse_approved_plan=approved, interpolation_step=0.001, tcp_speed_m_s=0.0,
+                              velocity_scale=0.3, linear_motion_profile=False)
+    plan = SimpleNamespace(fraction=1.0, solution=RobotTrajectory())
+    handle = SimpleNamespace(request=request, is_cancel_requested=False, publish_feedback=Mock(),
+                             succeed=Mock(), abort=Mock(), canceled=Mock())
+    params = {"use_moveit": True, "execute_motion": True}
+    server = SimpleNamespace(
+        publish_weld_markers=Mock(), get_parameter=lambda name: SimpleNamespace(value=params[name]),
+        approved_plan=Mock(return_value=plan), plan_with_moveit=Mock(return_value=plan),
+        consume_approved_plan=Mock(), approve_plan=Mock(), get_logger=lambda: Mock(),
+        _requested_start_state=lambda request: None,
+        execute_moveit_trajectory=Mock(return_value=SimpleNamespace(error_code=SimpleNamespace(val=1))))
+    result = CartesianPathActionServer._execute_callback(server, handle)
+    assert result.success
+    server.execute_moveit_trajectory.assert_called_once()
+    assert server.publish_weld_markers.called is (not approved)
+    assert handle.publish_feedback.called is (not approved)
+    assert len(result.sampled_path) >= len(waypoints) - 1                 # the result keeps the sampled path

@@ -1,0 +1,250 @@
+<?xml version="1.0" ?>
+<!-- RB20-1900ES-U + EOAT kinematic model: test data of the virtual arm (scan_l0/tests/sim_arm.py) - links, joints, limits and
+     collision geometry only (xacro output of the lab robot description). -->
+<robot name="rb20_1900es_u_eoat">
+  <link name="link0">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link0.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link0.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link1">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link1.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000 -0.008 -0.056"/>
+      <mass value="15.48"/>
+      <inertia ixx="0.084" ixy="0.0" ixz="0.0" iyy="0.084" iyz="0.006" izz="0.067"/>
+    </inertial>
+  </link>
+  <link name="link2">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link2.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link2.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.000 -0.217 0.341"/>
+      <mass value="32.79"/>
+      <inertia ixx="4.81" ixy="0.0" ixz="0.0" iyy="4.773" iyz="0.104" izz="0.175"/>
+    </inertial>
+  </link>
+  <link name="link3">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link3.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link3.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0 -0.008 0.042"/>
+      <mass value="8.371"/>
+      <inertia ixx="0.027" ixy="0.0" ixz="0.0" iyy="0.028" iyz="-0.003" izz="0.026"/>
+    </inertial>
+  </link>
+  <link name="link4">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link4.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link4.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0 -0.068 0.505"/>
+      <mass value="8.14"/>
+      <inertia ixx="0.718" ixy="0.0" ixz="0.0" iyy="0.696" iyz="0.099" izz="0.046"/>
+    </inertial>
+  </link>
+  <link name="link5">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link5.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link5.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0 0.0 0.035"/>
+      <mass value="1.924"/>
+      <inertia ixx="0.002" ixy="0.0" ixz="0.0" iyy="0.002" iyz="0.0" izz="0.002"/>
+    </inertial>
+  </link>
+  <link name="link6">
+    <visual>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/visual/link6.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://rbpodo_description/meshes/rb20_1900es_u/collision/link6.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000 0.000 0.104"/>
+      <mass value="0.588"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+  <link name="tcp"/>
+  <joint name="base" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.241"/>
+    <parent link="link0"/>
+    <child link="link1"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" lower="-6.2832" upper="6.2832" velocity="3.14"/>
+  </joint>
+  <joint name="shoulder" type="revolute">
+    <origin rpy="0 0 0" xyz="0 -0.2545 0"/>
+    <parent link="link1"/>
+    <child link="link2"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="10" lower="-6.2832" upper="6.2832" velocity="3.14"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.885"/>
+    <parent link="link2"/>
+    <child link="link3"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="10" lower="-2.618" upper="2.618" velocity="3.14"/>
+  </joint>
+  <joint name="wrist1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0.1875 0"/>
+    <parent link="link3"/>
+    <child link="link4"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" lower="-6.2832" upper="6.2832" velocity="3.14"/>
+  </joint>
+  <joint name="wrist2" type="revolute">
+    <origin rpy="0 0 0" xyz="0 -0.1292 0.885"/>
+    <parent link="link4"/>
+    <child link="link5"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="10" lower="-6.2832" upper="6.2832" velocity="3.14"/>
+  </joint>
+  <joint name="wrist3" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0.1292 0"/>
+    <parent link="link5"/>
+    <child link="link6"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" lower="-6.2832" upper="6.2832" velocity="3.14"/>
+  </joint>
+  <joint name="tcp_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.13"/>
+    <parent link="link6"/>
+    <child link="tcp"/>
+  </joint>
+  <!-- 어댑터판 밑면 중심 = 플랜지면 중심. 판 두께 15 mm 는 STL 에 포함되어 있다. -->
+  <joint name="eoat_base_joint" type="fixed">
+    <origin rpy="0 0 -1.5707963" xyz="0 0 0"/>
+    <parent link="tcp"/>
+    <child link="eoat_base_link"/>
+  </joint>
+  <link name="eoat_base_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0027017 1.9253E-06 0.011864"/>
+      <mass value="0.16587"/>
+      <inertia ixx="8.5303E-05" ixy="2.3431E-09" ixz="-7.4152E-08" iyy="0.00013596" iyz="5.7557E-10" izz="0.00021626"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://eoat_description/meshes/eoat_base_link_dustplate_torch180.STL"/>
+      </geometry>
+      <material name="eoat_grey">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://eoat_description/meshes/eoat_base_link_dustplate_torch180_collision.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- the torch turned 180 deg in its clamp (2026-10-13, eoat.xacro torch_clamp_joint = make_torch_turned_mesh.py turn()['T_turn']) -->
+  <joint name="torch_clamp_joint" type="fixed">
+    <origin rpy="0.0 0.0 3.141592653589793" xyz="-0.28441186375623134 -0.0009041390381966143 0.0"/>
+    <parent link="eoat_base_link"/>
+    <child link="torch_clamp_link"/>
+  </joint>
+  <link name="torch_clamp_link"/>
+  <!-- 토치 CAD 참조 프레임 (프레임 전용, 기하 없음). R = diag(-1, 1, -1) -->
+  <joint name="weld_joint" type="fixed">
+    <origin rpy="3.1416 0 3.1416" xyz="-0.041206 0 0.023"/>
+    <parent link="torch_clamp_link"/>
+    <child link="weld_link"/>
+  </joint>
+  <link name="weld_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.074812 -0.00042682 -0.02783"/>
+      <mass value="0.24213"/>
+      <inertia ixx="0.00058925" ixy="3.4051E-08" ixz="-9.6481E-05" iyy="0.00061396" iyz="-1.7852E-09" izz="8.7287E-05"/>
+    </inertial>
+  </link>
+  <!-- 프로파일러 CAD 참조 프레임 (프레임 전용, 기하 없음). R = diag(-1, 1, -1) -->
+  <joint name="laser_joint" type="fixed">
+    <origin rpy="3.1416 0 3.1416" xyz="0.057294 0 0.023"/>
+    <parent link="eoat_base_link"/>
+    <child link="laser_link"/>
+  </joint>
+  <link name="laser_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.029256 0.0049711 -0.068319"/>
+      <mass value="0.48983"/>
+      <inertia ixx="0.00023412" ixy="5.6951E-06" ixz="-7.2242E-05" iyy="0.0017143" iyz="3.7448E-06" izz="0.001556"/>
+    </inertial>
+  </link>
+  <!--
+      측정 좌표계. 초기값 xyz (0.045, 0, -0.124) m 는 eoat_base_link 기준 창면 추정 (12, 0, 147) mm
+      의 역변환(-0.105 였던 종전 값은 창면보다 19 mm 안쪽). yaw ±pi/2 는 센서 +X 부호 실측 후 확정.
+      캘리브레이션(P3 핸드아이) 결과는 calib/eoat_<serial>.yaml 의 xyz/rpy 로 저장되고
+      launch 가 xacro arg(opt_xyz/opt_rpy)로 주입한다 → eoat_yaw 만 바꾸면 다른 플랫폼에 이식된다.
+    -->
+  <joint name="profiler_optical_joint" type="fixed">
+    <origin rpy="3.11659954 -0.02107031 1.57079633" xyz="0.047463 0.001382 -0.099097"/>
+    <parent link="laser_link"/>
+    <child link="profiler_optical_frame"/>
+  </joint>
+  <link name="profiler_optical_frame"/>
+  <!--
+      토치 TCP = 우리 1차 브라켓 토치의 CAD 컨택트 팁 끝 (공칭; eoat.xacro torch_tcp_joint 주석), the torch turned in its clamp:
+      eoat_base_link 기준 (-237.86, -0.45, 297.17) mm, +z = 노즐 축 (플랜지 축에서 30.0° 굽음, -x_eoat 쪽), x = 굽힘 면 안. 와이어 끝 = TCP + 20.0 mm × z.
+    -->
+  <joint name="torch_tcp_joint" type="fixed">
+    <origin rpy="3.141584 0.523598 0.000003" xyz="0.005349 -0.000454 -0.274172"/>
+    <parent link="weld_link"/>
+    <child link="torch_tcp"/>
+  </joint>
+  <link name="torch_tcp"/>
+</robot>

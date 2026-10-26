@@ -1,0 +1,73 @@
+entries:
+- position_m:
+    x: -0.008
+    y: -1.549
+    z: 0.587
+  orientation_xyzw:
+    x: 0.726
+    y: -0.687
+    z: -0.026
+    w: -0.012
+  pass: 1
+  label: goal
+  source: tf2_echo world right_manipulator_ee_point 2026-10-14 21:01 (mm)
+  saved: '2026-10-14T21:04:19'
+- position_m:
+    x: -0.019447356845560915
+    y: -1.746664421842027
+    z: 0.5855597311158212
+  orientation_xyzw:
+    x: 0.7260009289584421
+    y: -0.6873901872134789
+    z: -0.01915913724477525
+    w: -0.007092893213228723
+  pass: 1
+  label: start
+  source: GUI keyboard capture 2026-10-14 21:00 (measured joints FK, file scan_start
+    / I)
+  saved: '2026-10-14T21:04:19'
+- position_m:
+    x: -0.015521978859337687
+    y: -1.746489600698593
+    z: 0.5901780153592474
+  orientation_xyzw:
+    x: 0.7259497086870024
+    y: -0.6874467898433819
+    z: -0.0191225750075036
+    w: -0.006946849384361525
+  pass: 2
+  label: start
+  source: GUI keyboard capture 2026-10-14 21:00 (measured joints FK, file scan_local_start
+    / O)
+  saved: '2026-10-14T21:04:19'
+- position_m:
+    x: -0.008398145053883773
+    y: -1.5488936252780787
+    z: 0.600270304793355
+  orientation_xyzw:
+    x: 0.7258228691143952
+    y: -0.6872658302099527
+    z: -0.02631556383490535
+    w: -0.012423059060638498
+  pass: 4
+  label: goal
+  source: GUI keyboard capture 2026-10-14 21:00 (measured joints FK, file scan_local_end
+    / K)
+  saved: '2026-10-14T21:04:19'
+- position_m:
+    x: -0.02065573901123606
+    y: -1.7463208300676754
+    z: 0.5954968250932353
+  orientation_xyzw:
+    x: 0.7259506885900032
+    y: -0.68744768684997
+    z: -0.019070746900000563
+    w: -0.0068979847059011
+  pass: 4
+  label: start
+  source: GUI keyboard capture 2026-10-14 21:00 (measured joints FK, file scan_end
+    / J)
+  saved: '2026-10-14T21:04:19'
+format_version: 2
+frame: World
+tcp_frame: right_manipulator_ee_point

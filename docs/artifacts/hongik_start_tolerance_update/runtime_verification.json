@@ -1,0 +1,41 @@
+{
+  "server_pid": 698937,
+  "launch_pid": 698910,
+  "status": "adapter=moveit_jtc base_frame=World running=False goal= phase=idle pass=0 ready=True not_ready='' run_stopped=False stop_reason='' awaiting_confirm=False last=",
+  "precision_sensing_action_servers": 1,
+  "precision_sensing_action_graph_entries": [
+    [
+      "/hongik_fine_sensing/hongik_auto_teach_server",
+      [
+        "welding_interfaces/action/PrecisionSensing"
+      ]
+    ]
+  ],
+  "precision_sensing_action_status_publishers": 1,
+  "adapter_source": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field/hongik_scan_ros/hongik_scan_ros/moveit_adapter.py",
+  "adapter_sha256": "fff0f42a2caaaf3fcdc9397c9e8c5389d1f6a2ca2d947744e7be3cfa0ff8215d",
+  "config": "/home/irs/hongik/hongik_kiro.yaml",
+  "job": "/home/irs/hongik/job_kiro.yaml",
+  "calib": "/home/irs/ros2_ws/install/eoat_description/share/eoat_description/calib/eoat_kiro_01.yaml",
+  "out_root": "/home/irs/hongik/runs",
+  "kiro_confirm_mode": "none (unchanged)",
+  "tests_passed": 93,
+  "motion_goals_sent": 0,
+  "sensor_restore": {
+    "original_backup": "/home/irs/scan_data/sensor_backup/backup_20261014-122707.txt",
+    "original_sha256": "d1678c98e4515fe381fd875f37f98f313fbf818ac3bcc02a1c252882cdeec5bd",
+    "CameraSNR": 4040760,
+    "parameters_verified": 37,
+    "parameters_expected": 37,
+    "reply_error": 0,
+    "mismatches": {},
+    "LaserMode": 0,
+    "DataMode": 0,
+    "AutoTriggerFPS": 50.0
+  },
+  "allowed_start_tolerance_readback": {
+    "allowed_start_tolerance_rad": 0.01,
+    "source": "MoveIt default allowed_start_tolerance 0.01 rad (trajectory_execution.allowed_start_tolerance not set or 0 on move_group)",
+    "parameter_service_available": true
+  }
+}

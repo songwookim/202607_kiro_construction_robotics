@@ -1,0 +1,167 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!--
+    용접 토치 + VC nano 3D-Z (12/24) large 프로파일러 EOAT (연구실 수정판).
+
+    원본: rbpodo_isaac_sim/urdf/eoat.xacro (isaacsim_kiro construct_robot2.urdf 이식본).
+    설계서 §7 #2/#3/#4 반영 사항:
+      - eoat_base_link 는 반드시 플랜지면 프레임(rbpodo `tcp` = link6 + 0.13 m, KIRO `right_flange`)에
+        xyz 0 0 0 으로 부착한다. 원본의 parent=link6 + z 0.05 는 KIRO link6 규약값이라
+        rbpodo 에서는 플랜지보다 80 mm 안쪽(link5 관통)에 놓였다.
+      - yaw(eoat_yaw)는 플랫폼별 핀/볼트 방향 실측값(핀 정렬 시 rbpodo -90 deg, KIRO +90 deg [추정]).
+      - STL 3개(eoat_base_link/weld_link/laser_link)는 동일 어셈블리를 3개 좌표계로 내보낸 것이라
+        eoat_base_link 에만 visual/collision 을 두고 weld_link/laser_link 는 프레임 전용 링크로 둔다.
+      - laser_link/weld_link 는 CAD 참조 프레임일 뿐 광학 원점/토치 팁이 아니다 →
+        profiler_optical_frame(측정 좌표계), torch_tcp(토치 팁)을 별도 fixed joint 로 정의한다.
+
+    프레임 규약 (설계서 §2.4):
+      profiler_optical_frame: X = 레이저 라인 방향(센서 출력 x), Z = 센서에서 멀어지는 방향(출력 z),
+                              Y = Z x X (오른손). 센서 점 = (x, 0, z) [mm → m 변환은 드라이버에서].
+      laser_joint 가 R = diag(-1, 1, -1) 이므로 opt_rpy = (pi, 0, -pi/2) 이면
+        (X, Y, Z)_opt = (-y, +x, +z)_eoat,   opt_rpy = (pi, 0, +pi/2) 이면 (+y, -x, +z)_eoat.
+      → 센서 +X 부호를 블록 실측(P1)으로 확정한 뒤 ±pi/2 를 선택한다(캘리브 YAML 에서 주입).
+        연구실 EOAT #01: +pi/2 확정 (2026-10-02 실기 자세 스냅샷, calib/eoat_lab_01.yaml).
+      → 진행방향을 +Y_opt 로 하드코딩하지 말 것. 툴 목표 자세는 eoat_base_link 기준
+        (z_eoat = -plate_normal, x_eoat = progression_sign * travel_dir)으로 구성하고
+        광학 프레임은 점 변환 P_base = T_base<-opt(t) * [x, 0, z, 1]^T 에만 사용한다.
+
+    파라미터(모두 launch/캘리브 YAML 에서 주입, 기본값은 초기 추정치):
+      parent     : 플랜지면 프레임 이름 (예: "tcp", "right_flange")
+      prefix     : 링크/조인트 이름 접두어
+      eoat_yaw   : 플랜지 z축 둘레 EOAT 장착 yaw [rad]
+      opt_xyz/opt_rpy   : laser_link → profiler_optical_frame (캘리브 결과 저장 위치)
+      torch_xyz/torch_rpy : weld_link → torch_tcp (우리 토치의 CAD 컨택트 팁 끝 — 공칭값; 아래 torch_tcp_joint 주석)
+
+    THE TORCH IS TURNED 180 DEG IN ITS CLAMP (user 2026-10-13: the lab torch was physically re-mounted like KIRO's September setup,
+    URDF v2 r4 - the neck bends away from the sensor, -x_eoat): this model IS that tool. The EOAT meshes are the turned-torch meshes
+    (eoat_base_link_dustplate_torch180.STL / _collision.STL, scripts/make_torch_turned_mesh.py: only the torch - body, neck, gas nozzle,
+    contact tip - turned about its straight body axis; clamp, bracket, plates, sensor and guard as built) and the torch's frames turn
+    with it: torch_clamp_joint (eoat_base_link -> torch_clamp_link) = the turn (180 deg about the body axis at eoat (-142.206, -0.452)
+    mm, +z_eoat; the script's turn()['T_turn'], full precision), below it the CAD torch frames as before (weld_joint, torch_tcp_joint) -
+    so eoat <- torch_tcp = the script's tcp_eoat(T_turn) (test_eoat_frames checks it). The CAD torch (eoat_base_link_dustplate.STL /
+    _collision.STL, the weld_joint below the clamp frame) is only the generator's input; nothing references the CAD orientation.
+    A later change of the torch or sensor placement is made HERE, in this URDF / xacro (meshes and joints, with their generator and
+    tests) - the run reads the tool from the robot model (MoveIt collision geometry, D14's tool, the nozzle end, the envelope's tool
+    body and torch keypoint, the weld torch's flange <- TCP); no launch argument or config value selects it.
+  -->
+  <xacro:macro name="eoat"
+               params="parent prefix='' eoat_yaw='0.0'
+                       opt_xyz='0.045 0 -0.124' opt_rpy='3.14159265 0 1.57079633'
+                       torch_xyz='0.005349 -0.000454 -0.274172' torch_rpy='3.141584 0.523598 0.000003'">
+
+    <!-- 어댑터판 밑면 중심 = 플랜지면 중심. 판 두께 15 mm 는 STL 에 포함되어 있다.
+         메시 = eoat_base_link_dustplate.STL (사용자 2026-10-12 밤: 연구실·KIRO 모두 센서와 브라켓 사이 먼지판 5.0 mm → 실제 센서가 CAD 보다
+         +z_eoat 로 5.0 mm 아래): CAD eoat_base_link.STL 에서 센서 쪽 부품 (하우징·옆판·아래틀·가드판·커넥터) 을 +5.0 mm 옮기고 그 틈을 판으로
+         채운 것 (scripts/make_dust_plate_mesh.py, 결정적). 브라켓·어댑터판·토치·laser_link (캘리브의 부모 프레임) 는 그대로 —
+         측정 캘리브 (laser_link → optical) 에 먼지판이 이미 들어 있다. -->
+    <joint name="${prefix}eoat_base_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 ${eoat_yaw}" />
+      <parent link="${parent}" />
+      <child link="${prefix}eoat_base_link" />
+    </joint>
+    <link name="${prefix}eoat_base_link">
+      <inertial>
+        <origin xyz="0.0027017 1.9253E-06 0.011864" rpy="0 0 0" />
+        <mass value="0.16587" />
+        <inertia ixx="8.5303E-05" ixy="2.3431E-09" ixz="-7.4152E-08"
+                 iyy="0.00013596" iyz="5.7557E-10" izz="0.00021626" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://eoat_description/meshes/eoat_base_link_dustplate_torch180.STL" />
+        </geometry>
+        <material name="eoat_grey">
+          <color rgba="0.75294 0.75294 0.75294 1" />
+        </material>
+      </visual>
+      <!-- 충돌 형상 (사용자 2026-10-13: 용접 자세 확인이 URDF 충돌 형상을 쓴다) = 같은 메시에서 CAD 모형 와이어 토막만 뺀 것
+           (eoat_base_link_dustplate_collision.STL, make_dust_plate_mesh.py): 와이어는 공정의 돌출 (stick_out_mm) 이지 강체가 아니고,
+           용접 자세에서 그 끝은 정의상 공작물에 닿는다. 컨택트 팁 끝면은 닫았다. visual 은 와이어까지. -->
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://eoat_description/meshes/eoat_base_link_dustplate_torch180_collision.STL" />
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- 토치가 클램프 안에서 돈 것 (frame only): eoat_base_link 의 토치 CAD 자리를 곧은 몸통 축 둘레로 180° (make_torch_turned_mesh.py
+         turn()['T_turn']: 축 = eoat (-142.206, -0.452) mm 를 지나는 +z_eoat; 원점 = c - R c). 아래 weld_joint·torch_tcp_joint 는 CAD 그대로 —
+         토치의 프레임이 토치와 함께 돈다. -->
+    <joint name="${prefix}torch_clamp_joint" type="fixed">
+      <origin xyz="-0.28441186375623134 -0.0009041390381966143 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <parent link="${prefix}eoat_base_link" />
+      <child link="${prefix}torch_clamp_link" />
+    </joint>
+    <link name="${prefix}torch_clamp_link" />
+
+    <!-- 토치 CAD 참조 프레임 (프레임 전용, 기하 없음). R = diag(-1, 1, -1) — 클램프 안에서 돈 토치의 것 (부모 torch_clamp_link) -->
+    <joint name="${prefix}weld_joint" type="fixed">
+      <origin xyz="-0.041206 0 0.023" rpy="3.1416 0 3.1416" />
+      <parent link="${prefix}torch_clamp_link" />
+      <child link="${prefix}weld_link" />
+    </joint>
+    <link name="${prefix}weld_link">
+      <inertial>
+        <origin xyz="0.074812 -0.00042682 -0.02783" rpy="0 0 0" />
+        <mass value="0.24213" />
+        <inertia ixx="0.00058925" ixy="3.4051E-08" ixz="-9.6481E-05"
+                 iyy="0.00061396" iyz="-1.7852E-09" izz="8.7287E-05" />
+      </inertial>
+    </link>
+
+    <!-- 프로파일러 CAD 참조 프레임 (프레임 전용, 기하 없음). R = diag(-1, 1, -1) -->
+    <joint name="${prefix}laser_joint" type="fixed">
+      <origin xyz="0.057294 0 0.023" rpy="3.1416 0 3.1416" />
+      <parent link="${prefix}eoat_base_link" />
+      <child link="${prefix}laser_link" />
+    </joint>
+    <link name="${prefix}laser_link">
+      <inertial>
+        <origin xyz="-0.029256 0.0049711 -0.068319" rpy="0 0 0" />
+        <mass value="0.48983" />
+        <inertia ixx="0.00023412" ixy="5.6951E-06" ixz="-7.2242E-05"
+                 iyy="0.0017143" iyz="3.7448E-06" izz="0.001556" />
+      </inertial>
+    </link>
+
+    <!--
+      측정 좌표계. 초기값 xyz (0.045, 0, -0.124) m 는 eoat_base_link 기준 창면 추정 (12, 0, 147) mm
+      의 역변환(-0.105 였던 종전 값은 창면보다 19 mm 안쪽). yaw ±pi/2 는 센서 +X 부호 실측 후 확정.
+      캘리브레이션(P3 핸드아이) 결과는 calib/eoat_<serial>.yaml 의 xyz/rpy 로 저장되고
+      launch 가 xacro arg(opt_xyz/opt_rpy)로 주입한다 → eoat_yaw 만 바꾸면 다른 플랫폼에 이식된다.
+    -->
+    <joint name="${prefix}profiler_optical_joint" type="fixed">
+      <origin xyz="${opt_xyz}" rpy="${opt_rpy}" />
+      <parent link="${prefix}laser_link" />
+      <child link="${prefix}profiler_optical_frame" />
+    </joint>
+    <link name="${prefix}profiler_optical_frame" />
+
+    <!--
+      토치 TCP = 우리 1차 브라켓 토치의 CAD 컨택트 팁 끝 (2026-10-12 사용자·KIRO 합의: KIRO 에 달린 것도 이 브라켓·토치·센서;
+      KIRO 답 2026-10-12 밤: KIRO 의 TCP = 토치 팁 끝 = 컨택트 팁 끝, 와이어 끝이 아니다).
+      위 STL 의 모형 토치 부품에서 유도 (test_eoat_frames.test_torch_tcp_is_the_cad_contact_tip_end 가 대조): 가스 노즐 (반지름 10/8 mm)
+      과 컨택트 팁 (4.48 mm, 끝으로 3.1 mm 까지 가늘어짐) 이 같은 축 (eoat 기준 (0.5, 0, 0.866) = 플랜지 축에서 +x_eoat 쪽으로 30.0° 굽음).
+      컨택트 팁 끝면 (고리 반지름 0.6–3.1 mm) 의 축 위 점 = eoat_base_link 기준 (-46.56, -0.45, 297.17) mm. 그 앞으로 모형 와이어
+      (지름 1.2 mm) 가 20.0 mm 나와 와이어 끝 (-36.55, -0.45, 314.49) mm — 가스 노즐 끝은 와이어 끝에서 18.8 mm 뒤. 이 와이어 토막이
+      포락선 키포인트의 공칭 형상 (토치의 가장 먼 점) 일 뿐 — 용접 계획의 돌출은 공정 값 (job weld_plan.stick_out_mm).
+      축: +z = 노즐 축 (공작물 쪽), x = 굽힘 면 안 — 예전 곧은 자리표시자 축 (x = -x_eoat, y = -y_eoat, z = +z_eoat; eoat 기준
+      (-100, 0, 315) mm) 을 z_eoat × 노즐 축 둘레로 30° 돌린 최소 회전: x = (-0.866, 0, 0.5)_eoat, y = -y_eoat.
+      weld_link 기준 xyz/rpy 는 weld_joint 의 3.1416 근사를 넣어 계산한 값 (eoat 기준 0.0004 mm·축 0.00003° 재현).
+      공칭값: 최종 TCP 는 KIRO 의 캘리브레이션이 정한다 (돌출은 KIRO 확인 대기).
+      (The numbers above are the CAD torch's, in the frame of the torch. Turned in its clamp (torch_clamp_joint) the TCP is at eoat
+      (-237.86, -0.45, 297.17) mm with the nozzle axis (-0.5, 0, 0.866)_eoat - leaning away from the sensor; with the lab mount
+      eoat_yaw -90 deg: flange (rbpodo tcp) <- torch_tcp (-0.45, +237.86, +297.17) mm, rpy (0, -30, -90) deg = KIRO's r4.)
+    -->
+    <joint name="${prefix}torch_tcp_joint" type="fixed">
+      <origin xyz="${torch_xyz}" rpy="${torch_rpy}" />
+      <parent link="${prefix}weld_link" />
+      <child link="${prefix}torch_tcp" />
+    </joint>
+    <link name="${prefix}torch_tcp" />
+
+  </xacro:macro>
+</robot>

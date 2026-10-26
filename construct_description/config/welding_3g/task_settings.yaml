@@ -1,0 +1,66 @@
+format_version: 1
+welding_position: 3G
+values:
+  teaching_pose_name: "1 \xB7 Initial pose"
+  velocity_percent: 29.136842105263156
+  speed_mode: scale
+  tcp_speed_mm_s: 10.0
+  interpolation_step_mm: 5.0
+  linear_motion_profile: true
+  weave_amplitude_mm: 4.0
+  weave_pitch_mm: 4.0
+  weave_left_dwell_s: 0.2
+  weave_right_dwell_s: 0.2
+  weave_axis: world_y
+  weld_weave_reference: scan_plate_plane
+  weave_base: linear
+  weave_pattern: sine
+  weld_weave_enabled: false
+  work_cycle_repeats: 1
+  corner_touch_target: start_floor
+  corner_touch_count: 10
+  seam_axis: X
+  wall_probe_axis: "AUTO \u27C2 taught seam (XY)"
+  floor_probe_axis: World Z
+  seam_orientation_mode: Wait poses + fixed World-XYZ tilt
+  weld_fixed_tilt_x_deg: 0.0
+  weld_fixed_tilt_y_deg: 0.0
+  weld_fixed_tilt_z_deg: -0.0
+  wall_probe_sign: '-'
+  floor_probe_sign: '-'
+  touch_probe_distance_mm: 25.0
+  touch_probe_speed_percent: 5.0
+  touch_settle_seconds: 0.7
+  weld_approach_mode: taught_wait
+  weld_safe_approach_mm: 30.0
+  weld_pre_start_lead_mm: 0.0
+  weld_lead_in_mm: 0.0
+  weld_lead_out_mm: 0.0
+  weld_arc_off_delay_ms: 0.0
+  weld_tcp_speed_mm_s: 5.0
+  four_pass_folder: /home/irs/ros2_ws/weld_feedback/3g
+  selected_pass_number: 1
+  auto_seam_move_to_end_pose: false
+  weld_current_raw: 190
+  weld_voltage_raw: 245
+  weld_material: FE-SOLID
+  weld_diameter_mm: 1.2
+  weld_mode: LSM
+  weld_gas: CO2 100%
+  weld_synergic: false
+  weld_correction: 0.0
+  weld_hot_start_enabled: false
+  weld_hot_start_percent: 5.0
+  weld_hot_start_hold_adjustment: -1
+  weld_custom_hot_start_enabled: false
+  weld_custom_hot_start_hold_s: 0.2
+  weld_custom_hot_start_percent: 20.0
+  weld_expect_native_crater: true
+  weld_crater_panel_current_ref_a: 60.0
+  weld_crater_panel_voltage_ref_v: 25.0
+  weld_crater_panel_time_ref_s: 1.0
+  weld_software_crater_enabled: true
+  weld_software_crater_ratio_percent: 30.0
+  weld_software_crater_voltage_v: 24.5
+  weld_software_crater_hold_s: 0.75
+  weld_wire_consumable_alpha_mm: 0.0

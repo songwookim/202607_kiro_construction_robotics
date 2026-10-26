@@ -7,6 +7,7 @@ unchanged.
 
 import copy
 import math
+import os
 import threading
 import time
 
@@ -20,6 +21,7 @@ from moveit_msgs.msg import Constraints, DisplayTrajectory, JointConstraint
 from moveit_msgs.srv import GetCartesianPath, GetPositionFK, GetPositionIK
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rbpodo_msgs.msg import SystemState
@@ -51,9 +53,20 @@ from construct_robot.core.cartesian_path_common import (
     weaving_from_path,
 )
 from construct_robot.nodes.cartesian_path_server import make_weld_visualization
-from construct_robot.core.keyboard_jog import keyboard_velocity_vector
+from construct_robot.core.trajectory_limits import straight_joint_retime
+from construct_robot.core.keyboard_jog import (
+    KEYBOARD_LINEAR_SPEEDS_MM_S, keyboard_velocity_vector, next_keyboard_speed,
+)
 from construct_robot.nodes.keyboard_servo import KeyboardServoBridge
 from construct_robot.nodes.action_call import ActionCall, wait_for_future
+from construct_robot.nodes.robot_model import (
+    describe_fidelity,
+    fetch_robot_description,
+    planning_frame_chain,
+    verify_path_fidelity,
+)
+from construct_robot.nodes.precision_sensing_test import PrecisionSensingTestBridge
+from construct_robot.nodes.scanner_live import ScannerLiveBridge
 from construct_robot.core.seam_geometry import (
     _pose_position_tuple,
     _unit_vector,
@@ -100,9 +113,64 @@ KEYBOARD_VELOCITY_DEADMAN_TIMEOUT_S = 0.25
 KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S = 0.80
 KEYBOARD_ZERO_BURST_COUNT = 5
 KEYBOARD_TF_LOOKUP_TIMEOUT_S = 0.05
+KEYBOARD_ARROW_KEYS = {0x01: "Left", 0x02: "Right", 0x04: "Up", 0x08: "Down"}
+# The GUI re-publishes its keyboard-jog context every Tk bridge cycle (10 ms)
+# and at once on focus loss.  The live GUI's Tk loop lags 0.1-0.4 s under
+# load; a tighter limit (0.15 s) sent ~45% of presses to the slow Tk path.
+# Tk still re-checks every interlock and stops a jog it would not allow.
+KEYBOARD_FAST_CONTEXT_MAX_AGE_S = 1.0
+# A held key renews its deadman lease from an older context: the release
+# itself is handled in the ROS thread, so a GUI hiccup must not stop the jog.
+KEYBOARD_FAST_REFRESH_MAX_AGE_S = 2.0
+# Axis keys (GUI keyboard_jog_selection_key), by X11 character code.
+KEYBOARD_SELECTION_KEYS = {
+    ord("1"): "X", ord("2"): "Y", ord("3"): "Z", ord("4"): "RX", ord("5"): "RY",
+    ord("6"): "RZ", ord("7"): "XY", ord("8"): "XZ", ord("9"): "YZ",
+    ord("a"): "RX/RY", ord("s"): "RX/RZ", ord("d"): "RY/RZ",
+}
 # "servo": keyboard_jog_node streams into the active JTC (RB stays in Servo-J).
 # "native_jog": exchange JTC for the Cartesian velocity controller (jog_robot_l).
 KEYBOARD_TEACHING_BACKENDS = ("servo", "native_jog")
+
+
+ARM_JOINT_LIMIT_RAD = 6.283          # RB20 joints: +-360 deg (URDF)
+
+
+def nearest_joint_turn(value, seed, limit=ARM_JOINT_LIMIT_RAD):
+    """The same joint angle +- full turns closest to seed within +-limit (KDL may return a solution one turn away:
+    the same pose, but the joint would spin 360 deg to reach it)."""
+    best = float(value)
+    for turns in range(-2, 3):
+        candidate = float(value) + turns * 2.0 * math.pi
+        if abs(candidate) <= limit + 1e-9 and abs(candidate - seed) < abs(best - seed):
+            best = candidate
+    return best
+
+
+# A seeded IK solution farther than this from its seed is another arm branch: joints 1-3 (shoulder / elbow) 60 deg,
+# the wrist joints 4-6 150 deg (a 40 deg torch tilt legitimately turns the wrist a lot).
+IK_SEED_MAX_JUMP_RAD = tuple(math.radians(v) for v in (60.0, 60.0, 60.0, 150.0, 150.0, 150.0))
+
+def spin_side_node(name):
+    """A small node spun by its own thread for high-rate or latency-critical input.
+
+    Every wake-up of the GUI node's executor rebuilds a wait set over its ~60
+    clients, action clients and services (~3 ms in rclpy on the Jetson), and
+    the GIL is shared with Tk.  /joint_states at 125 Hz alone kept that
+    executor ~40% busy, delaying keyboard callbacks and starving Tk.
+    """
+    node = rclpy.create_node(name, start_parameter_services=False, enable_rosout=False)
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+
+    def spin():
+        try:
+            executor.spin()
+        except ExternalShutdownException:
+            pass
+
+    threading.Thread(target=spin, name=name, daemon=True).start()
+    return node
 
 
 class WeldGuiNode(Node):
@@ -183,7 +251,26 @@ class WeldGuiNode(Node):
             "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
             "zero_burst_remaining": 0,
         }
-        self.create_timer(0.02, self._publish_keyboard_velocity)
+        # Physical arrow -> jog command stays off the Tk queue (see
+        # _keyboard_fast_press) and off this node's executor: its own node and
+        # thread, so no GUI callback, service response or joint-state burst
+        # can delay it.
+        self.keyboard_input_node = spin_side_node("weld_action_gui_keyboard")
+        self.keyboard_fast_lock = threading.Lock()
+        self.keyboard_fast_context = None
+        # (selection, monotonic) chosen in the ROS thread until Tk's context
+        # catches up (see set_keyboard_fast_context).
+        self.keyboard_selection_override = None
+        self.keyboard_speed_override = None
+        self.keyboard_speed_generation = 0
+        self.keyboard_command_key = None
+        self.keyboard_command_generation = 0
+        self.keyboard_physical_key = None
+        self._keyboard_last_mask = 0
+        self.keyboard_velocity_timer = self.keyboard_input_node.create_timer(
+            0.02,
+            self._publish_keyboard_velocity,
+        )
         self.joint_trajectory_cancel_clients = {
             device: self.create_client(
                 CancelGoal,
@@ -244,7 +331,11 @@ class WeldGuiNode(Node):
         self.tf_buffer = Buffer()
         # Own spin thread: /tf (200 Hz) must not queue behind GUI callbacks,
         # which made "current TCP" lookups hundreds of ms stale after motion.
-        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        # The listener gets its own node: given this node, its thread would
+        # spin every GUI callback too, and two executors waiting on the same
+        # action clients race ("wait set index ... out of bounds"), killing
+        # whichever executor thread hits it.
+        self.tf_listener = TransformListener(self.tf_buffer, None, spin_thread=True)
         self.active_motion_goal = None
         self._motion_action_calls = set()
         self._motion_action_lock = threading.Lock()
@@ -301,9 +392,10 @@ class WeldGuiNode(Node):
                 f"keyboard_teaching_backend must be one of "
                 f"{KEYBOARD_TEACHING_BACKENDS}, got {backend!r}"
             )
+        self.joint_state_node = spin_side_node("weld_action_gui_joint_states")
         self.keyboard_servo = (
             KeyboardServoBridge(
-                self,
+                self.joint_state_node,
                 {arm: CONTROLLER_NAMES[arm] for arm in ("left", "right")},
                 on_status=self._keyboard_servo_status,
             )
@@ -356,28 +448,36 @@ class WeldGuiNode(Node):
             ),
         )
         self.create_timer(0.5, self._check_robot_feedback)
-        self.create_subscription(
+        self.precision_sensing_test = PrecisionSensingTestBridge(self)
+        self.scanner_live = ScannerLiveBridge(self)
+        self.joint_state_node.create_subscription(
             SystemState,
             "/right_rbpodo_hardware/system_state",
             lambda message: self._system_state(message, "right"),
-            10,
+            1,
         )
-        self.create_subscription(
+        self.joint_state_node.create_subscription(
             SystemState,
             "/left_rbpodo_hardware/system_state",
             lambda message: self._system_state(message, "left"),
-            10,
+            1,
         )
-        self.create_subscription(
+        self.joint_state_node.create_subscription(
             JointState,
             "/joint_states",
             self._joint_state,
             10,
         )
-        self.create_subscription(
+        self.keyboard_input_node.create_subscription(
             UInt8,
             "/keyboard_teaching/arrow_state",
             self._keyboard_arrow_state,
+            10,
+        )
+        self.keyboard_input_node.create_subscription(
+            UInt8,
+            "/keyboard_teaching/selection_key",
+            self._keyboard_selection_key,
             10,
         )
         self.create_subscription(
@@ -420,11 +520,19 @@ class WeldGuiNode(Node):
 
     def _keyboard_arrow_state(self, message):
         mask = int(message.data) & 0x0F
+        key = KEYBOARD_ARROW_KEYS.get(mask)
+        new_press = key is not None and mask != getattr(self, "_keyboard_last_mask", 0)
+        # jog latency diagnosis: time of a new single-arrow press edge (consumed by set_keyboard_velocity)
+        if new_press:
+            self.keyboard_press_edge_monotonic = time.monotonic()
+        self._keyboard_last_mask = mask
+        # Latest physical state, so the Tk thread can tell a queued press
+        # that was already released from one that is still held.
+        self.keyboard_physical_key = key
         # Safety path stays entirely in the ROS executor: do not wait for the
         # Tk queue to notice a physical release before publishing velocity
         # zero. Multiple simultaneous arrows are also treated as STOP.
-        valid_single_arrow = mask in (0x01, 0x02, 0x04, 0x08)
-        if not valid_single_arrow:
+        if key is None:
             with self.keyboard_velocity_lock:
                 moving = any(
                     abs(value) > 1e-12
@@ -435,12 +543,163 @@ class WeldGuiNode(Node):
                 self.get_logger().info(
                     "KEYBOARD PHYSICAL RELEASE · immediate ROS velocity zero"
                 )
+        else:
+            # Lazy lookup also supports keyboard-only runtime test doubles.
+            fast_press = getattr(self, "_keyboard_fast_press", None)
+            if fast_press is not None:
+                fast_press(key, new_press)
         # Do not coalesce physical edges: a short release between two presses
         # is precisely the safety event that must never be discarded.
         self.ui.post(
             self.ui.keyboard_arrow_state_received,
             mask,
         )
+
+    def set_keyboard_fast_context(self, context):
+        """Tk publishes the state its own key handler would check (or None)."""
+        lock = getattr(self, "keyboard_fast_lock", None)
+        if lock is None:
+            return
+        with lock:
+            speed_override = getattr(self, "keyboard_speed_override", None)
+            if speed_override is not None and context is not None:
+                arm, speed, generation = speed_override
+                if context.get("arm", arm) != arm or context.get("speed_generation", 0) >= generation:
+                    self.keyboard_speed_override = None
+                elif "linear_m_s" in context:
+                    context = dict(context, linear_m_s=speed * 0.001)
+            override = getattr(self, "keyboard_selection_override", None)
+            if override is not None and context is not None and "selection" in context:
+                if context["selection"] == override[0] or time.monotonic() - override[1] > 5.0:
+                    self.keyboard_selection_override = None
+                else:
+                    context = dict(context, selection=override[0])
+            self.keyboard_fast_context = context
+
+    def _keyboard_selection_key(self, message):
+        """Axis key: re-aim a held servo jog now, ahead of the Tk event loop."""
+        if int(message.data) == ord("v"):
+            self._keyboard_speed_key()
+            return
+        selection = KEYBOARD_SELECTION_KEYS.get(int(message.data))
+        lock = getattr(self, "keyboard_fast_lock", None)
+        if selection is None or lock is None:
+            return
+        with lock:
+            context = self.keyboard_fast_context
+            if (
+                context is None or not context.get("armed")
+                or time.monotonic() - context["updated_monotonic"] > KEYBOARD_FAST_REFRESH_MAX_AGE_S
+            ):
+                return
+            self.keyboard_selection_override = (selection, time.monotonic())
+            context = dict(context, selection=selection)
+            self.keyboard_fast_context = context
+        arm = context["arm"]
+        key = self.keyboard_command_key_for(arm)
+        # The native jog_robot_l backend stops on an axis change (Tk path).
+        if key is None or self.keyboard_servo is None or key != getattr(self, "keyboard_physical_key", None):
+            return
+        try:
+            velocity = self.resolve_keyboard_velocity(
+                context["planning_group"], selection, key,
+                context["linear_m_s"], context["angular_rad_s"], context["frame"],
+            )
+        except Exception:  # noqa: BLE001 - the Tk path reports TF/selection errors
+            return
+        self.set_keyboard_velocity(arm, velocity, key=key)
+
+    def _keyboard_speed_key(self):
+        """Apply a physical V press before Tk renders the selected speed."""
+        with self.keyboard_fast_lock:
+            context = self.keyboard_fast_context
+            if (context is None or not context.get("armed")
+                    or time.monotonic() - context["updated_monotonic"] > KEYBOARD_FAST_CONTEXT_MAX_AGE_S):
+                return
+            arm = context["arm"]
+            if (self.active_motion_goal is not None or self.ui.sequence_running
+                    or self.ui.keyboard_teaching_capture_in_progress or self.ui.keyboard_velocity_switching
+                    or self.ui.keyboard_velocity_arm != arm):
+                return
+            speed = next_keyboard_speed(context["linear_m_s"] * 1000, KEYBOARD_LINEAR_SPEEDS_MM_S)
+            generation = getattr(self, "keyboard_speed_generation", 0) + 1
+            self.keyboard_speed_generation = generation
+            self.keyboard_speed_override = (arm, speed, generation)
+            self.keyboard_fast_context = dict(context, linear_m_s=speed * 0.001)
+        self.clear_keyboard_velocity()
+        self.ui.post_latest("keyboard_speed", self.ui.keyboard_speed_selected, arm, speed, generation)
+
+    def _keyboard_fast_press(self, key, new_press):
+        """Start or renew a physical-arrow jog in the ROS thread.
+
+        The Tk path added its queue and event-loop delay (9-58 ms measured) to
+        every jog start, and a busy GUI could let the deadman lapse while the
+        key was still held.  Tk keeps every interlock: it publishes a context
+        only it can evaluate (enabled, focus, selected arm/axis/frame/speed)
+        and later adopts the running jog for its status and log.
+        """
+        lock = getattr(self, "keyboard_fast_lock", None)
+        if lock is None:
+            return
+        with lock:
+            context = self.keyboard_fast_context
+        if context is None or not context.get("armed"):
+            return
+        age = time.monotonic() - context["updated_monotonic"]
+        if age > KEYBOARD_FAST_REFRESH_MAX_AGE_S:
+            return
+        arm = context["arm"]
+        ui = self.ui
+        if (
+            self.active_motion_goal is not None
+            or getattr(ui, "sequence_running", True)
+            or getattr(ui, "keyboard_teaching_capture_in_progress", True)
+            or getattr(ui, "keyboard_velocity_switching", True)
+            or getattr(ui, "keyboard_velocity_arm", None) != arm
+        ):
+            return
+        if self.keyboard_command_key_for(arm) == key:
+            # Held key: renew the deadman lease without a Tk round trip.
+            self.refresh_keyboard_velocity(arm)
+            return
+        if not new_press or age > KEYBOARD_FAST_CONTEXT_MAX_AGE_S:
+            # A key still held after a deliberate stop needs a new press; a
+            # stale context leaves the start to the Tk path.
+            return
+        try:
+            velocity = self.resolve_keyboard_velocity(
+                context["planning_group"],
+                context["selection"],
+                key,
+                context["linear_m_s"],
+                context["angular_rad_s"],
+                context["frame"],
+            )
+        except Exception:  # noqa: BLE001 - the Tk path reports TF/selection errors
+            return
+        self.set_keyboard_velocity(arm, velocity, key=key)
+
+    def keyboard_command_key_for(self, arm):
+        """Arrow that owns the current non-zero jog command of `arm`, else None."""
+        token = self.keyboard_command_token(arm)
+        return None if token is None else token[0]
+
+    def keyboard_command_token(self, arm):
+        """(arrow, generation) of the current non-zero jog command of `arm`, else None.
+
+        Every set_keyboard_velocity() is a new generation, so the GUI can tell
+        the command it already knows from a newer press of the same arrow.
+        """
+        with self.keyboard_velocity_lock:
+            command = self.keyboard_velocity_command
+            if command.get("arm") != arm or not any(
+                abs(value) > 1e-12 for value in command.get("values", ())
+            ):
+                return None
+            return (
+                getattr(self, "keyboard_command_key", None),
+                getattr(self, "keyboard_command_generation", 0),
+            )
 
     def _wide_sensing_result(self, message):
         self.ui.post(
@@ -524,10 +783,16 @@ class WeldGuiNode(Node):
             *_quaternion_rotate_vector(rotation, world_velocity[3:]),
         )
 
-    def set_keyboard_velocity(self, arm, values):
+    def set_keyboard_velocity(self, arm, values, key=None):
+        """Command a jog velocity; `key` is the physical arrow that holds it."""
         values = tuple(float(value) for value in values)
         if len(values) != 6 or not all(math.isfinite(value) for value in values):
             raise ValueError("keyboard velocity must contain six finite values")
+        edge = getattr(self, "keyboard_press_edge_monotonic", None)
+        latency_ms = None
+        if edge is not None and any(abs(value) > 1e-12 for value in values):
+            self.keyboard_press_edge_monotonic = None
+            latency_ms = (time.monotonic() - edge) * 1000.0
         with self.keyboard_velocity_lock:
             self.keyboard_velocity_command = {
                 "arm": arm,
@@ -536,11 +801,20 @@ class WeldGuiNode(Node):
                 "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
                 "zero_burst_remaining": 0,
             }
+            self.keyboard_command_key = key
+            self.keyboard_command_generation = getattr(self, "keyboard_command_generation", 0) + 1
         # jog_robot_l is latched; publish once on start/direction/speed change.
         # Re-streaming identical non-zero messages can queue stale motion ahead
         # of the release zero when the subscriber is briefly delayed.
         if arm in self.keyboard_velocity_publishers:
             self._publish_keyboard_velocity(force=True)
+        if latency_ms is not None:
+            # Logged after the publish: logging (rcutils + /rosout) must not
+            # delay the command it reports on.
+            queue = getattr(getattr(self.ui, "_ui_queue", None), "qsize", lambda: -1)()
+            log = self.get_logger().warning if latency_ms > 100.0 else self.get_logger().info
+            log(f"KEYBOARD JOG LATENCY · arrow press -> velocity command {latency_ms:.0f} ms "
+                f"(Tk queue {queue} items){' · GUI busy: check CPU / log spam' if latency_ms > 100.0 else ''}")
 
     def refresh_keyboard_velocity(self, arm):
         """Renew an active jog lease without changing its command."""
@@ -564,6 +838,7 @@ class WeldGuiNode(Node):
                 "deadman_timeout_s": KEYBOARD_VELOCITY_INITIAL_DEADMAN_TIMEOUT_S,
                 "zero_burst_remaining": KEYBOARD_ZERO_BURST_COUNT,
             }
+            self.keyboard_command_key = None
         if arm in self.keyboard_velocity_publishers:
             self._publish_keyboard_velocity(force=True)
 
@@ -607,6 +882,9 @@ class WeldGuiNode(Node):
 
     def _publish_keyboard_velocity(self, force=False):
         expired_arm = None
+        # Read, decide and publish under one lock: the 50 Hz stream (ROS
+        # thread) and a stop/start (Tk or ROS thread) must never publish a
+        # stale non-zero twist after the newer zero.
         with self.keyboard_velocity_lock:
             arm = self.keyboard_velocity_command["arm"]
             values = tuple(self.keyboard_velocity_command["values"])
@@ -628,6 +906,7 @@ class WeldGuiNode(Node):
                 self.keyboard_velocity_command["zero_burst_remaining"] = (
                     KEYBOARD_ZERO_BURST_COUNT
                 )
+                self.keyboard_command_key = None
                 expired_arm = arm
             zero_burst = int(self.keyboard_velocity_command.get(
                 "zero_burst_remaining", 0
@@ -637,26 +916,26 @@ class WeldGuiNode(Node):
                 publish_zero_burst = True
             else:
                 publish_zero_burst = False
-        if arm not in self.keyboard_velocity_publishers:
-            return
-        # Servo is not latched: it needs the twist every cycle while a key is
-        # held and halts on its own when the stream stops.
-        servo_streaming = self.keyboard_servo is not None and any(
-            abs(value) > 1e-12 for value in values
-        )
-        if (
-            not force
-            and expired_arm is None
-            and not publish_zero_burst
-            and not servo_streaming
-        ):
-            return
-        if self.keyboard_servo is not None:
-            self.keyboard_servo.publish_twist(arm, values)
-        else:
-            message = Float64MultiArray()
-            message.data = list(values)
-            self.keyboard_velocity_publishers[arm].publish(message)
+            if arm not in self.keyboard_velocity_publishers:
+                return
+            # Servo is not latched: it needs the twist every cycle while a key
+            # is held and halts on its own when the stream stops.
+            servo_streaming = self.keyboard_servo is not None and any(
+                abs(value) > 1e-12 for value in values
+            )
+            if (
+                not force
+                and expired_arm is None
+                and not publish_zero_burst
+                and not servo_streaming
+            ):
+                return
+            if self.keyboard_servo is not None:
+                self.keyboard_servo.publish_twist(arm, values)
+            else:
+                message = Float64MultiArray()
+                message.data = list(values)
+                self.keyboard_velocity_publishers[arm].publish(message)
         if expired_arm is not None:
             self.get_logger().warning(
                 f"{expired_arm.upper()} keyboard velocity deadman expired; "
@@ -771,12 +1050,12 @@ class WeldGuiNode(Node):
         )
         self.legacy_node_digital_outputs[arm] = tuple(message.digital_out)
         if arm == "right":
-            self.ui.post_latest(
-                "right_control_box_io",
-                self.ui.update_control_box_io,
-                tuple(message.digital_in),
-                tuple(message.digital_out),
-            )
+            io_state = (tuple(message.digital_in), tuple(message.digital_out))
+            if io_state != getattr(self, "_last_control_box_io", None):
+                self._last_control_box_io = io_state
+                self.ui.post_latest(
+                    "right_control_box_io", self.ui.update_control_box_io, *io_state,
+                )
         if not self.expect_robot_feedback[arm]:
             return
         self.last_robot_feedback_at[arm] = time.monotonic()
@@ -841,7 +1120,14 @@ class WeldGuiNode(Node):
             and guard[0] == arm
             and previous_touch is False
             and touch_active
+            and not self.touch_guard_triggered.is_set()
         ):
+            self.touch_guard_triggered.set()
+            # Latch the TCP at the DI0 edge (before braking) for touch measurements (TCP calibration).
+            try:
+                self.touch_guard_edge_pose = self._current_tcp_pose(f"{arm}_manipulator")
+            except TransformException:
+                self.touch_guard_edge_pose = None
             threading.Thread(
                 target=self.stop_touch_guarded_motion,
                 daemon=True,
@@ -877,13 +1163,17 @@ class WeldGuiNode(Node):
                 self.last_robot_feedback_at[arm] = received_at
                 self.last_measured_joints_at[arm] = received_at
                 self.robot_feedback_seen[arm] = True
+                snapshot = {
+                    "positions": {name: float(positions[name]) for name in expected_names},
+                    "received_monotonic": received_at,
+                    "stamp_sec": (float(message.header.stamp.sec)
+                                  + float(message.header.stamp.nanosec) * 1e-9),
+                }
                 with self.measured_joint_snapshot_lock:
-                    self.measured_joint_snapshots[arm] = {
-                        "positions": {name: float(positions[name]) for name in expected_names},
-                        "received_monotonic": received_at,
-                        "stamp_sec": (float(message.header.stamp.sec)
-                                      + float(message.header.stamp.nanosec) * 1e-9),
-                    }
+                    self.measured_joint_snapshots[arm] = snapshot
+                record = getattr(self.ui, "record_weld_joint_sample", None)
+                if record is not None:
+                    record(arm, snapshot)
 
     def _display_trajectory_received(self, message):
         """Keep the latest non-empty trajectory displayed by MoveIt/RViz."""
@@ -1005,10 +1295,15 @@ class WeldGuiNode(Node):
         result_timeout=300.0,
         on_accepted=None,
         feedback_callback=None,
+        track_active=True,
     ):
         """Submit an action goal and block only the calling worker thread."""
+        sensing_test = getattr(self, "precision_sensing_test", None)
+        if sensing_test is not None and sensing_test.busy:
+            raise RuntimeError("A Hongik sensor scan is active; cancel/wait before another motion")
         def goal_ready(handle):
-            self.active_motion_goal = handle
+            if track_active:
+                self.active_motion_goal = handle
             if on_accepted is not None:
                 on_accepted(handle)
 
@@ -1249,17 +1544,61 @@ class WeldGuiNode(Node):
         expected_joint_names,
         endpoint,
         teaching_name,
+        seed_positions=None,
+        task_position=None,
     ):
-        """Use MoveIt IK to make a named pose's joints match its corrected TCP."""
+        """Use MoveIt IK to make a named pose's joints match its corrected TCP.
+        seed_positions: start IK from these joints and refuse a solution on another arm branch
+        (IK_SEED_MAX_JUMP_RAD per joint); when that fails, retry from the robot's current joints (same check)."""
         while rclpy.ok() and not self.ik_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warning(
                 f"Waiting for /compute_ik to resolve corrected {teaching_name} TCP"
             )
         if not rclpy.ok():
             return
+        attempts = [None] if seed_positions is None else [("stored joints", tuple(seed_positions))]
+        if seed_positions is not None:
+            current = getattr(self, "latest_joint_positions", {}) or {}
+            if all(name in current for name in expected_joint_names):
+                attempts.append(("current joints", tuple(current[name] for name in expected_joint_names)))
+        errors = []
+        task_context = () if task_position is None else (task_position,)
+        for attempt in attempts:
+            resolved, error = self._solve_tcp_ik(
+                planning_group, target_pose, expected_joint_names,
+                None if attempt is None else attempt[1],
+            )
+            if resolved is None and error is None:        # shutdown
+                return
+            if resolved is not None:
+                self.ui.post(
+                    self.ui.apply_corrected_tcp_joint_state,
+                    endpoint,
+                    teaching_name,
+                    planning_group,
+                    tuple(expected_joint_names),
+                    tuple(resolved[name] for name in expected_joint_names),
+                    copy.deepcopy(target_pose),
+                    *task_context,
+                )
+                return
+            errors.append(error if attempt is None else f"from {attempt[0]}: {error}")
+        self.ui.post(
+            self.ui.corrected_tcp_joint_state_failed,
+            endpoint,
+            teaching_name,
+            " · ".join(errors),
+            *task_context,
+        )
+
+    def _solve_tcp_ik(self, planning_group, target_pose, expected_joint_names, seed):
+        """One /compute_ik call -> (resolved {name: q}, None) or (None, reason); (None, None) on shutdown."""
         request = GetPositionIK.Request()
         request.ik_request.group_name = planning_group
         request.ik_request.robot_state.is_diff = True
+        if seed is not None:
+            request.ik_request.robot_state.joint_state.name = list(expected_joint_names)
+            request.ik_request.robot_state.joint_state.position = [float(v) for v in seed]
         request.ik_request.ik_link_name = tip_link_for_group(planning_group)
         request.ik_request.pose_stamped.header.frame_id = "World"
         request.ik_request.pose_stamped.header.stamp = (
@@ -1288,48 +1627,30 @@ class WeldGuiNode(Node):
         while rclpy.ok() and not finished.wait(timeout=0.2):
             pass
         if not rclpy.ok():
-            return
+            return None, None
         if "error" in outcome:
-            self.ui.post(
-                self.ui.corrected_tcp_joint_state_failed,
-                endpoint,
-                teaching_name,
-                outcome["error"],
-            )
-            return
+            return None, outcome["error"]
         response = outcome["response"]
         if response.error_code.val != 1:
-            self.ui.post(
-                self.ui.corrected_tcp_joint_state_failed,
-                endpoint,
-                teaching_name,
-                f"MoveIt IK error code {response.error_code.val}",
-            )
-            return
+            return None, f"MoveIt IK error code {response.error_code.val}"
         resolved = dict(zip(
             response.solution.joint_state.name,
             response.solution.joint_state.position,
         ))
         missing = [name for name in expected_joint_names if name not in resolved]
         if missing:
-            self.ui.post(
-                self.ui.corrected_tcp_joint_state_failed,
-                endpoint,
-                teaching_name,
-                "corrected TCP IK omitted joints: " + ", ".join(missing),
-            )
-            return
-        self.ui.post(
-            self.ui.apply_corrected_tcp_joint_state,
-            endpoint,
-            teaching_name,
-            planning_group,
-            tuple(expected_joint_names),
-            tuple(resolved[name] for name in expected_joint_names),
-            copy.deepcopy(target_pose),
-        )
+            return None, "corrected TCP IK omitted joints: " + ", ".join(missing)
+        if seed is not None:
+            for name, value in zip(expected_joint_names, seed):
+                resolved[name] = nearest_joint_turn(resolved[name], float(value))
+            for index, (name, value) in enumerate(zip(expected_joint_names, seed)):
+                jump = abs(resolved[name] - float(value))
+                if jump > IK_SEED_MAX_JUMP_RAD[min(index, len(IK_SEED_MAX_JUMP_RAD) - 1)]:
+                    return None, (f"IK solution is on another arm branch ({name} moves "
+                                  f"{math.degrees(jump):.0f} deg from the seed)")
+        return resolved, None
 
-    def resolve_tcp_joint_states(self, targets):
+    def resolve_tcp_joint_states(self, targets, *, task_position=None):
         """Resolve related corrected named poses serially for deterministic YAML."""
         for (
             endpoint,
@@ -1337,6 +1658,7 @@ class WeldGuiNode(Node):
             target_pose,
             joint_names,
             teaching_name,
+            *seed,
         ) in targets:
             self.resolve_tcp_joint_state(
                 planning_group,
@@ -1344,6 +1666,8 @@ class WeldGuiNode(Node):
                 joint_names,
                 endpoint,
                 teaching_name,
+                seed[0] if seed else None,
+                task_position=task_position,
             )
 
     def publish_points(self, points, visible=True):
@@ -2517,6 +2841,13 @@ class WeldGuiNode(Node):
                 f"{response.fraction:.1%}",
             )
             return
+        try:
+            fidelity = self._verify_named_tcp_path(
+                planning_group, request.waypoints, response.solution
+            )
+        except Exception as error:  # noqa: BLE001 - every failure refuses the plan
+            self.ui.post(self.ui.error, f"Named TCP path refused: {error}")
+            return
         scale_trajectory_speed(response.solution, velocity_scale)
         display = DisplayTrajectory()
         display.trajectory_start = response.start_state
@@ -2530,8 +2861,43 @@ class WeldGuiNode(Node):
             planning_group,
             target_positions,
             velocity_scale,
-            "Named TCP linear plan shown in RViz · XYZ linear + orientation SLERP",
+            "Named TCP linear plan shown in RViz · XYZ linear + orientation SLERP · "
+            + describe_fidelity(fidelity),
         )
+
+    def _planning_chain(self, planning_group):
+        chains = self.__dict__.setdefault("_planning_chains", {})
+        chain = chains.get(planning_group)
+        if chain is None:
+            urdf = self.__dict__.get("_robot_description_xml") or fetch_robot_description(self)
+            self.__dict__["_robot_description_xml"] = urdf
+            chain = planning_frame_chain(urdf, "World", planning_group)
+            chains[planning_group] = chain
+        return chain
+
+    def _verify_named_tcp_path(self, planning_group, waypoints, trajectory):
+        """Same IK-branch check as the Cartesian server, for direct MoveIt plans."""
+        return verify_path_fidelity(self._planning_chain(planning_group), waypoints, trajectory)
+
+    def path_start_joints(self, step, seed_joints=None):
+        """IK of the path's first pose (planning group order), seeded with
+        ``seed_joints`` ({name: rad}) when complete, else the current joints."""
+        names = list(self._planning_chain(step["planning_group"]).joint_names)
+        current = seed_joints if seed_joints and all(name in seed_joints for name in names) \
+            else (getattr(self, "latest_joint_positions", {}) or {})
+        if not all(name in current for name in names):
+            raise RuntimeError("current joint state unavailable")
+        seed = [float(current[name]) for name in names]
+        target = step["points"][0]
+        positions = self._cleaner_corrected_joint_target(
+            dict(step, joint_names=names, positions=seed), target)
+        return names, [nearest_joint_turn(q, s) for q, s in zip(positions, seed)]
+
+    def joints_within(self, names, positions, tolerance_rad):
+        current = getattr(self, "latest_joint_positions", {}) or {}
+        if not all(name in current for name in names):
+            return False
+        return max(abs(current[name] - q) for name, q in zip(names, positions)) <= tolerance_rad
 
     def _initial_plan_goal_response(
         self,
@@ -2933,8 +3299,12 @@ class WeldGuiNode(Node):
         )
         future.add_done_callback(self._cartesian_goal_response)
 
-    def run_sequence_cartesian_motion(self, step, execute_requested):
-        """Plan or execute one stored path and block only the worker thread."""
+    def run_sequence_cartesian_motion(self, step, execute_requested, track_goal=True):
+        """Plan or execute one stored path and block only the worker thread.
+
+        ``track_goal=False`` (plan-only background planning) keeps the goal out
+        of ``active_motion_goal``, which the touch guard cancels.
+        """
         goal = CartesianPath.Goal()
         goal.planning_group = step["planning_group"]
         goal.interpolation_step = step["interpolation_step"]
@@ -2950,6 +3320,7 @@ class WeldGuiNode(Node):
         goal.linear_motion_profile = bool(step.get("linear_motion_profile", False))
         goal.waypoints = copy.deepcopy(step["points"])
         goal.waypoint_hold_s = list(step.get("waypoint_hold_s", []))
+        goal.start_joint_positions = [float(v) for v in step.get("start_joint_positions", [])]
         touch_guarded = bool(execute_requested and step.get("touch_guard", False))
         arm = step["planning_group"].removesuffix("_manipulator")
         guard_name = step.get("path_kind", "Cartesian approach")
@@ -2976,6 +3347,7 @@ class WeldGuiNode(Node):
             self.touch_guard_triggered.clear()
             self.touch_guard_stop_complete.clear()
             self.touch_guard_stop_success = False
+            self.touch_guard_edge_pose = None
             self.active_motion_goal = None
             self.active_touch_guard = (arm, guard_name)
             self.ui.post(
@@ -3002,6 +3374,7 @@ class WeldGuiNode(Node):
                 self.cartesian_motion_client,
                 goal,
                 "Cartesian motion",
+                track_active=track_goal or bool(execute_requested),
                 on_accepted=(
                     lambda handle: handle.cancel_goal_async()
                     if touch_guarded and self.touch_guard_triggered.is_set()
@@ -3035,6 +3408,37 @@ class WeldGuiNode(Node):
         finally:
             if touch_guarded and self.active_touch_guard == (arm, guard_name):
                 self.active_touch_guard = None
+
+    def _closest_corrected_joint_target(self, step, target_pose):
+        """IK for a corrected named pose that stays near its stored joints: KDL may answer with full-turn shifted joints
+        or the flipped wrist (P2 weld_wait 2026-10-15: up to 641 deg away -> no plan). Tries the stored joints, the
+        current joints and wrist-turned variants as seeds, wraps full turns to the stored joints and keeps the
+        solution with the smallest largest joint change (IK/FK checked by _cleaner_corrected_joint_target)."""
+        stored = tuple(float(v) for v in step["positions"])
+        seeds = [stored]
+        current = getattr(self, "latest_joint_positions", {}) or {}
+        if all(name in current for name in step["joint_names"]):
+            seeds.append(tuple(current[name] for name in step["joint_names"]))
+        if len(stored) == 6:
+            for d4, d6 in ((math.pi, math.pi), (-math.pi, -math.pi), (math.pi, -math.pi), (-math.pi, math.pi)):
+                seeds.append(stored[:3] + (stored[3] + d4, -stored[4], stored[5] + d6))
+        best, errors = None, []
+        for seed in seeds:
+            try:
+                solution = self._cleaner_corrected_joint_target(dict(step, positions=seed), target_pose)
+            except RuntimeError as error:
+                errors.append(str(error))
+                continue
+            wrapped = tuple(nearest_joint_turn(q, s) for q, s in zip(solution, stored))
+            jump = max(abs(q - s) for q, s in zip(wrapped, stored))
+            if best is None or jump < best[0]:
+                best = (jump, wrapped)
+        if best is None:
+            raise RuntimeError("corrected pose IK failed for every seed: " + " · ".join(errors[:2]))
+        if best[0] > math.radians(170.0):
+            raise RuntimeError(f"corrected pose IK needs a {math.degrees(best[0]):.0f} deg joint change from its "
+                               "stored joints; re-teach this pose near its weld attitude")
+        return best[1]
 
     def _cleaner_corrected_joint_target(self, step, target_pose):
         """Resolve a shifted cleaner TCP before either preview or execution."""
@@ -3104,7 +3508,7 @@ class WeldGuiNode(Node):
                 return False, f"Cleaner teaching FK failed: {error}"
         if step.get("resolve_target_tcp_ik"):
             try:
-                positions = self._cleaner_corrected_joint_target(step, step["tcp_pose"])
+                positions = self._closest_corrected_joint_target(step, step["tcp_pose"])
                 step = dict(step, positions=positions)
             except (RuntimeError, ValueError) as error:
                 return False, f"Corrected named pose IK failed: {error}"
@@ -3166,7 +3570,6 @@ class WeldGuiNode(Node):
             constraint.weight = 1.0
             constraints.joint_constraints.append(constraint)
         goal.request.goal_constraints.append(constraints)
-        goal.planning_options.plan_only = not bool(execute_requested)
         goal.planning_options.look_around = False
         goal.planning_options.replan = False
         touch_guarded = bool(
@@ -3183,6 +3586,14 @@ class WeldGuiNode(Node):
                 "GOAL WAIT retract · Fastech touch guard disabled; "
                 "DI contact will not cancel this motion",
             )
+        # Ruckig smoothing caps jerk without the request's scale and stretches
+        # OMPL joint moves ~3x; plan first, then time the line to the % setting.
+        retime_joint_line = bool(
+            execute_requested and step.get("use_joint_planning", False) and not touch_guarded
+        )
+        goal.planning_options.plan_only = retime_joint_line or not bool(execute_requested)
+        if retime_joint_line:
+            return self._plan_and_execute_joint_line(step, goal)
         arm = step["planning_group"].removesuffix("_manipulator")
         if touch_guarded:
             if self.node_touch_input_states.get(arm) is None:
@@ -3250,6 +3661,68 @@ class WeldGuiNode(Node):
                 arm, step["pose_name"]
             ):
                 self.active_touch_guard = None
+
+    def _moveit_joint_limits(self, joint_names):
+        cache = self.__dict__.setdefault("_moveit_joint_limits_cache", {})
+        if not cache:
+            from ament_index_python.packages import get_package_share_directory
+            import yaml
+            path = os.path.join(get_package_share_directory("construct_moveit_config"),
+                                "config", "joint_limits.yaml")
+            with open(path, encoding="utf-8") as stream:
+                cache.update((yaml.safe_load(stream) or {}).get("joint_limits", {}))
+        limits = []
+        for name in joint_names:
+            entry = cache.get(name, {})
+            limits.append({
+                "velocity": float(entry["max_velocity"]),
+                "acceleration": float(entry["max_acceleration"]),
+                "jerk": float(entry["max_jerk"]),
+            })
+        return limits
+
+    def _plan_and_execute_joint_line(self, step, goal):
+        """Plan the joint goal with MoveIt, then execute it at the step's speed."""
+        label = step["pose_label"]
+        try:
+            result = self._send_action_goal_and_wait(self.move_group_client, goal, "MoveGroup")
+        except (RuntimeError, TimeoutError) as error:
+            return False, str(error)
+        if result.error_code.val != 1:
+            return False, f"MoveIt code {result.error_code.val}"
+        trajectory = copy.deepcopy(result.planned_trajectory)
+        joint_trajectory = trajectory.joint_trajectory
+        note = "planner timing"
+        try:
+            retimed = straight_joint_retime(
+                [list(point.positions) for point in joint_trajectory.points],
+                self._moveit_joint_limits(joint_trajectory.joint_names),
+                float(step["velocity_scale"]),
+            )
+        except (KeyError, OSError, ValueError, TypeError) as error:
+            retimed = None
+            note = f"planner timing (joint limits unavailable: {error})"
+        if retimed is not None:
+            times, positions, velocities, accelerations = retimed
+            joint_trajectory.points = []
+            for stamp, q, dq, ddq in zip(times, positions, velocities, accelerations):
+                point = JointTrajectoryPoint()
+                point.positions = [float(value) for value in q]
+                point.velocities = [float(value) for value in dq]
+                point.accelerations = [float(value) for value in ddq]
+                point.time_from_start = Duration(seconds=float(stamp)).to_msg()
+                joint_trajectory.points.append(point)
+            note = f"{float(times[-1]):.2f}s at {round(step['velocity_scale'] * 100)}% joint limits"
+        execute = ExecuteTrajectory.Goal()
+        execute.trajectory = trajectory
+        try:
+            outcome = self._send_action_goal_and_wait(
+                self.execute_trajectory_client, execute, f"{label} joint move")
+        except (RuntimeError, TimeoutError) as error:
+            return False, str(error)
+        if outcome.error_code.val != 1:
+            return False, f"{label} execution failed · MoveIt code {outcome.error_code.val}"
+        return True, f"{label} reached · stored joint state · {note}"
 
     def run_sequence_head_motion(self, step, execute_requested):
         """Move J the head to target joint1/joint2 angles (no MoveIt plan)."""
@@ -3458,6 +3931,9 @@ class WeldGuiNode(Node):
             self.ui.post(self.ui.error, result.message)
 
     def cancel_active_motion(self):
+        sensing_test = getattr(self, "precision_sensing_test", None)
+        if sensing_test is not None:
+            sensing_test.cancel()
         lock = self.__dict__.setdefault("_motion_action_lock", threading.Lock())
         with lock:
             calls = tuple(getattr(self, "_motion_action_calls", ()))

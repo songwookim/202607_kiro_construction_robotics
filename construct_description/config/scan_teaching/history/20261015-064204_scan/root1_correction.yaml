@@ -1,0 +1,152 @@
+format_version: 2
+source_scan: /home/irs/ros2_ws/scan_data/kiro_scan/20261015-024206_scan
+calib:
+  file: /home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml
+  xyz:
+  - 0.039454
+  - 0.024934
+  - -0.100543
+  rpy:
+  - 3.11659954
+  - -0.02107031
+  - 1.57079633
+computed: '2026-10-15T06:40:25'
+compare_at: 'root: wire tip (aim point) = TCP + L * torch axis; passes 2..: TCP'
+wire_tip_model_m:
+- -0.00010000000000003127
+- -0.0223999999999992
+- 0.03119999999999713
+seam_frame:
+  u:
+  - -0.05474232943404319
+  - -0.9984163168609859
+  - -0.01296671098923398
+  w:
+  - 0.9983986485984541
+  - -0.0549176212547099
+  - 0.013571785162795983
+  n:
+  - -0.014262392678493373
+  - -0.01220299559402809
+  - 0.9998238200071133
+offsets_seam_m:
+  start:
+  - -0.0011557465818745696
+  - 0.014180947415531312
+  - -0.009930013179283197
+  goal:
+  - 0.00034308442556403595
+  - 0.012391703328602828
+  - -0.010728874781044133
+offsets_world_m:
+  start:
+  - 0.014363132742904995
+  - 0.0004963082533762098
+  - -0.009720816705999447
+  goal:
+  - 0.012506098041587746
+  - -0.0008921395469629889
+  - -0.010563255709175823
+angle_convention: travel + push / - drag along the plan's travel; work + toward the
+  bevel face (Hongik / AWS A3.0)
+reference_torch_angles_deg:
+  start:
+    travel: 36.568338271451076
+    work: 15.574371817137955
+  goal:
+    travel: 37.13034712905342
+    work: 15.859683753056862
+hongik_root_torch_angles_deg:
+  travel: 42.000009747045716
+  work: 9.000047678979882
+reference_orientation_xyzw:
+- 0.707032925165845
+- -0.6262515313734835
+- 0.10745244648351737
+- 0.310431045368377
+reference_orientations_xyzw:
+  start:
+  - 0.707032925165845
+  - -0.6262515313734835
+  - 0.10745244648351737
+  - 0.310431045368377
+  goal:
+  - 0.7
+  - -0.631
+  - 0.112
+  - 0.314
+matches:
+- pass: 1
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.013
+  - -1.53
+  - 0.59
+- pass: 1
+  end: start
+  saved_as: start
+  position_m:
+  - -0.022127043701487548
+  - -1.7282129578592875
+  - 0.5882043948908755
+- pass: 2
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.017198304052081788
+  - -1.53012014378398
+  - 0.579768577674274
+- pass: 4
+  end: goal
+  saved_as: goal
+  position_m:
+  - -0.01720155709047074
+  - -1.529679763307345
+  - 0.5926291112659666
+notes: []
+report:
+- 'start: world (+14.4, +0.5, -9.7) mm = along -1.2 / lateral +14.2 / normal -9.9
+  mm, |17.4| mm'
+- 'goal: world (+12.5, -0.9, -10.6) mm = along +0.3 / lateral +12.4 / normal -10.7
+  mm, |16.4| mm'
+- 'goal - start: along +1.5 / lateral -1.8 / normal -0.8 mm (lateral / normal: seam
+  direction error; along: end position / length difference)'
+- 'pass 2 goal: measured - predicted = along -0.1 / lateral +2.8 / normal -6.5 mm
+  (measured_layout)'
+- 'pass 4 goal: measured - predicted = along -0.1 / lateral +2.6 / normal -3.1 mm
+  (measured_layout)'
+pass_deltas_seam_m:
+  measured_layout:
+    '2':
+      goal:
+      - -9.264510975221817e-05
+      - 0.002758914888861655
+      - -0.006523201084835186
+    '4':
+      goal:
+      - -0.00013343721707444114
+      - 0.002590645601677944
+      - -0.0030763993114181426
+  hongik_tcp:
+    '2':
+      goal:
+      - -0.0005618561982356286
+      - 0.010512462487615266
+      - -0.005432709975495994
+    '4':
+      goal:
+      - 1.4195412955039186e-05
+      - 0.0030775505118210804
+      - -0.0045472312572829915
+  hongik_aim:
+    '2':
+      goal:
+      - -0.00028473920911243684
+      - 0.002575518660404167
+      - -0.005958483646123374
+    '4':
+      goal:
+      - -0.0005270003111133626
+      - 0.002471477429982418
+      - -0.004971608231215799

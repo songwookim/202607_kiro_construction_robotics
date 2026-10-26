@@ -79,8 +79,9 @@ def test_sequence_builder_refreshes_cleaner_rows_without_erasing_weld():
     gui.sequence_running = False
     gui.sequence_steps = [{"type": "sleep", "seconds": 0.1, "parallel_slot": 1}]
     gui.torch_cleaner_panel = SimpleNamespace(
-        build_sequence_steps=lambda: [{"type": "named_pose", "planning_group": "right_manipulator",
-                                       "torch_clean_scenario": True, "parallel_slot": 1}],
+        build_sequence_steps=lambda cut_only=False: [{"type": "named_pose", "planning_group": "right_manipulator",
+                                                      "torch_clean_scenario": True, "parallel_slot": 1,
+                                                      "cut_only": cut_only}],
         status=SimpleNamespace(set=Mock()), folder=SimpleNamespace(get=lambda: "cleaner"),
     )
     gui.refresh_sequence_table = Mock()
@@ -88,6 +89,8 @@ def test_sequence_builder_refreshes_cleaner_rows_without_erasing_weld():
     gui.log = Mock()
     assert gui.build_torch_clean_sequence() is True
     assert [step["parallel_slot"] for step in gui.sequence_steps] == [1, 2]
+    assert gui.build_torch_clean_sequence(cut_only=True) is True      # the cut-only rows replace the cleaner rows
+    assert [step.get("cut_only") for step in gui.sequence_steps] == [None, True]
     assert gui.build_torch_clean_sequence() is True
     assert len(gui.sequence_steps) == 2
     gui.error.assert_not_called()
@@ -257,8 +260,8 @@ def test_saved_cleaner_sequence_uses_key_poses_returns_to_start_and_feeds_075s()
 def test_cleaner_key_map():
     from construct_robot.gui.torch_cleaner_panel import CLEANER_KEY_POSES
     assert CLEANER_KEY_POSES == {
-        "u": "start", "i": "clear1_top", "j": "clear1_inside", "o": "clear2_top",
-        "k": "clear2_inside", "p": "clear3_top", "l": "clear3_inside",
+        "u": "start", "i": "clear1_1", "j": "clear1_2", "m": "clear1_3", "n": "clear1_4", "h": "clear1_5",
+        "o": "clear2_top", "k": "clear2_inside", "p": "clear3_top", "l": "clear3_inside",
     }
 
 
@@ -282,7 +285,7 @@ def keyboard_gui(cleaner=True, arm="right"):
     return gui
 
 
-@pytest.mark.parametrize("key,name", [("u", "start"), ("j", "clear1_inside"), ("l", "clear3_inside")])
+@pytest.mark.parametrize("key,name", [("u", "start"), ("j", "clear1_2"), ("n", "clear1_4"), ("h", "clear1_5"), ("l", "clear3_inside")])
 def test_cleaner_tab_keys_save_their_pose(key, name):
     gui = keyboard_gui()
     assert gui.keyboard_teaching_shortcut_key(SimpleNamespace(keysym=key)) == "break"

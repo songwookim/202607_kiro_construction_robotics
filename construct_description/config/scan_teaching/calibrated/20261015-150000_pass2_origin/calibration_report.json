@@ -1,0 +1,223 @@
+{
+  "source_scan": "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan",
+  "teaching_folder": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/calibrated/20261015-150000_pass2_origin",
+  "backup": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/history/20261015-145751_before_pass2_origin_calibration",
+  "anchor_pass": 2,
+  "reference_start_saved": "2026-10-15T14:43:43",
+  "reference_goal_saved": "2026-10-15T01:55:12",
+  "max_anchor_wire_tip_error_mm": 0.0,
+  "targets": [
+    {
+      "pass": 1,
+      "end": "start",
+      "tcp_world_mm": [
+        -20.46069405505767,
+        -1727.6709418578375,
+        579.7952819696624
+      ],
+      "wire_tip_world_mm": [
+        -8.98961187047683,
+        -1746.2267832610332,
+        552.9962973558966
+      ],
+      "from_root_along_face_up_mm": [
+        1.2476242501722122e-16,
+        -3.4671624775592246e-15,
+        1.675839877270733e-17
+      ]
+    },
+    {
+      "pass": 1,
+      "end": "goal",
+      "tcp_world_mm": [
+        -9.197519218713975,
+        -1529.9810122418662,
+        581.8097413856375
+      ],
+      "wire_tip_world_mm": [
+        2.273562965866862,
+        -1548.536853645062,
+        555.0107567718717
+      ],
+      "from_root_along_face_up_mm": [
+        2.651201531615951e-16,
+        -7.367720264813353e-15,
+        3.561159739200308e-17
+      ]
+    },
+    {
+      "pass": 2,
+      "end": "start",
+      "tcp_world_mm": [
+        -28.46129311177906,
+        -1727.8097371159558,
+        577.7540041342482
+      ],
+      "wire_tip_world_mm": [
+        -7.015080178214624,
+        -1746.3600208507294,
+        558.0046376339673
+      ],
+      "from_root_along_face_up_mm": [
+        -4.12855426412064e-14,
+        1.9999999999999991,
+        5.000000000000038
+      ],
+      "anchor_wire_tip_error_mm": 0.0
+    },
+    {
+      "pass": 2,
+      "end": "goal",
+      "tcp_world_mm": [
+        -17.198118275435363,
+        -1530.1198074999845,
+        579.7684635502234
+      ],
+      "wire_tip_world_mm": [
+        4.248094658129073,
+        -1548.670091234758,
+        560.0190970499424
+      ],
+      "from_root_along_face_up_mm": [
+        -4.1271990114050334e-14,
+        1.9999999999999987,
+        5.000000000000038
+      ],
+      "anchor_wire_tip_error_mm": 0.0
+    },
+    {
+      "pass": 3,
+      "end": "start",
+      "tcp_world_mm": [
+        -24.489457052684376,
+        -1727.6064376383858,
+        586.2771727366088
+      ],
+      "wire_tip_world_mm": [
+        -13.018374868103539,
+        -1746.1622790415815,
+        559.4781881228431
+      ],
+      "from_root_along_face_up_mm": [
+        -6.940747884254331e-15,
+        -4.000000000000002,
+        6.499999999999958
+      ]
+    },
+    {
+      "pass": 3,
+      "end": "goal",
+      "tcp_world_mm": [
+        -13.226282216340687,
+        -1529.9165080224147,
+        588.2916321525839
+      ],
+      "wire_tip_world_mm": [
+        -1.7552000317598502,
+        -1548.4723494256102,
+        561.4926475388182
+      ],
+      "from_root_along_face_up_mm": [
+        -6.696802395445093e-15,
+        -4.000000000000009,
+        6.499999999999958
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "start",
+      "tcp_world_mm": [
+        -25.90982095264261,
+        -1727.8009198736634,
+        586.7733836771652
+      ],
+      "wire_tip_world_mm": [
+        -9.037914666296407,
+        -1746.3491899034216,
+        562.9954314911013
+      ],
+      "from_root_along_face_up_mm": [
+        1.070834229602032e-13,
+        1.7466205137939043e-15,
+        10.000000000000034
+      ]
+    },
+    {
+      "pass": 4,
+      "end": "goal",
+      "tcp_world_mm": [
+        -14.64664611629892,
+        -1530.110990257692,
+        588.7878430931403
+      ],
+      "wire_tip_world_mm": [
+        2.2252601700472834,
+        -1548.6592602874503,
+        565.0098909070764
+      ],
+      "from_root_along_face_up_mm": [
+        1.0727315834038816e-13,
+        -3.891230783130719e-15,
+        10.000000000000034
+      ]
+    }
+  ],
+  "offsets_world_mm": {
+    "start": [
+      12.922541942148374,
+      -6.883155773234728,
+      -9.46930923667255
+    ],
+    "goal": [
+      17.01532960160338,
+      -8.446101060985312,
+      -9.928686536602505
+    ]
+  },
+  "unchanged_source_sha256": {
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/estimate.json": "44a27d8ebb46fd673f65bdd76c89e4be9bd8287fd8ffb1e1c19acca25735fa21",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/calib_used.json": "39f8b81373f9da4429bfe446e352ccbfe79c9b07c90e8bbee043c2fa1b537f36",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_1_info.yaml": "0c0897256221a0dbf9de041b0eba99cf107f6d83d440b8f8134ac63883a1132e",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_2_info.yaml": "67db0def6ea71d6b70a8ad6671fc9934b88a9d986bb64f8f2f649a0b85c0ad9f",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_2.yaml": "0ea08e11690b4053a4cfb934586c67f5f24a551641392056239d33cfce994e67",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_3_info.yaml": "d36864d77703dd6a58bb062883b590659db9033bd2e0ef9de54a7723687bb138",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_3.yaml": "75cc70cd14a94acce3135b895e4838e64a6723992ee87d021d1685b50524ba61",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_4_info.yaml": "ed66f3e8cc702df75d39510021c093bd37dc8493c72be2451600677546bf4eb6",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_4.yaml": "67fc04df400b22c7254b4e71a0e88fd4c11a80fecf8f3f7019c07f7b47645545",
+    "/home/irs/ros2_ws/scan_data/kiro_scan/20261015-140509_scan/hongik_estimate/kiro/pass_1.yaml": "a1ce337819da840619ddacb33c6c562c8d460a2a21706efc74626ae3cc4dbfbb",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/root1_reference.yaml": "9f8b7391899e3ab5f9a52ab5282a6b03c174cd728d6b0c80049841640d4f97c7",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/wire_tip_offset.yaml": "7a793f1c79120291ddef103e14598233c96c16a6d29e89c4c4166bb0ae0fc6f2",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/eoat_kiro_handeye.yaml": "7773fc3b6bb487797f3243edf0f4a8a952d03df4304a4c697baa70df61585915",
+    "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/pass_orientations.yaml": "f97dd75207f5c961f40fda23861dd0a1c96dc8c0284dbf2ea7fc9c0044b5ecf7"
+  },
+  "robot_motion_executed": false,
+  "tests": [
+    {
+      "passed": 66,
+      "files": [
+        "test_scan_reference.py",
+        "test_scan_four_pass.py",
+        "test_tcp_calibration.py",
+        "test_four_pass_correction.py"
+      ]
+    },
+    {
+      "passed": 56,
+      "files": [
+        "test_precision_sensing_test.py",
+        "test_scan_teaching.py",
+        "test_kiro_estimate.py"
+      ]
+    }
+  ],
+  "runtime_import_verified": true,
+  "export_sha256": {
+    "pass_1.yaml": "fa120249f55e53aea5c665f2d54238945c475bc8b866f0f652a271eef0201989",
+    "pass_2.yaml": "b9cd00e44042b49374d0787e2c5a2394572aebef87f69b7564bb507ff6148908",
+    "pass_3.yaml": "92ae03b9209a5517f9ff25fece20b64dfba7083aa2b1e490b208aa447fad8af6",
+    "pass_4.yaml": "76cd471a6c227aa1a1cfeeae029678d9b524cd20483f5a3e7dabaef0acc6f547",
+    "pass_design_layout.yaml": "2cf5de7cc89f09fde8429bf47ea0d049f33a8aab0128d8f3d4a6db3a0930ce58",
+    "reference_snapshot.yaml": "9f8b7391899e3ab5f9a52ab5282a6b03c174cd728d6b0c80049841640d4f97c7",
+    "root1_correction.yaml": "cb8167d8afa361945509302171447536a44047401d7fe23911d1f75e8ae238fd"
+  }
+}

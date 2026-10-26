@@ -9,6 +9,7 @@ import yaml
 from construct_robot.core.cartesian_path_common import pose_is_valid
 from construct_robot.core.seam_geometry import _pose_position_tuple
 from construct_robot.core.weld_quality_metrics import (
+    tcp_motion_profile,
     _number, analyze_weld_quality, format_quality_summary,
 )
 from construct_robot.io.teaching_yaml import _pose_from_yaml_dict, atomic_text_writer
@@ -100,7 +101,8 @@ def format_weld_feedback_log(document):
         f"WCR       : {'DETECTED' if feedback['wcr_seen'] else 'NOT DETECTED'}",
         f"SAMPLES   : RX {feedback['rx_samples']} / "
         f"welding {feedback['welding_samples']} / "
-        f"TCP {len(document.get('tcp_trajectory', ())) }",
+        f"TCP {len(document.get('tcp_trajectory', ())) } / "
+        f"JOINT {len(document.get('joint_trajectory', ())) }",
         "===================================================",
         "",
         "[commanded]",
@@ -221,6 +223,13 @@ def format_weld_feedback_log(document):
             f"{int(bool(sample.get('torch_collision')))}"
         )
 
+    profile = tcp_motion_profile(document)
+    lines.extend(("", "[tcp_motion_profile]",
+                  "# seam axis, TF-stamp time, local quadratic over 1 s: constant speed <=> acc ~ 0",
+                  "elapsed_s along_mm speed_mm_s acc_mm_s2"))
+    for t, along, speed, acc in (profile or {}).get("rows", ()):
+        lines.append(f"{t:.3f} {along:.3f} {speed:.3f} {acc:.3f}")
+
     lines.extend((
         "",
         "[tcp_trajectory]",
@@ -255,6 +264,18 @@ def format_weld_feedback_log(document):
             f"{float(sample.get('progress', 0.0)):.5f} "
             f"{int(sample.get('waypoint_index', -1))} {phase}"
         )
+    lines.extend((
+        "",
+        "[joint_trajectory]",
+        "source=/joint_states",
+        "position_unit=rad",
+        "joint_order={arm}_manipulator_joint1 ... {arm}_manipulator_joint6",
+        "elapsed_s joint_stamp_s arm j1_rad j2_rad j3_rad j4_rad j5_rad j6_rad",
+    ))
+    for sample in document.get("joint_trajectory", ()):
+        positions = " ".join(f"{float(v):.9f}" for v in sample["positions_rad"])
+        lines.append(f"{float(sample['elapsed_s']):.6f} {float(sample['joint_stamp_s']):.9f} "
+                     f"{sample['arm']} {positions}")
     return "\n".join(lines) + "\n"
 
 

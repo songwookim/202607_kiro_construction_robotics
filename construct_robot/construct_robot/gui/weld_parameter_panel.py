@@ -70,6 +70,11 @@ class WeldParameterPanel:
         self.host = host
         self.latest_log_path = latest_log_path
         self._refresh_pending = None
+        self._log_signature = None
+        self._last_log = {}
+        self._rendered_rows = []
+        self._row_items = []
+        self._source_text = None
         header = ttk.Frame(parent)
         header.pack(fill=tk.X)
         self.source_label = ttk.Label(header, text="")
@@ -111,30 +116,54 @@ class WeldParameterPanel:
         self._refresh_pending = self.tree.after(delay_ms, self.refresh)
 
     def refresh(self):
+        if self._refresh_pending is not None:
+            self.tree.after_cancel(self._refresh_pending)
         self._refresh_pending = None
-        last = read_weld_log_sections(self.latest_log_path)
+        try:
+            stat = self.latest_log_path.stat()
+            signature = (str(self.latest_log_path), stat.st_ino, stat.st_size,
+                         stat.st_mtime_ns, stat.st_ctime_ns)
+        except OSError:
+            signature = None
+        if signature != self._log_signature:
+            self._last_log = read_weld_log_sections(self.latest_log_path) if signature else {}
+            self._log_signature = signature
+        last = self._last_log
         ended = last.get("header", {}).get("ended")
-        self.source_label.configure(
-            text=f"직전 용접: {ended} · {self.latest_log_path.name}" if ended
+        source_text = (
+            f"직전 용접: {ended} · {self.latest_log_path.name}" if ended
             else "직전 용접 로그 없음"
         )
+        if source_text != self._source_text:
+            self.source_label.configure(text=source_text)
+            self._source_text = source_text
+        rows = list(build_rows(current_settings(self.host), last))
+        if [row[:3] for row in rows] == [row[:3] for row in self._rendered_rows]:
+            for row, previous, (item, stripe) in zip(rows, self._rendered_rows, self._row_items):
+                if row != previous:
+                    self.tree.item(item, values=row[2:6],
+                                   tags=("changed",) if row[6] else (stripe,))
+            self._rendered_rows = rows
+            return
         self.tree.delete(*self.tree.get_children())
         groups = {}
-        for group, label, unit, now, previous, measured, changed in build_rows(
-            current_settings(self.host), last
-        ):
+        group_counts = {}
+        self._row_items = []
+        for group, label, unit, now, previous, measured, changed in rows:
             if group not in groups:
                 groups[group] = self.tree.insert(
                     "", tk.END, text=f"  {group}", open=True, tags=("group",)
                 )
-            stripe = "odd" if len(self.tree.get_children(groups[group])) % 2 else "even"
-            self.tree.insert(
+                group_counts[group] = 0
+            stripe = "odd" if group_counts[group] % 2 else "even"
+            group_counts[group] += 1
+            item = self.tree.insert(
                 groups[group], tk.END, text=f"   {label}",
                 values=(unit, now, previous, measured),
                 # A changed row gets only the highlight: Tk would let the
                 # stripe background win otherwise.
                 tags=("changed",) if changed else (stripe,),
             )
-        self.tree.configure(height=sum(
-            1 + len(self.tree.get_children(group)) for group in groups.values()
-        ))
+            self._row_items.append((item, stripe))
+        self.tree.configure(height=len(groups) + len(rows))
+        self._rendered_rows = rows

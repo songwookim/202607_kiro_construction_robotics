@@ -1,0 +1,83 @@
+--- a/scan_l0/scan_l0/autoteach.py
++++ b/scan_l0/scan_l0/autoteach.py
+@@ -3129,25 +3129,39 @@
+         js = self._joints_now()
+         return None if js is None else {n: float(v) for n, v in zip(js[0], js[1])}
+ 
+-    def _joint_move(self, ranked: list, T_goal: np.ndarray, name: str, what: str) -> None:
+-        """관절 공간 이동 (MoveIt: 관절 직선을 상태 검사, 막히면 OMPL): 후보 순서대로 보내지 않고 계획해 보고 첫 번째로 되는 해 → 확인 →
+-        같은 JTC 감시 경로로 실행 (판에서 먼 이동; 장면 상자가 시편·바닥을 피한다)."""
++    def _joint_move(self, ranked: list, T_goal: np.ndarray, name: str, what: str) -> dict:
++        """관절 공간 이동 (MoveIt: 관절 직선을 상태 검사, 막히면 OMPL): 후보를 모두 계획해 보고 (보내지 않는다) 계획 이동 시간이 가장 짧은 해
++        → 확인 → 같은 JTC 감시 경로로 실행 (판에서 먼 이동; 장면 상자가 시편·바닥을 피한다). 이동 시간은 플랫폼 한계로 재시간한 실제 시간이라
++        큰 손목·툴 회전은 저절로 길다 (KIRO 현장 2026-10-14: 첫 통과 해가 joint4 260°, 플랜지 352° 회전). 실행한 후보를 돌려준다."""
+         be = self.rs.backend
+         self._check_estop(f"before move '{name}'")
+         T_from = self._T_now()
+         v = min(float(self.transit_speed), self.cfg.v_eff_max_mps)
+-        pick, fails = None, []
+-        for c in ranked:
++        planned, fails, outcomes = [], [], []
++        for rank, c in enumerate(ranked, 1):
+             chk = be.check_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s)
+             if chk.get("ok"):
+-                pick = (c, chk)
+-                break
+-            fails.append(str(chk.get("reason")))
+-        if pick is None:
++                planned.append((float((chk.get("plan") or {}).get("duration_s") or math.inf), rank, c))
++            else:
++                fails.append(str(chk.get("reason")))
++            outcomes.append((rank, c, chk))
++        if not planned:
+             self._record_move(name, "joint", T_from, T_goal, {}, v, refused="; ".join(fails))
+             raise _Abort(STATUS_REFUSED, f"{name}: no collision-free joint-space path from the current pose to any of the {len(ranked)} arm "
+                                          f"configurations for {what}: {fails[:2]} (nothing sent)", category="motion")
+-        c, chk = pick
++        _best_s, best_rank, c = min(planned, key=lambda p: (p[0], p[1]))
++        for rank, cand, chk in outcomes:
++            wrist = np.round(np.degrees(np.asarray(cand["q"], dtype=float)[3:6]), 1).tolist()
++            plan_s = (chk.get("plan") or {}).get("duration_s")
++            state = ("CHOSEN, " if rank == best_rank else "") + (f"planned {float(plan_s):.1f} s" if chk.get("ok") and plan_s is not None
++                                                                 else f"refused: {chk.get('reason')}")
++            self._decide("move", f"{name} candidate {rank}/{len(ranked)}: wrist (joint4, joint5, joint6) {wrist} deg - {state}")
++        # check_joint keeps the plan it checked last for the next move_joint (OMPL is stochastic): check the chosen one once more.
++        chk = be.check_joint(c["q"], v, self.accel, timeout_s=self.motion_timeout_s)
++        if not chk.get("ok"):
++            self._record_move(name, "joint", T_from, T_goal, {}, v, refused=str(chk.get("reason")))
++            raise _Abort(STATUS_REFUSED, f"{name}: the chosen arm configuration (candidate {best_rank}) failed its final plan check: "
++                                         f"{chk.get('reason')} (nothing sent)", category="motion")
+         dur = float((chk.get("plan") or {}).get("duration_s") or 0.0)
+         if self.motion_timeout_s is not None and dur >= float(self.motion_timeout_s):
+             self._record_move(name, "joint", T_from, T_goal, {}, v, refused=f"planned {dur:.1f} s >= --motion-timeout")
+@@ -3182,6 +3196,7 @@
+         if not res.ok:
+             raise _Abort(STATUS_ABORTED, f"move '{name}': {res.reason}", safety=True, category="motion")
+         self._p(f"      -> OK {res.reason} duration={res.motion_duration_s:.2f} s")
++        return c
+ 
+     def _support_probe(self) -> None:
+         """3G: 아래 착점 옆 판 면을 내려다보는 정지 측정 한 번 → 지지면 (테이블·지그 윗면). 자세는 계산 (acquisition.plan_support_probe:
+@@ -3617,14 +3632,17 @@
+                                              "specimen is out of reach or too close to the robot for this tool"
+                                              + ("" if self._motion_sent else " (nothing sent)"), category="motion")
+         self._set_progression(best["sign"])
+-        c0 = best["ranked"][0]
+-        self._decide("acquire", f"{L(name)}: progression {best['sign']:+d}, arm configuration {np.round(np.degrees(c0['q']), 1).tolist()} deg "
+-                                f"(kept for the whole job: the following moves are continuous) - joint-space move to "
+-                                f"{best['retreat'] * 1e3:.0f} mm in front of the dwell, then {phase} to the dwell", chosen=_jsonable(c0))
++
++        def kept(c):
++            self._decide("acquire", f"{L(name)}: progression {best['sign']:+d}, arm configuration {np.round(np.degrees(c['q']), 1).tolist()} deg "
++                                    f"(kept for the whole job: the following moves are continuous) - joint-space move to "
++                                    f"{best['retreat'] * 1e3:.0f} mm in front of the dwell, then {phase} to the dwell", chosen=_jsonable(c))
+         if self.dry_run:
++            kept(best["ranked"][0])                             # nothing is planned in a dry run: the first-ranked configuration
+             return
+         self._sensor()                                          # 센서 연결·초기화는 첫 이동 전에 (실패하면 아무것도 보내지 않았다)
+-        self._joint_move(best["ranked"], best["T_pre"], f"acquire_{L(name)}", f"{best['retreat'] * 1e3:.0f} mm in front of the {L(name)} dwell")
++        kept(self._joint_move(best["ranked"], best["T_pre"], f"acquire_{L(name)}",
++                              f"{best['retreat'] * 1e3:.0f} mm in front of the {L(name)} dwell"))
+         self._local_move(best["T_in"], phase, f"acquire_{L(name)}_in", speed=self.descend_speed,
+                          extra=f"(onto the {L(name)} dwell, {best['retreat'] * 1e3:.0f} mm toward the plate)")
+ 

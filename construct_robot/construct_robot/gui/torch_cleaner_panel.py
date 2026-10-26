@@ -4,7 +4,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
-from construct_robot.application.weld_sequence_builder import build_cleaner_sequence_steps
+from construct_robot.application.weld_sequence_builder import build_cleaner_sequence_steps, cleaner_cut_only_tokens
 from construct_robot.core.task_teaching_model import CleanerTeachingState
 from construct_robot.io.teaching_yaml import (
     cleaner_pose_path,
@@ -15,8 +15,12 @@ from construct_robot.io.teaching_yaml import (
 # Torch Cleaner tab keyboard shortcuts: key -> cleaner teaching pose.
 CLEANER_KEY_POSES = {
     "u": "start",
-    "i": "clear1_top",
-    "j": "clear1_inside",
+    # Cleaner 1 step poses 1-1 .. 1-5 (2026-10-15; replaced clear1_top / clear1_inside)
+    "i": "clear1_1",
+    "j": "clear1_2",
+    "m": "clear1_3",
+    "n": "clear1_4",
+    "h": "clear1_5",
     "o": "clear2_top",
     "k": "clear2_inside",
     "p": "clear3_top",
@@ -33,7 +37,7 @@ class TorchCleanerPanel:
         self.selected = tk.StringVar(value="start")
         self.selected_label = tk.StringVar()
         self.position_names = []
-        self.order = tk.StringVar(value="start, clear1_top, clear1_inside, WIRE_FORWARD:0.75, DO7:ON, DO7:OFF, clear1_top, clear2_top, clear2_inside, DO6:2, clear2_top, clear3_top, clear3_inside, DO5:1, clear3_top, start")
+        self.order = tk.StringVar(value="start, clear1_1, clear1_2, clear1_3, DO7:ON, clear1_4, DO7:OFF, WIRE_FORWARD:0.75, DO7:ON, clear1_5, DO7:OFF, clear2_top, clear2_inside, DO6:2, clear2_top, clear3_top, clear3_inside, DO5:1, clear3_top, start")
         self.status = tk.StringVar(value="Select a numbered teaching pose, or build the cleaner sequence")
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
@@ -48,6 +52,12 @@ class TorchCleanerPanel:
         ttk.Button(row, text="Build → Sequence Builder", command=self.send_to_sequence).pack(side=tk.LEFT)
         ttk.Button(row, text="Plan", command=lambda: self.plan_or_execute(False)).pack(side=tk.LEFT)
         ttk.Button(row, text="Execute", command=lambda: self.plan_or_execute(True)).pack(side=tk.LEFT)
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X)
+        ttk.Label(row, text="Wire cut only (Cleaner 1):").pack(side=tk.LEFT)
+        ttk.Button(row, text="Cut only → Sequence Builder", command=self.send_cut_to_sequence).pack(side=tk.LEFT)
+        ttk.Button(row, text="Plan cut", command=lambda: self.plan_or_execute_cut(False)).pack(side=tk.LEFT)
+        ttk.Button(row, text="Execute cut", command=lambda: self.plan_or_execute_cut(True)).pack(side=tk.LEFT)
         ttk.Label(parent, textvariable=self.status, wraplength=850).pack(anchor=tk.W)
         ttk.Label(
             parent,
@@ -104,7 +114,20 @@ class TorchCleanerPanel:
             return
         self.gui.run_sequence(True, execute, steps_override=steps)
 
-    def build_sequence_steps(self):
+    def send_cut_to_sequence(self):
+        self.gui.build_torch_clean_sequence(cut_only=True)
+
+    def plan_or_execute_cut(self, execute):
+        """Run only the cutter part (start -> Cleaner 1 -> wire forward -> DO7 cut -> start)."""
+        try:
+            self.idle()
+            steps = self.build_sequence_steps(cut_only=True)
+        except Exception as error:
+            self.gui.error(f"Cleaner cut: {error}")
+            return
+        self.gui.run_sequence(True, execute, steps_override=steps)
+
+    def build_sequence_steps(self, cut_only=False):
         """Read latest teaching YAML and delegate sequence generation."""
         self.refresh_teaching_index()
         order_path = Path(self.folder.get()) / "sequence.yaml"
@@ -114,6 +137,8 @@ class TorchCleanerPanel:
         if hasattr(self, "state"):
             self.state.set_order(tokens)
             tokens = self.state.tokens
+        if cut_only:
+            tokens = cleaner_cut_only_tokens(tokens)
         return build_cleaner_sequence_steps(
             self.folder.get(), tokens, self.gui.velocity_percent.get(), self.load_pose
         )

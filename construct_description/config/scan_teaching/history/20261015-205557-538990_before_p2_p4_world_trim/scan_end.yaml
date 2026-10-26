@@ -1,0 +1,43 @@
+format_version: 1
+planning_group: right_manipulator
+joint_state:
+  names:
+  - right_manipulator_joint1
+  - right_manipulator_joint2
+  - right_manipulator_joint3
+  - right_manipulator_joint4
+  - right_manipulator_joint5
+  - right_manipulator_joint6
+  positions_rad:
+  - 4.951147231064692
+  - 1.2467922869922758
+  - 1.3770363106314731
+  - 5.097938539820987
+  - 0.10771279032263736
+  - -0.2319006774520751
+tcp_pose_world:
+  position_m:
+    x: -0.02065573901123606
+    y: -1.7463208300676754
+    z: 0.5954968250932353
+  orientation_xyzw:
+    x: 0.7259506885900032
+    y: -0.68744768684997
+    z: -0.019070746900000563
+    w: -0.0068979847059011
+capture_provenance:
+  capture_source: measured_joint_fk
+  tcp_source: moveit_fk
+  joint_state_timestamp: 1791979175.5075274
+  joint_state_age_ms: 0.3258220021962188
+  tf_age_ms: 10.020971298217773
+  tf_fresh: true
+  tf_fk_position_error_mm: 7.131886835281874e-13
+  tf_fk_orientation_error_deg: 0.0
+  scan_point: end
+  scan_point_frame: hongik_weld_link
+  scan_point_parent: World
+  scan_point_world_m:
+  - -0.021019835739795375
+  - -1.7455961205640738
+  - 0.5755132761164484

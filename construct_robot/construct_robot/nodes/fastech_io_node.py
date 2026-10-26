@@ -16,6 +16,11 @@ from construct_robot.io.fastech_ethernet import FastechEthernetClient
 
 TOUCH_INPUT_CHANNEL = 4
 TOUCH_OUTPUT_CHANNEL = 0
+# Unchanged state is re-published at this period only.  A change (touch edge,
+# output readback, disconnect) is published in the same poll as before; the
+# topics are latched, so subscribers never miss the current state.  Every
+# 100 Hz duplicate cost each subscriber (the GUI) a Python callback.
+STATE_HEARTBEAT_S = 0.5
 
 
 class FastechConnectionManager:
@@ -113,6 +118,9 @@ class FastechIONode(Node):
         self._stop_event = threading.Event()
         self._last_error = ""
         self._last_raw_contact = None
+        self._published_state = None
+        self._published_contact = None
+        self._published_at = 0.0
 
         state_qos = QoSProfile(depth=1)
         state_qos.reliability = ReliabilityPolicy.RELIABLE
@@ -162,13 +170,18 @@ class FastechIONode(Node):
                 "Fastech device does not expose physical "
                 f"DI{self.touch_input_channel}"
             )
-        self._state_publisher.publish(
-            self._state_message(
-                snapshot,
-                connected=True,
-                detail=detail or self._manager.device_detail,
-            )
+        detail = detail or self._manager.device_detail
+        state = (
+            tuple(snapshot.inputs), tuple(snapshot.outputs),
+            int(snapshot.raw_input), int(snapshot.raw_output), str(detail),
         )
+        now = time.monotonic()
+        heartbeat = now - self._published_at >= STATE_HEARTBEAT_S
+        if heartbeat or state != self._published_state:
+            self._state_publisher.publish(
+                self._state_message(snapshot, connected=True, detail=detail)
+            )
+            self._published_state = state
         raw_contact = bool(snapshot.inputs[self.touch_input_channel])
         if raw_contact != self._last_raw_contact:
             self.get_logger().info(
@@ -177,14 +190,21 @@ class FastechIONode(Node):
                 f"raw_input=0x{int(snapshot.raw_input):08X}"
             )
             self._last_raw_contact = raw_contact
-        contact = Bool()
-        contact.data = raw_contact
-        self._contact_publisher.publish(contact)
+        if heartbeat or raw_contact != self._published_contact:
+            contact = Bool()
+            contact.data = raw_contact
+            self._contact_publisher.publish(contact)
+            self._published_contact = raw_contact
+        if heartbeat:
+            self._published_at = now
 
     def _publish_disconnected(self, detail):
         self._state_publisher.publish(
             self._state_message(connected=False, detail=detail)
         )
+        # The next connected poll is a change for every subscriber.
+        self._published_state = None
+        self._published_contact = None
 
     def _attempt_connect(self):
         with self._operation_lock:

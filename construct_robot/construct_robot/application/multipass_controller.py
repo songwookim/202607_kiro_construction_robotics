@@ -20,6 +20,7 @@ the host so existing entry points and host-level overrides keep working.
 """
 
 import copy
+from functools import partial
 import hashlib
 import math
 from pathlib import Path
@@ -1208,6 +1209,8 @@ class MultipassController:
                     copy.deepcopy(current[endpoint]),
                     tuple(joint_states[endpoint][0]),
                     pose_name,
+                    # generated pass files: IK from their stored joints (same arm branch)
+                    *((tuple(joint_states[endpoint][1]),) if reference.get("requires_ik") else ()),
                 )
                 for endpoint, pose_name in (
                     ("start_wait", "weld_start_wait"),
@@ -1216,8 +1219,21 @@ class MultipassController:
                     ("goal", "weld_end"),
                 )
             )
+            if reference.get("requires_ik"):
+                # Generated pass files (scan estimate) carry only an IK seed in
+                # every joint state, the extra poses included.
+                ik_targets += tuple(
+                    (endpoint, "right_manipulator", copy.deepcopy(stored[3]),
+                     tuple(stored[1]), pose_name, tuple(stored[2]))
+                    for pose_name, endpoint in (
+                        ("weld_wait", "start"), ("weld_finish", "goal"),
+                    )
+                    for stored in (additional_poses.get(pose_name),)
+                    if stored is not None
+                )
             threading.Thread(
-                target=host.node.resolve_tcp_joint_states,
+                target=partial(host.node.resolve_tcp_joint_states,
+                               task_position=getattr(host, "welding_position", None)),
                 args=(ik_targets,),
                 daemon=True,
             ).start()

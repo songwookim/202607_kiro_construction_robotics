@@ -1,8 +1,10 @@
 import copy
+from functools import partial
 import math
 from pathlib import Path
 import queue
 import signal
+import sys
 import threading
 import time
 import tkinter as tk
@@ -53,6 +55,11 @@ from construct_robot.core.work_cycle import assemble_work_cycle
 from construct_robot.gui.torch_cleaner_panel import CLEANER_KEY_POSES
 from construct_robot.gui.weld_parameter_forms import check, combo, entry, parameter_tables, spin
 from construct_robot.gui.weld_parameter_panel import WeldParameterPanel
+from construct_robot.gui.precision_sensing_test_panel import (
+    ORIENTATION_KEYS, PrecisionSensingTestPanel, REFERENCE_KEYS, SCAN_KEY_POINTS, SCAN_POINT_LABELS, TCP_CAL_KEYS,
+)
+from construct_robot.gui.scanner_connection_panel import ScannerConnectionPanel
+from construct_robot.gui.status_bar import EventLogPanel, OperatorStatusBar
 from construct_robot.core.weld_quality_metrics import calculate_weld_production_metrics
 from construct_robot.core.seam_geometry import (
     CORNER_TOUCH_NAMES,
@@ -80,6 +87,7 @@ from construct_robot.core.seam_geometry import (
 )
 from construct_robot.core.keyboard_jog import (
     KEYBOARD_JOG_SELECTIONS,
+    KEYBOARD_LINEAR_SPEEDS_MM_S,
     keyboard_jog_velocity,
     keyboard_velocity_vector,
     next_keyboard_speed,
@@ -132,6 +140,10 @@ from construct_robot.application.weld_sequence_builder import (
     resolve_weld_endpoints,
     validate_required_weld_poses,
 )
+from construct_robot.application import scan_four_pass
+from construct_robot.application.welding_tasks import (
+    WeldingTaskController, task_config_directory, task_feedback_directory,
+)
 from construct_robot.application.multipass_controller import MultipassController
 from construct_robot.application.seam_correction_controller import (
     SeamCorrectionController,
@@ -141,6 +153,7 @@ from construct_robot.application.weld_execution_controller import (
     WeldFeedbackRecorder,
     weld_status_snapshot,
 )
+from construct_robot.io.scan_cycle_log import record_cycle_event
 from construct_robot.application.sequence_executor import (
     SequenceExecutor,
     attach_execution_conditions,
@@ -191,7 +204,6 @@ FASTECH_ALL_OFF_CHANNELS = (0, 3, 4, 5, 6, 7)
 TEACHING_KEY_TAG = "TeachingKeys"
 FASTECH_TOUCH_BACKEND = "fastech_ethernet"
 
-KEYBOARD_LINEAR_SPEEDS_MM_S = (5.0, 15.0, 45.0)
 KEYBOARD_ANGULAR_SPEEDS_DEG_S = (3.0, 7.0, 10.0)
 TCP_FEEDBACK_SAMPLE_PERIOD_S = 0.01  # 100 Hz logging poll; unique TF rate is measured separately.
 KEYBOARD_TEACHING_POSE_SHORTCUTS = {
@@ -361,7 +373,7 @@ class WeldActionGui:
         container = ttk.Frame(parent)
         # Keep backing widgets alive for shared callbacks, but retire these
         # panels from the operator UI.
-        visible = key not in {"path_test", "planned_path", "digital_io"}
+        visible = key not in {"path_test", "planned_path", "digital_io", "weld_parameter_table"}
         if visible:
             container.pack(fill=tk.X, pady=2)
         section_styles = (
@@ -453,12 +465,15 @@ class WeldActionGui:
         return content
 
     def _operator_page_changed(self, _event=None):
+        self._sync_keyboard_fast_jog()
         if self.keyboard_velocity_active_key is not None:
             self._stop_keyboard_jog_command("STOPPED · task changed")
         selected = self.operator_notebook.select()
         if selected == str(self.task_notebook.master):
             selected = self.task_notebook.select()
-            task = "cleaner" if selected == self.task_notebook.tabs()[1] else "welding"
+            position = self._welding_task_tabs.get(selected)
+            tabs = self.task_notebook.tabs()
+            task = {tabs[1]: "cleaner", tabs[2]: "scan"}.get(selected, "welding")
             previous = getattr(self, "_active_teaching_task", task)
             if task != previous:
                 settings = self._teaching_task_settings
@@ -475,7 +490,27 @@ class WeldActionGui:
                 self.velocity_percent.set(scale)
                 self.update_speed_label()
                 self._active_teaching_task = task
-            if task == "cleaner" and self.keyboard_velocity_arm == "left":
+            if position is not None:
+                try:
+                    self.welding_tasks.switch(position)
+                except (OSError, ValueError, tk.TclError, yaml.YAMLError) as error:
+                    self.task_notebook.select(next(
+                        tab for tab, value in self._welding_task_tabs.items()
+                        if value == self.welding_position
+                    ))
+                    self.error(str(error))
+                    return
+                settings = self._teaching_task_settings
+                settings["welding"] = settings["welding"][:4] + (self.velocity_percent.get(),)
+                self._welding_controls.pack_forget()
+                self._welding_controls.pack(
+                    in_=self._welding_task_pages[position], fill=tk.BOTH, expand=True
+                )
+                self.welding_task_title.set(f"Welding task · {position}")
+                self.welding_task_storage.set(
+                    f"Active task: {position} · feedback: {self._weld_feedback_directory()}"
+                )
+            if task in ("cleaner", "scan") and self.keyboard_velocity_arm == "left":
                 self._disable_keyboard_velocity_async()
         current = self._operator_page_canvases.get(selected)
         if current is not None:
@@ -491,8 +526,7 @@ class WeldActionGui:
         for arm in ("left", "right"):
             label = tk.Label(
                 robot_status,
-                text=f"Connect {arm.upper()} (IP): X",
-                width=32,
+                text=f"{arm.upper()} (IP): X",
                 relief=tk.SOLID,
                 borderwidth=1,
                 bg="#fce8e6",
@@ -503,8 +537,7 @@ class WeldActionGui:
             self.robot_connection_labels[arm] = label
         head_label = tk.Label(
             robot_status,
-            text="Connect HEAD (CAN2): X",
-            width=26,
+            text="HEAD (CAN2): X",
             relief=tk.SOLID,
             borderwidth=1,
             bg="#fce8e6",
@@ -516,7 +549,6 @@ class WeldActionGui:
         self.welder_connection_label = tk.Label(
             robot_status,
             text="HICOMM WELDER: X",
-            width=22,
             relief=tk.SOLID,
             borderwidth=1,
             bg="#fce8e6",
@@ -524,9 +556,20 @@ class WeldActionGui:
             font=("Sans", 11, "bold"),
         )
         self.welder_connection_label.pack(side=tk.LEFT, padx=6, pady=6)
+        self.scanner_connection_label = tk.Label(
+            robot_status,
+            text="SCANNER: -",
+            width=14,
+            relief=tk.SOLID,
+            borderwidth=1,
+            bg="#eeeeee",
+            fg="#5f6368",
+            font=("Sans", 11, "bold"),
+        )
+        self.scanner_connection_label.pack(side=tk.LEFT, padx=6, pady=6)
         tk.Button(
             robot_status,
-            text="EMERGENCY STOP (SOFTWARE)\nALL MOTION + WELDER",
+            text="SOFTWARE E-STOP\nmotion + welder",
             command=self.emergency_stop_all,
             bg="#b3261e",
             fg="white",
@@ -558,8 +601,10 @@ class WeldActionGui:
             textvariable=self.robot_power_status,
         ).pack(side=tk.LEFT)
 
-    def _build_keyboard_teaching_controls(self, task_page, *, cleaner=False):
-        if not cleaner:
+    def _build_keyboard_teaching_controls(self, task_page, *, task="welding"):
+        """task: welding (selectable arm) or the right-arm-only cleaner / scan pages."""
+        right_only = task != "welding"
+        if not right_only:
             arm_selection = ttk.Frame(task_page)
             arm_selection.pack(fill=tk.X, pady=(0, 7))
             ttk.Label(
@@ -576,13 +621,14 @@ class WeldActionGui:
             ).pack(side=tk.LEFT)
             self.planning_group.trace_add("write", self.arm_changed)
         else:
-            ttk.Label(task_page, text="Torch Cleaner · right arm", style="Step.TLabel").pack(anchor=tk.W)
+            title = "Torch Cleaner · right arm" if task == "cleaner" else "Scan teaching · right arm"
+            ttk.Label(task_page, text=title, style="Step.TLabel").pack(anchor=tk.W)
 
         keyboard_jog = self._create_toggle_section(
             task_page,
-            "keyboard_jog_cleaner" if cleaner else "keyboard_jog",
+            "keyboard_jog" if task == "welding" else f"keyboard_jog_{task}",
             "Keyboard Teaching · SpaceMouse-style hold-to-run velocity",
-            expanded=False,
+            expanded=task == "scan",
         )
         jog_row = ttk.Frame(keyboard_jog)
         jog_row.pack(fill=tk.X, pady=2)
@@ -590,12 +636,12 @@ class WeldActionGui:
             jog_row,
             text="Enable keyboard teaching",
             variable=self.keyboard_jog_enabled,
-            command=(self._cleaner_keyboard_jog_enable_changed if cleaner
+            command=(self._cleaner_keyboard_jog_enable_changed if right_only
                      else self.keyboard_jog_enable_changed),
         )
         enable_button.pack(side=tk.LEFT, padx=(0, 8))
         self.keyboard_jog_enable_buttons.append(enable_button)
-        if not cleaner:
+        if not right_only:
             self.keyboard_jog_enable_button = enable_button
         ttk.Label(jog_row, text="axis/plane").pack(side=tk.LEFT)
         ttk.Combobox(
@@ -647,10 +693,13 @@ class WeldActionGui:
             text=(
                 "Speed: V=XYZ 5/15/25 mm/s · X=rotation 3/7/10 deg/s · "
                 +
-                ("Save: selected cleaner pose via Teaching Detail below"
-                 if cleaner else
-                 "Save: I/J=TCP1/2 · O/K=START/GOAL WAIT · "
-                 "P/L=Weld WAIT(init)/END · M=Initial pose")
+                {
+                    "cleaner": "Save: selected cleaner pose via Teaching Detail below",
+                    "scan": "Save: " + " · ".join(
+                        f"{key.upper()}={SCAN_POINT_LABELS[name]}" for key, name in SCAN_KEY_POINTS.items()
+                    ) + " (sensor scanning poses; Hongik action seam A/B are captured separately)",
+                }.get(task, "Save: I/J=TCP1/2 · O/K=START/GOAL WAIT · "
+                            "P/L=Weld WAIT(init)/END · M=Initial pose")
             ),
             foreground="#174ea6",
         ).pack(anchor=tk.W)
@@ -664,13 +713,13 @@ class WeldActionGui:
             ),
             foreground="#137333",
         ).pack(anchor=tk.W)
-        if not cleaner:
+        if not right_only:
             ttk.Label(
                 keyboard_jog,
                 text="Wire (right arm, Hi-COMM connected): hold F=feed forward, R=reverse; release=OFF",
                 foreground="#b3261e",
             ).pack(anchor=tk.W)
-        if cleaner:
+        if right_only:
             return
         for key_name in (
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "s", "d"
@@ -680,8 +729,9 @@ class WeldActionGui:
                 self.keyboard_jog_selection_key,
                 add="+",
             )
-        # "u" is a Torch Cleaner tab shortcut only (CLEANER_KEY_POSES).
-        for key_name in ("v", "x", "u", "i", "j", "o", "k", "p", "l", "m"):
+        # "u" is a Torch Cleaner (CLEANER_KEY_POSES) / Scan reference (REFERENCE_KEYS) shortcut only;
+        # "n" / "h" are Torch Cleaner shortcuts only (Cleaner 1 steps 1-4 / 1-5).
+        for key_name in ("v", "x", "u", "i", "j", "o", "k", "p", "l", "m", "n", "h"):
             self.root.bind(
                 f"<KeyPress-{key_name}>",
                 self.keyboard_teaching_shortcut_key,
@@ -763,7 +813,7 @@ class WeldActionGui:
         ).pack(side=tk.LEFT, padx=8)
 
         self._build_weld_arc_parameter_table(welding_page)
-        # Welder tests (wire/gas, ARC ON-OFF, Fake ARC) live with the welder
+        # Welder tests (wire/gas, ARC ON-OFF) live with the welder
         # connection on the Connection page.
         welder_test = ttk.Frame(welder)
         welder_test.pack(fill=tk.X)
@@ -843,15 +893,6 @@ class WeldActionGui:
             digital_test, text="DISCONNECTED · ARC OFF"
         )
         self.hicomm_weld_status.grid(row=0, column=8, padx=8)
-        self.fake_arc_check = ttk.Checkbutton(
-            digital_test,
-            text="Fake ARC (motion only, no real welding)",
-            variable=self.fake_arc_enabled,
-            command=self.fake_arc_changed,
-        )
-        self.fake_arc_check.grid(
-            row=0, column=9, padx=(12, 3), sticky=tk.W
-        )
 
         self.hicomm_rx_bit_status = ttk.Label(
             digital_test,
@@ -906,7 +947,7 @@ class WeldActionGui:
             ("소프트웨어 크레이터", (
                 ("소프트웨어 크레이터", check(self.weld_software_crater_enabled), "",
                  "용접 끝에서 전류를 낮춰 유지"),
-                ("전류 비율", spin(self.weld_software_crater_ratio_percent, 20.0, 40.0, 1.0), "%",
+                ("전류 비율", spin(self.weld_software_crater_ratio_percent, 20.0, 50.0, 1.0), "%",
                  "본용접 전류 대비"),
                 ("크레이터 전압", spin(self.weld_software_crater_voltage_v, 10.0, 40.0, 0.1), "V", ""),
                 ("크레이터 hold", spin(self.weld_software_crater_hold_s, 0.1, 5.0, 0.1), "s", ""),
@@ -951,7 +992,8 @@ class WeldActionGui:
                  "touch_pair: 벽·바닥 두 터치점을 잇는 방향 / bisector: 필렛 45° / manual: 아래 축"),
                 ("횡방향 축 (manual·터치 없음)", combo(self.weave_axis, (
                     "tool_x", "tool_y", "tool_z", "world_x", "world_y", "world_z"), 9), "",
-                 "용접선에 수직 성분만 사용"),
+                 "용접선에 수직 성분만 사용 · world_x/y가 용접선과 거의 나란하면 "
+                 "I→J를 따라 보정된 수평면에서 위빙"),
                 ("좌측 드웰", spin(self.weave_left_dwell_s, 0.0, 10.0, 0.1), "s",
                  "sine 피크에서 이동 정지 (circle은 0)"),
                 ("우측 드웰", spin(self.weave_right_dwell_s, 0.0, 10.0, 0.1), "s", ""),
@@ -1192,6 +1234,19 @@ class WeldActionGui:
         sequence = self._create_toggle_section(
             shared_task_controls, "sequence", "Sequence Builder", expanded=True
         )
+        fake_arc_box = ttk.LabelFrame(sequence, text="Fake ARC")
+        fake_arc_box.pack(fill=tk.X, pady=(0, 4))
+        self.fake_arc_check = ttk.Checkbutton(
+            fake_arc_box,
+            text="Fake ARC (motion only, no real welding)",
+            variable=self.fake_arc_enabled,
+            command=self.fake_arc_changed,
+        )
+        self.fake_arc_check.pack(side=tk.LEFT, anchor=tk.W, padx=6, pady=4)
+        ttk.Checkbutton(fake_arc_box, text="Hongik scan + estimate (A/B)",
+                        variable=self.hongik_cycle_scan_enabled).pack(side=tk.LEFT, padx=12, pady=4)
+        ttk.Checkbutton(fake_arc_box, text="Traverse (START touch · 0.5 mm/s)",
+                        variable=self.scan_cycle_traverse_enabled).pack(side=tk.LEFT, padx=12, pady=4)
         sequence_buttons = ttk.Frame(sequence)
         sequence_buttons.pack(fill=tk.X, pady=(0, 4))
         for text, command in (
@@ -1209,6 +1264,17 @@ class WeldActionGui:
         ttk.Label(sequence_buttons, text="Repeat").pack(side=tk.LEFT, padx=(8, 2))
         ttk.Spinbox(sequence_buttons, from_=1, to=20, width=3,
                     textvariable=self.work_cycle_repeats).pack(side=tk.LEFT)
+        scan_cycle_buttons = ttk.Frame(sequence)
+        scan_cycle_buttons.pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(scan_cycle_buttons, text="Build Scan + 4 Passes",
+                   command=self.build_scan_weld_cycle).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_cycle_buttons, text="Build No Scan + 4 Passes",
+                   command=lambda: self.build_scan_weld_cycle(rescan_after_passes=False, reuse_latest=True)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_cycle_buttons, text="Build Scan + 4 Passes (1 Scan)",
+                   command=lambda: self.build_scan_weld_cycle(rescan_after_passes=False)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_cycle_buttons, text="Plan All (teaching preview)",
+                   command=lambda: self.run_sequence(True, False)).pack(side=tk.LEFT, padx=2)
+        ttk.Label(sequence, text="P1 190/24.5/5 · P2,P3 230/26.5/7 · P4 220/26/5 + weave · Cleaner 1 × 3 · 5 scans / initial scan only").pack(anchor=tk.W, padx=6)
         sequence_table_frame = ttk.Frame(sequence)
         sequence_table_frame.pack(fill=tk.X)
         self.sequence_table = ttk.Treeview(
@@ -1649,6 +1715,12 @@ class WeldActionGui:
             )
             style.map(name, background=[("active", active)])
 
+        # Visible on every tab: connection, keyboard teaching, pipeline
+        # status, unacknowledged errors and the software STOP; the event log
+        # keeps status lines that the next update would overwrite.  Packed
+        # before the notebook so the notebook takes the remaining space.
+        self.status_bar = OperatorStatusBar(self, self.root)
+        self.event_log = EventLogPanel(self, self.root)
         self.operator_notebook = ttk.Notebook(self.root)
         self.operator_notebook.pack(fill=tk.BOTH, expand=True)
         self._operator_page_canvases = {}
@@ -1662,13 +1734,36 @@ class WeldActionGui:
         self.task_notebook = ttk.Notebook(task_page)
         self.task_notebook.pack(fill=tk.BOTH, expand=True)
         welding_page = self._create_operator_scroll_page(
-            self.task_notebook, "Welding"
+            self.task_notebook, "Welding · 1G"
         )
         cleaner_page = self._create_operator_scroll_page(
             self.task_notebook, "Torch Cleaner"
         )
+        # Keep Scan after Welding/Torch Cleaner: _cleaner_task_selected uses tab index 1.
+        scan_page = self._create_operator_scroll_page(
+            self.task_notebook, "Scan"
+        )
+        welding_3g_page = self._create_operator_scroll_page(
+            self.task_notebook, "Welding · 3G"
+        )
+        self._welding_task_tabs = {
+            self.task_notebook.tabs()[0]: "1G", self.task_notebook.tabs()[3]: "3G",
+        }
+        self._welding_task_pages = {"1G": welding_page, "3G": welding_3g_page}
+        self._welding_controls = ttk.Frame(self.task_notebook)
+        self._welding_controls.pack(in_=welding_page, fill=tk.BOTH, expand=True)
+        welding_page = self._welding_controls
+        self.welding_task_title = tk.StringVar(value="Welding task · 1G")
+        self.welding_task_storage = tk.StringVar(
+            value=f"Active task: 1G · feedback: {self._weld_feedback_directory()}"
+        )
+        ttk.Label(shared_task_controls, textvariable=self.welding_task_storage).pack(anchor=tk.W)
         sequence_page = self._create_operator_scroll_page(
             self.operator_notebook, "3. etc"
+        )
+        # Outside 2. TASK on purpose: no keyboard-teaching task maps to it.
+        params_page = self._create_operator_scroll_page(
+            self.operator_notebook, "4. 4-PASS PARAMS"
         )
         self.content_canvas, self.content_window = self._operator_page_canvases[
             self.operator_notebook.tabs()[0]
@@ -1690,8 +1785,13 @@ class WeldActionGui:
                     widget_class, sequence, self._scroll_value_control
                 )
         ttk.Label(connection_page, text="Connection & diagnostics", style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(welding_page, text="Welding task", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(welding_page, textvariable=self.welding_task_title,
+                  style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Button(welding_page, text="Save task settings",
+                   command=self.save_welding_task_settings).pack(anchor=tk.W, pady=3)
         ttk.Label(cleaner_page, text="Torch Cleaner task", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(scan_page, text="Scan task · Hongik precision sensing / post-weld scan",
+                  style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(sequence_page, text="Etc · Diagnostics / Wide Sensing", style="Title.TLabel").pack(anchor=tk.W)
 
         self._build_connection_header(connection_page)
@@ -1703,11 +1803,15 @@ class WeldActionGui:
             self.velocity_percent.get(),
         )
         self._teaching_task_settings = {
-            "welding": teaching_defaults, "cleaner": teaching_defaults,
+            "welding": teaching_defaults, "cleaner": teaching_defaults, "scan": teaching_defaults,
         }
         self._active_teaching_task = "welding"
         self._build_keyboard_teaching_controls(welding_page)
-        self._build_keyboard_teaching_controls(cleaner_page, cleaner=True)
+        self._build_keyboard_teaching_controls(cleaner_page, task="cleaner")
+        self._build_keyboard_teaching_controls(scan_page, task="scan")
+        self.precision_sensing_test_panel = PrecisionSensingTestPanel(self, scan_page)
+        from construct_robot.gui.scan_cycle_params_panel import ScanCycleParamsPanel
+        self.scan_cycle_params_panel = ScanCycleParamsPanel(self, params_page)
 
         motion_tests = self._create_toggle_section(
             sequence_page, "motion_test", "Motion Test", expanded=False
@@ -1974,6 +2078,9 @@ class WeldActionGui:
         self._build_sequence_and_sensing_controls(sequence_page, shared_task_controls)
 
         self._build_fastech_controls(connection_page)
+        self.scanner_connection_panel = ScannerConnectionPanel(
+            self, connection_page, self.scanner_connection_label
+        )
 
         self._build_cleaner_controls(cleaner_teaching)
 
@@ -1986,6 +2093,7 @@ class WeldActionGui:
         self.root.title("Editable Cartesian Action")
         self.root.geometry("1240x940")
         self._closing = False
+        self.welding_position = "1G"
         self._ui_queue = queue.SimpleQueue()
         self._latest_ui_updates = {}
         self._latest_ui_updates_lock = threading.Lock()
@@ -2022,6 +2130,8 @@ class WeldActionGui:
         self.keyboard_velocity_arm = None
         self.keyboard_velocity_switching = False
         self.keyboard_velocity_active_key = None
+        # (arrow, generation) of the node jog command the GUI has adopted.
+        self.keyboard_active_token = None
         self.keyboard_release_after_id = None
         self.keyboard_stop_generation = 0
         self.keyboard_ros_input_last_at = 0.0
@@ -2136,6 +2246,8 @@ class WeldActionGui:
         # of being sent to the welder over Hi-COMM, so a sequence can be run
         # to exercise motion only (no real welding output).
         self.fake_arc_enabled = tk.BooleanVar(value=False)
+        self.hongik_cycle_scan_enabled = tk.BooleanVar(value=False)
+        self.scan_cycle_traverse_enabled = tk.BooleanVar(value=True)
         self.work_cycle_repeats = tk.IntVar(value=1)
         self.hicomm_inching_direction = None
         self.keyboard_wire_active_key = None
@@ -2236,8 +2348,14 @@ class WeldActionGui:
         self.corrected_seam_geometry = None
         self.computed_seam_endpoints = {"start": None, "goal": None}
         self.computed_seam_wait_points = {"start": None, "goal": None}
+        # The scan-generated four-pass teaching (TASK › Scan) once it exists.
+        scan_four_pass_folder = scan_four_pass.latest_four_pass_dir()
         self.four_pass_folder = tk.StringVar(
-            value=str(self._weld_feedback_directory() / "test_shimen_gth")
+            value=str(
+                scan_four_pass_folder
+                if scan_four_pass_folder is not None
+                else self._weld_feedback_directory() / "test_shimen_gth"
+            )
         )
         self.four_pass_status = tk.StringVar(
             value="Load 1.log..4.log · WAIT/START/GOAL WAIT/GOAL come from each log"
@@ -2364,6 +2482,7 @@ class WeldActionGui:
             "right": "192.168.1.12",
         }
 
+        self.welding_tasks = WeldingTaskController(self)
         self._build_operator_layout()
         self._install_teaching_key_tag()
 
@@ -2376,6 +2495,8 @@ class WeldActionGui:
         )
         self.executor_thread.start()
         self._auto_load_teaching_states()
+        if self.welding_tasks.load_error is not None:
+            self.error(f"Task settings load failed: {self.welding_tasks.load_error}")
         loaded_settings = self._last_execution_settings.get("settings", {})
         loaded_motion = self._last_execution_settings.get("motion", {})
         if loaded_settings or loaded_motion:
@@ -2403,7 +2524,7 @@ class WeldActionGui:
         # Never monopolize Tk's event loop.  ROS callbacks can produce work
         # faster than widgets can render it; an unlimited drain starves mouse,
         # scrolling, repainting, and the Hi-COMM cyclic Python thread.
-        deadline = time.monotonic() + 0.004
+        deadline = time.monotonic() + 0.002
         processed = 0
         while processed < 64 and time.monotonic() < deadline:
             try:
@@ -2412,11 +2533,16 @@ class WeldActionGui:
                 break
             self._dispatch_ui_callback(callback, args)
             processed += 1
-        with self._latest_ui_updates_lock:
-            latest = tuple(self._latest_ui_updates.values())
-            self._latest_ui_updates.clear()
-        for callback, args in latest:
+        deadline = time.monotonic() + 0.002
+        processed = 0
+        while processed < 64 and time.monotonic() < deadline:
+            with self._latest_ui_updates_lock:
+                if not self._latest_ui_updates:
+                    break
+                key = next(iter(self._latest_ui_updates))
+                callback, args = self._latest_ui_updates.pop(key)
             self._dispatch_ui_callback(callback, args)
+            processed += 1
 
     def _dispatch_ui_callback(self, callback, args):
         try:
@@ -2438,6 +2564,9 @@ class WeldActionGui:
         )
 
     def _scroll_content(self, event):
+        event_log = getattr(self, "event_log", None)
+        if event_log is not None and event_log.owns(getattr(event, "widget", None)):
+            return  # the log scrolls itself
         delta = getattr(event, "delta", 0)
         button = getattr(event, "num", None)
         if delta > 0 or button == 4:
@@ -2727,6 +2856,11 @@ class WeldActionGui:
     ):
         return _weld_feedback_for(self).record_tcp_sample(pose, progress=progress, waypoint_index=waypoint_index, phase=phase, tf_stamp_s=tf_stamp_s, along_mm=along_mm, remaining_mm=remaining_mm, cross_track_mm=cross_track_mm)
 
+    def record_weld_joint_sample(self, arm, snapshot):
+        recorder = getattr(self, "_weld_feedback_recorder", None)
+        if recorder is not None:
+            recorder.record_joint_sample(arm, snapshot)
+
     def _record_actual_tcp_until_motion_done(self, step):
         return _weld_feedback_for(self).record_actual_tcp_until_motion_done(step)
 
@@ -2740,7 +2874,16 @@ class WeldActionGui:
         return _weld_feedback_for(self).pending_final_status()
 
     def _weld_feedback_directory(self):
-        return Path.home() / "ros2_ws" / "weld_feedback"
+        return task_feedback_directory(getattr(self, "welding_position", "1G"))
+
+    def save_welding_task_settings(self):
+        try:
+            path = self.welding_tasks.save_settings()
+        except (OSError, ValueError, tk.TclError, yaml.YAMLError) as error:
+            self.error(f"Task settings save failed: {error}")
+            return False
+        self.log(f"Saved {self.welding_position} task settings: {path}")
+        return True
 
     def _latest_weld_feedback_path(self):
         return self._weld_feedback_directory() / "latest_weld_feedback.log"
@@ -3658,7 +3801,11 @@ class WeldActionGui:
         joint_names,
         positions,
         tcp,
+        task_position=None,
     ):
+        if task_position is not None and task_position != self.welding_position:
+            self.log(f"Ignored completed {task_position} IK result after task change; reload that pass to resolve IK")
+            return
         try:
             save_initial_state_yaml(
                 self._initial_state_yaml_path(planning_group, teaching_name),
@@ -3688,7 +3835,9 @@ class WeldActionGui:
             "MoveIt joint state resolved and YAML saved · computation complete"
         )
 
-    def corrected_tcp_joint_state_failed(self, endpoint, teaching_name, message):
+    def corrected_tcp_joint_state_failed(self, endpoint, teaching_name, message, task_position=None):
+        if task_position is not None and task_position != self.welding_position:
+            return
         self.error(
             f"{str(endpoint).upper()} TCP was computed, but "
             f"{TEACHING_POSES.get(teaching_name, teaching_name)} IK update "
@@ -3723,7 +3872,7 @@ class WeldActionGui:
             return None
         reference = self.weld_weave_reference.get()
         geometry = self.corrected_seam_geometry
-        if reference == "manual":
+        if reference == "manual" or reference not in WEAVE_REFERENCES:
             return None
         if reference == "touch_pair":
             direction = touch_pair_weave_direction(
@@ -3735,7 +3884,7 @@ class WeldActionGui:
 
     def build_sensed_weld_sequence(
         self, *, teaching_poses=None, force_unsensed=False,
-        weave_override=None, append=True,
+        weave_override=None, append=True, return_inputs=False,
     ):
         """Append a weld workflow. START/GOAL each use touch-sensed geometry
         when wall+floor touches are available, otherwise the plain taught
@@ -3801,6 +3950,7 @@ class WeldActionGui:
                 endpoints=endpoints,
                 goal_wait=goal_wait_data,
                 finish=finish_data,
+                weld_wait=poses.get("weld_wait"),
                 settings=settings,
                 corner_touch_count=count,
                 lead_in_mm=lead_in_mm,
@@ -3891,9 +4041,15 @@ class WeldActionGui:
             steps = build_weld_scenario_steps(
                 scenario, approach, path, slots, motion, scenario_id
             )
+            traverse_enabled = bool(self.scan_cycle_traverse_enabled.get())
+            if traverse_enabled and not return_inputs:
+                from construct_robot.application.scan_start_touch import configure_start_touch, START_TOUCH
+                configure_start_touch(steps, START_TOUCH)
         except (ValueError, TypeError, tk.TclError) as error:
             self.error(f"Cannot build sensed weld sequence: {error}")
             return
+        if return_inputs:
+            return copy.deepcopy((scenario, motion))
         if append:
             self.sequence_model.extend(steps)
             self.refresh_sequence_table(select_last=True)
@@ -3908,6 +4064,7 @@ class WeldActionGui:
         self.log(
             f"Built weld workflow from {start_source} to {goal_source} · "
             f"approach={approach_mode} · "
+            f"Traverse {'ON' if traverse_enabled else 'OFF'} · "
             f"{len(steps)} steps · slots {base_slot}..{final_slot} · "
             f"lead-in={lead_in_mm:.1f} mm / lead-out={lead_out_mm:.1f} mm · "
             f"safe approach={safe_approach_mm:.1f} mm / "
@@ -4254,7 +4411,8 @@ class WeldActionGui:
                 pose_name,
             ))
         threading.Thread(
-            target=self.node.resolve_tcp_joint_states,
+            target=partial(self.node.resolve_tcp_joint_states,
+                           task_position=getattr(self, "welding_position", None)),
             args=(tuple(ik_targets),),
             daemon=True,
         ).start()
@@ -4408,6 +4566,34 @@ class WeldActionGui:
                     f"J2={math.degrees(step['joint2_rad']):.1f}° · "
                     f"{timing}"
                 )
+            elif step["type"] == "post_weld_scan":
+                kind = "POST-WELD SCAN"
+                detail = (f"{step['pose_label']} · recording at {step['tcp_speed_m_s'] * 1000.0:.0f} mm/s · "
+                          f"files only (no estimate) · {Path(step['start_path']).name} → "
+                          f"{Path(step['end_path']).name} → back")
+            elif step["type"] == "saved_scan_load":
+                kind = "LOAD SAVED SCAN"
+                detail = f"{step['scan']['saved_folder']} · no scanning / estimation"
+            elif step["type"] == "precision_sensing_scan":
+                kind = "PRECISION SCAN"
+                detail = ("Local 1G scan C → D → C + estimate + correction → fresh 4-pass paths · "
+                          if step["scan"].get("source") == "local_1g"
+                          else "Full PrecisionSensing → fresh 4-pass paths · ") + timing
+            elif step["type"] == "scan_weld_pass":
+                kind = f"WELD PASS {step['scan_cycle_pass']}"
+                settings = step["settings"]
+                detail = (f"{settings['current_a']} A / {settings['voltage']:.1f} V / "
+                          f"{step['weld_tcp_speed_mm_s']:g} mm/s · "
+                          f"weave={'ON' if step['weld_weave_enabled'] else 'OFF'} · frozen pass TCP · {timing}")
+                if step.get("start_touch_probe"):
+                    detail += " · START touch Z↓ 0.5mm/s (≤10mm below target) → pass Z correction"
+                else:
+                    detail += " · Traverse OFF"
+            elif step["type"] == "hongik_post_weld_scan":
+                kind = f"RAW SCAN AFTER P{step['scan_cycle_pass']}"
+                detail = ("Local scan C → D → C · files only (scan_data/post_weld_scan) · "
+                          if step["scan"].get("source") == "local_1g"
+                          else "PostWeldScan · this cycle's run · raw files only · ") + timing
             elif step["type"] == "sleep":
                 kind = "SLEEP"
                 detail = f"{step['seconds']:.3f} seconds"
@@ -4649,6 +4835,9 @@ class WeldActionGui:
             self.error("Select a sequence step to edit")
             return
         step = self.sequence_steps[index]
+        if step.get("scan_weld_cycle_id"):
+            self.error("Scan + 4 Passes freezes its teaching and recipe at Build; change settings and rebuild")
+            return
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Edit sequence #{index + 1} · {step['type']}")
         dialog.transient(self.root)
@@ -4791,7 +4980,7 @@ class WeldActionGui:
             entry("crater_panel_voltage_ref_v", "Panel Voltage Ref (V)", settings["crater_panel_voltage_ref_v"])
             entry("crater_panel_time_ref_s", "Panel Time Ref (s)", settings["crater_panel_time_ref_s"])
             check("software_crater_enabled", "Software Crater Enabled", settings["software_crater_enabled"])
-            entry("software_crater_ratio_percent", "Crater Current Ratio (20..40 %)", settings["software_crater_ratio_percent"])
+            entry("software_crater_ratio_percent", "Crater Current Ratio (20..50 %)", settings["software_crater_ratio_percent"])
             entry("software_crater_voltage_v", "Software Crater Voltage (V)", settings["software_crater_voltage_v"])
             entry("software_crater_hold_s", "Software Crater Hold (s)", settings["software_crater_hold_s"])
             entry(
@@ -5093,13 +5282,17 @@ class WeldActionGui:
             self.sequence_parallel_slot.set(1)
         self.refresh_sequence_table()
 
-    def build_torch_clean_sequence(self):
-        """Refresh cleaner rows from config YAML without executing equipment."""
+    def _run_post_weld_scan(self, step, execute_requested):
+        """Sequence worker: the post-weld scan row (Scan tab panel does the recording)."""
+        return self.precision_sensing_test_panel.run_post_weld_scan(step, execute_requested)
+
+    def build_torch_clean_sequence(self, cut_only=False):
+        """Refresh cleaner rows from config YAML without executing equipment (cut_only: the wire cutter part)."""
         if self.sequence_running:
             self.error("Cannot build Torch Clean while a sequence is running")
             return False
         try:
-            steps = self.torch_cleaner_panel.build_sequence_steps()
+            steps = self.torch_cleaner_panel.build_sequence_steps(cut_only=cut_only)
             replacement = self.sequence_model.with_replaced_cleaner(steps)
             validate_managed_weld_sequence(replacement)
         except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
@@ -5107,10 +5300,11 @@ class WeldActionGui:
             return False
         self.sequence_steps = replacement
         self.refresh_sequence_table(select_last=True)
+        what = "Torch Clean (wire cut only)" if cut_only else "Torch Clean"
         self.torch_cleaner_panel.status.set(
-            f"Torch Clean: {len(steps)} steps added to Sequence Builder"
+            f"{what}: {len(steps)} steps added to Sequence Builder"
         )
-        self.log(f"Built Torch Clean from {self.torch_cleaner_panel.folder.get()} · {len(steps)} steps")
+        self.log(f"Built {what} from {self.torch_cleaner_panel.folder.get()} · {len(steps)} steps")
         return True
 
     def build_combined_work_cycle(self):
@@ -5119,7 +5313,9 @@ class WeldActionGui:
             self.error("Cannot build work cycle while a sequence is running")
             return False
         try:
-            config = load_work_cycle(teaching_config_dir() / "combined_work_cycle.yaml")
+            config = load_work_cycle(task_config_directory(
+                getattr(self, "welding_position", "1G")
+            ) / "combined_work_cycle.yaml")
             repeats = int(self.work_cycle_repeats.get())
             if set(self.four_pass_references) != {1, 2, 3, 4}:
                 if not self.load_four_pass_references():
@@ -5168,6 +5364,234 @@ class WeldActionGui:
             "Pass 4 FAKE ARC/tool-Y weave → torch clean → World-X spray → initial"
         )
         return True
+
+    SCAN_CYCLE_SOURCE = "local_1g"     # "local_1g" (KIRO local scan) or "hongik" (PrecisionSensing server)
+
+    def build_scan_weld_cycle(self, *, rescan_after_passes=True, reuse_latest=False, params=None, start_pass=1):
+        """Additional production cycle; freeze Tk inputs without running equipment.
+        params: the 4-PASS PARAMS tab's values (None: the fixed defaults; Traverse then follows the Sequence
+        Builder checkbox)."""
+        from construct_robot.application.scan_cycle_params import summary as params_summary, validate_params
+        from construct_robot.application.scan_weld_cycle import PASS4_WEAVE, build_scan_weld_cycle
+        custom = params is not None
+        if getattr(self, "welding_position", "1G") != "1G":
+            self.error("Scan + 4 Passes uses the 1G sensing workflow; select Welding · 1G")
+            return False
+        if self.sequence_running:
+            self.error("Cannot build a scan/weld cycle while a sequence is running")
+            return False
+        panel = self.precision_sensing_test_panel
+        if panel.busy or panel.bridge.busy or (panel.direct is not None and panel.direct.busy):
+            self.error("Wait for the current scan to finish before building")
+            return False
+        try:
+            saved_scan = None
+            if reuse_latest:
+                from construct_robot.application.scan_four_pass import latest_four_pass_dir
+                from construct_robot.application.scan_weld_cycle import saved_scan_config
+                folder = latest_four_pass_dir()
+                if folder is None:
+                    raise ValueError("No saved four-pass scan result is available")
+                saved_scan = saved_scan_config(folder)
+                self.four_pass_folder.set(str(folder))
+                if not self.load_four_pass_references():
+                    raise ValueError("Cannot load the latest four-pass scan result")
+            if set(self.four_pass_references) != {1, 2, 3, 4}:
+                if not self.load_four_pass_references():
+                    raise ValueError("Load the current four pass teachings first")
+            self._validate_four_pass_source_hashes()
+            params = validate_params(params)
+            # The tab sets traverse per pass; the fixed build keeps the Sequence Builder checkbox.
+            traverse_enabled = True if custom else bool(self.scan_cycle_traverse_enabled.get())
+            cut_only = params["cleaner"] == "cut_only"
+            # Show the weave preset the cycle builder freezes (the last weaving pass).
+            weaving = [k for k in range(1, 5) if params["passes"][k]["weave"]]
+            for name in PASS4_WEAVE:
+                if weaving:
+                    getattr(self, name).set(params["passes"][weaving[-1]][name])
+            pass_inputs = []
+            for k in range(1, 5):
+                reference = self.four_pass_references[k]
+                corrected = self.four_pass_corrected[k]
+                poses = {}
+                for endpoint, name in (("start_wait", "weld_start_wait"), ("start", "weld_start"),
+                                       ("goal_wait", "weld_goal_wait"), ("goal", "weld_end")):
+                    names, joints = reference["joint_states"][endpoint]
+                    poses[name] = ("right_manipulator", tuple(names), tuple(joints), copy.deepcopy(corrected[endpoint]))
+                for name in ("weld_wait", "weld_finish"):
+                    entry = reference.get("additional_pose_entries", {}).get(name)
+                    if entry is None:
+                        raise ValueError(f"Pass {k} needs its own {name} teaching")
+                    poses[name] = parse_teaching_snapshot_entry(name, entry)
+                frozen = self.build_sensed_weld_sequence(
+                    teaching_poses=poses, force_unsensed=True, append=False, return_inputs=True,
+                    weave_override={"enabled": params["passes"][k]["weave"],
+                                    "transverse_axis": self.weave_axis.get().strip().lower()},
+                )
+                if frozen is None:
+                    raise ValueError(f"Pass {k} teaching/recipe is invalid")
+                pass_inputs.append(frozen)
+            if reuse_latest:
+                plane = self.four_pass_references[4].get("weave_geometry") or {}
+                if plane.get("normal_world") is None:
+                    raise ValueError("Saved scan has no measured plate normal for pass-4 weave")
+                saved_scan["plate_normal_world"] = plane["normal_world"]
+                steps = build_scan_weld_cycle(
+                    saved_scan, {}, pass_inputs, self.torch_cleaner_panel.build_sequence_steps(cut_only=cut_only),
+                    rescan_after_passes=False, traverse_enabled=traverse_enabled, params=params,
+                    start_pass=start_pass)
+                self.sequence_steps = steps
+                self.refresh_sequence_table()
+                if start_pass != 1:
+                    self.log(f"No Scan starts at P{start_pass}: P1-P{start_pass - 1} are taken as already welded")
+                if custom:
+                    self.log("Built No Scan + 4 Passes with 4-PASS PARAMS · " + params_summary(params))
+                else:
+                    self.log(f"Built No Scan + 4 Passes · saved targets: {saved_scan['saved_folder']} · "
+                             f"no scan / estimate / rescan · Cleaner 1 only × 3 · Traverse {'ON' if traverse_enabled else 'OFF'}")
+                return True
+            choice = getattr(self, "hongik_cycle_scan_enabled", None)
+            source = ("hongik" if choice.get() else "local_1g") if choice is not None else self.SCAN_CYCLE_SOURCE
+            if source == "local_1g":
+                # KIRO local 1G scan (C -> D -> C) + offline estimate + correction; raw scans: local, files only.
+                scan, post_scan = panel.local_cycle_scan_config()
+                plane = self.four_pass_references[4].get("weave_geometry") or {}
+                if plane.get("normal_world") is not None:
+                    scan["plate_normal_world"] = plane["normal_world"]
+                steps = build_scan_weld_cycle(scan, post_scan, pass_inputs, self.torch_cleaner_panel.build_sequence_steps(cut_only=cut_only),
+                                             rescan_after_passes=rescan_after_passes,
+                                             traverse_enabled=traverse_enabled, params=params)
+                self.sequence_steps = steps
+                self.refresh_sequence_table()
+                if custom:
+                    self.log("Built Scan + 4 Passes with 4-PASS PARAMS · " + params_summary(params))
+                else:
+                    self.log("Built Scan + 4 Passes (local 1G scan) · 190/24.5/5 → 230/26.5/7 → 230/26.5/7 → 220/26/5 + "
+                             f"plate-plane sine ±4mm / pitch 4mm / dwell L/R 0.2s · Traverse {'ON' if traverse_enabled else 'OFF'} · saved correction AUTO ({scan['relative']}) · Cleaner 1 only × 3 · "
+                             + ("local scan + estimate first, local post-weld scans after each pass" if rescan_after_passes
+                                else "initial scan only; no post-weld rescans"))
+                return True
+            scan = dict(source="hongik", a=tuple(float(v.get()) / 1000.0 for v in panel.a),
+                        b=tuple(float(v.get()) / 1000.0 for v in panel.b),
+                        frame=panel.frame.get().strip(), action_name=panel.action.get().strip(),
+                        status_service=panel.status_service.get().strip(), log_topic=panel.log_topic.get().strip())
+            plane = self.four_pass_references[4].get("weave_geometry") or {}
+            if plane.get("normal_world") is not None:
+                scan["plate_normal_world"] = plane["normal_world"]
+            post_scan = {}
+            if rescan_after_passes:
+                orientation = {"Sensing pass": "pass", "Least rotation": "least_rotation"}[panel.post_weld_orientation.get()]
+                speed = float(panel.post_weld_speed.get()) / 1000.0
+                if not math.isfinite(speed) or speed < 0 or panel.post_weld_confirm.get() not in ("each", "auto"):
+                    raise ValueError("Invalid PostWeldScan speed or confirmation mode")
+                post_scan = dict(action_name=panel.post_weld_action.get().strip(),
+                             status_service=scan["status_service"], log_topic=scan["log_topic"],
+                             measure_speed_mps=speed, confirm_mode=panel.post_weld_confirm.get(),
+                             direction="" if panel.post_weld_direction.get() == "Auto" else panel.post_weld_direction.get(),
+                             tool_orientation=orientation)
+            steps = build_scan_weld_cycle(scan, post_scan, pass_inputs, self.torch_cleaner_panel.build_sequence_steps(cut_only=cut_only),
+                                         rescan_after_passes=rescan_after_passes,
+                                         traverse_enabled=traverse_enabled, params=params)
+        except (OSError, KeyError, TypeError, ValueError, tk.TclError, yaml.YAMLError) as error:
+            self.error(f"Cannot build Scan + 4 Passes: {error}")
+            return False
+        self.sequence_steps = steps
+        self.refresh_sequence_table()
+        if custom:
+            self.log("Built Scan + 4 Passes with 4-PASS PARAMS · " + params_summary(params))
+        else:
+            self.log("Built Scan + 4 Passes · 190/24.5/5 → 230/26.5/7 → 230/26.5/7 → 220/26/5 + sine ±4mm / pitch 4mm / dwell L/R 0.2s · "
+                     f"Cleaner 1 only × 3 · Hongik scan + estimate · {'4 raw scans' if rescan_after_passes else 'initial scan only'} · "
+                     f"Traverse {'ON' if traverse_enabled else 'OFF'} · current hot-start/crater retained")
+        self.log("Hongik mode uses the native PrecisionSensing result; local C/D truth correction is not applied.")
+        return True
+
+    def _prepare_scan_weld_cycle(self, steps, execute_requested):
+        """Sequence worker; all GUI reads were frozen by Build."""
+        from construct_robot.application.scan_weld_cycle import expand_scan_weld_cycle
+        panel = self.precision_sensing_test_panel
+        if self.sequence_stop_requested:
+            raise RuntimeError("stopped by operator")
+        inspection = None
+        if steps[0]["scan"].get("source") == "saved_scan":
+            from construct_robot.application.scan_weld_cycle import validate_saved_scan
+            cfg = steps[0]["scan"]
+            validate_saved_scan(cfg)
+            if execute_requested:
+                if not record_cycle_event(self, "artifact", kind="saved_four_pass_teaching", pass_number=0,
+                                          path=cfg["saved_folder"], source_hashes=cfg["saved_hashes"]):
+                    raise RuntimeError(self._scan_cycle_log_error)
+            self.post(self.log, f"No Scan + 4 Passes · using frozen saved targets: {cfg['saved_folder']}")
+            return expand_scan_weld_cycle(steps)
+        if steps[0]["scan"].get("source") == "local_1g":
+            if not execute_requested:
+                self.post(self.log, "PLAN uses the Build-time teaching only; Execute runs the local 1G scan first.")
+                return expand_scan_weld_cycle(steps, None)
+            if panel.busy or panel.estimating or (panel.direct is not None and panel.direct.busy):
+                raise RuntimeError("Wait for the active scan / estimate to finish before executing Scan + 4 Passes")
+            local = panel.run_cycle_scan(steps[0]["scan"], cancel_requested=lambda: self.sequence_stop_requested)
+            if self.sequence_stop_requested:
+                raise RuntimeError("stopped by operator after the local scan")
+            return expand_scan_weld_cycle(steps, None, local=local)
+        if execute_requested:
+            if panel.busy or panel.bridge.busy or (panel.direct is not None and panel.direct.busy):
+                raise RuntimeError("Wait for the active scan to finish before executing Scan + 4 Passes")
+            live = self.node.scanner_live
+            if live.active:
+                raise RuntimeError("Stop sensor live/RViz streaming before executing Scan + 4 Passes")
+            self.post(panel._set_busy, True, False, False)
+            try:
+                inspection = panel.bridge.scan(
+                    **{key: steps[0]["scan"][key] for key in
+                       ("a", "b", "frame", "action_name", "status_service", "log_topic")},
+                    on_progress=self.log, on_result=None,
+                    on_error=None, on_finished=None, cancel_requested=lambda: self.sequence_stop_requested,
+                )
+                if not record_cycle_event(self, "artifact", kind="precision_sensing_result", pass_number=0,
+                                          path=str(inspection.document.get("data_file_path", "")),
+                                          error_code=inspection.document.get("error_code"),
+                                          message=inspection.document.get("error_message")):
+                    raise RuntimeError(self._scan_cycle_log_error)
+                self.post(panel.show_result, inspection)
+            finally:
+                self.post(panel._set_busy, False)
+            if self.sequence_stop_requested:
+                raise RuntimeError("stopped by operator after PrecisionSensing")
+        else:
+            self.post(self.log, "PLAN uses the Build-time teaching only; Execute measures new paths first. Scanning actions are not sent.")
+        return expand_scan_weld_cycle(steps, inspection)
+
+    def _run_hongik_post_weld_scan(self, step, execute_requested):
+        """Serial raw scan tied to this execution's initial PrecisionSensing run."""
+        panel = self.precision_sensing_test_panel
+        if step["scan"].get("source") == "local_1g":
+            return panel.run_post_weld_scan(step["scan"], execute_requested)
+        if not execute_requested:
+            return True, "PostWeldScan planned as a raw scan stage (no goal submitted)"
+        if self.sequence_stop_requested:
+            return False, "stopped by operator"
+        self.post(panel._set_busy, True, False, False)
+        try:
+            result = panel.bridge.post_weld_scan(
+                **step["scan"], on_progress=self.log, on_confirm=panel.set_awaiting_confirmation,
+                on_result=None, on_error=None, on_finished=None,
+                cancel_requested=lambda: self.sequence_stop_requested,
+            )
+            self.post(panel.show_post_weld_result, result)
+            if not record_cycle_event(self, "artifact", kind="post_weld_scan", pass_number=step["scan_cycle_pass"],
+                                      path=str(result.get("out_dir", "")), run_dir=result.get("run_dir"),
+                                      status=result.get("status"), message=result.get("message")):
+                return False, self._scan_cycle_log_error
+            if result.get("status") == "OK":
+                from construct_robot.application.scan_weld_cycle import export_post_weld_ply
+                try:
+                    ply = export_post_weld_ply(self, result["out_dir"], step["scan_cycle_pass"])
+                except (OSError, ValueError, RuntimeError, ImportError, KeyError) as error:
+                    return False, f"PostWeldScan saved, PLY export failed: {error}"
+                self.post(self.log, f"Post-weld PLY saved · {ply}")
+            return result.get("status") == "OK", f"PostWeldScan P{step['scan_cycle_pass']} · {result.get('message', '')} · {result.get('out_dir', '')}"
+        finally:
+            self.post(panel._set_busy, False)
 
     def delete_all_sequence_steps(self):
         if self.sequence_running:
@@ -5294,6 +5718,10 @@ class WeldActionGui:
                 "weld_weave_axis", self.weave_axis.get()
             )),
             "weld_weave_reference": self.weld_weave_reference.get(),
+            "effective_weld_weave_reference": effective_motion_value(
+                "weld_weave_reference", self.weld_weave_reference.get()
+            ),
+            "weld_plate_normal_world": effective_motion_value("weld_plate_normal_world", None),
             # These are effective scenario values, not live Seam Correction
             # widgets.  The per-step snapshot below and this summary therefore
             # cannot disagree after a Builder edit.
@@ -5347,6 +5775,9 @@ class WeldActionGui:
             "steps": recorded_steps,
         }
 
+    def sequence_execution_preflight_error(self, steps, work_cycle=False):
+        return _sequence_executor_for(self).execution_preflight_error(steps, work_cycle)
+
     def run_sequence(self, run_all, execute_requested, steps_override=None):
         if self.sequence_running:
             self.error("A sequence is already running")
@@ -5368,7 +5799,7 @@ class WeldActionGui:
             # row's current values before running the visible Builder sequence.
             selected_index = self._selected_sequence_index()
             if (selected_index is not None and 0 <= selected_index < len(self.sequence_steps)
-                    and not any(row.get("work_cycle_id") for row in self.sequence_steps)):
+                    and not any(row.get("work_cycle_id") or row.get("scan_weld_cycle_id") for row in self.sequence_steps)):
                 success, error = self._commit_selected_sequence_step_edits(selected_index)
                 if not success:
                     self.error(f"Sequence edit failed: {error}")
@@ -5380,6 +5811,13 @@ class WeldActionGui:
         if not indices:
             self.error("Add or select a sequence step")
             return
+        if any(row.get("scan_weld_cycle_id") for row in steps):
+            from construct_robot.application.scan_weld_cycle import validate_scan_weld_cycle
+            try:
+                validate_scan_weld_cycle(steps)
+            except (KeyError, TypeError, ValueError) as error:
+                self.error(str(error))
+                return
         work_cycle = is_work_cycle(steps)
         if work_cycle and (not run_all or not all(step.get("fake_arc_required") for step in steps)):
             self.error("Full work cycle must run all rows as a fake-ARC-only sequence")
@@ -5404,7 +5842,7 @@ class WeldActionGui:
             return
         executor = _sequence_executor_for(self)
         if execute_requested:
-            preflight_error = executor.execution_preflight_error(steps, work_cycle)
+            preflight_error = self.sequence_execution_preflight_error(steps, work_cycle)
             if preflight_error is not None:
                 self.error(preflight_error)
                 return
@@ -5450,6 +5888,9 @@ class WeldActionGui:
         self.pipeline_waiting(f"SEQUENCE STATUS · {text}")
 
     def _sequence_finished(self, success, message):
+        journal = getattr(self, "_scan_cycle_journal", None)
+        if journal is not None:
+            message = f"{message} · cycle log={journal.directory} · bundle={journal.bundle_directory}"
         self.sequence_model.finish(success, message)
         text = (
             f"Sequence {'complete' if success else 'stopped/failed'} · "
@@ -5468,6 +5909,9 @@ class WeldActionGui:
             self.torch_cleaner_panel.abort()
         self._stop_keyboard_wire()
         self.sequence_stop_requested = True
+        sensing = getattr(self.node, "precision_sensing_test", None)
+        if sensing is not None and sensing.busy:
+            sensing.cancel()
         # STOP NOW also invalidates any pending touch dwell/retract.
         self.node.clear_touch_probe()
         if self.hicomm_client is not None:
@@ -5679,6 +6123,32 @@ class WeldActionGui:
             and not self._keyboard_focus_accepts_arrows(widget)
         )
 
+    @staticmethod
+    def _scan_key_help(key_mode):
+        if key_mode == "orientation":
+            items = (f"{key.upper()}=" + "+".join(f"P{k}" for k in passes) + " orientation"
+                     for key, passes in ORIENTATION_KEYS.items())
+        elif key_mode == "reference":
+            items = (f"{key.upper()}=P{k} {end}" for key, (k, end) in REFERENCE_KEYS.items())
+        elif key_mode == "tcp_cal":
+            items = ("I=TCP calibration sample",)
+        else:
+            items = (f"{key.upper()}={SCAN_POINT_LABELS[name]}" for key, name in SCAN_KEY_POINTS.items())
+        return "Scan keys: " + " · ".join(items)
+
+    def _scan_key_mode(self):
+        """orientation | reference | scan_poses (the Scan tab's key mode; scan_poses without the panel setting)."""
+        panel = getattr(self, "precision_sensing_test_panel", None)
+        mode = getattr(panel, "scan_key_mode", None)
+        return mode.get() if mode is not None else "scan_poses"
+
+    def _scan_task_selected(self):
+        return (
+            hasattr(self, "task_notebook")
+            and self.operator_notebook.select() == str(self.task_notebook.master)
+            and self.task_notebook.select() == self.task_notebook.tabs()[2]
+        )
+
     def _cleaner_task_selected(self):
         return (
             hasattr(self, "task_notebook")
@@ -5882,15 +6352,17 @@ class WeldActionGui:
             pass
         self.keyboard_release_after_id = None
 
-    def _stop_keyboard_jog_command(self, status=None):
+    def _stop_keyboard_jog_command(self, status=None, *, publish_zero=True):
         """Publish zero now and cancel every Tk-side continuation."""
         self._cancel_keyboard_release_timer()
         active_key = self.keyboard_velocity_active_key
         arm = self.keyboard_velocity_arm
         self.keyboard_velocity_active_key = None
+        self.keyboard_active_token = None
         self.keyboard_stop_generation += 1
         generation = self.keyboard_stop_generation
-        self.node.clear_keyboard_velocity()
+        if publish_zero:
+            self.node.clear_keyboard_velocity()
         if status is not None and active_key is not None:
             self.keyboard_jog_status.set(status)
         if active_key is not None and arm is not None:
@@ -5928,6 +6400,7 @@ class WeldActionGui:
             or self.keyboard_velocity_active_key is not None
             or arm != self.keyboard_velocity_arm
             or not self.keyboard_jog_enabled.get()
+            or self._keyboard_command_token() is not None
         ):
             return
         uses_servo = self.node.keyboard_teaching_uses_servo()
@@ -6064,6 +6537,9 @@ class WeldActionGui:
         # Losing application focus can also lose KeyRelease.  The latched RB
         # jog must be stopped immediately, independently of that event.
         self.keyboard_wire_focus_out(event)
+        self._refresh_keyboard_fast_context()
+        if self.keyboard_velocity_active_key is None and self._keyboard_command_token() is not None:
+            self._stop_keyboard_jog_command()
         if self.keyboard_velocity_active_key is not None:
             arm = self.keyboard_velocity_arm
             self._stop_keyboard_jog_command(
@@ -6075,6 +6551,87 @@ class WeldActionGui:
 
     def _keyboard_ros_input_online(self):
         return time.monotonic() - self.keyboard_ros_input_last_at < 0.35
+
+    def _keyboard_fast_context(self):
+        """Every Tk-side interlock of keyboard_jog_key_press, for the ROS thread.
+
+        The node starts a physical-arrow jog itself (no Tk queue delay) only
+        while this snapshot is armed and recent; see _keyboard_fast_press.
+        """
+        now = time.monotonic()
+        try:
+            if not self.keyboard_jog_enabled.get():
+                return {"armed": False, "updated_monotonic": now}
+            planning_group = self.planning_group.get()
+            selection = self.keyboard_jog_selection.get()
+            frame = self.keyboard_jog_frame.get()
+            linear_m_s = float(self.keyboard_jog_linear_speed.get()) * 0.001
+            angular_rad_s = math.radians(float(self.keyboard_jog_angular_speed.get()))
+        except (tk.TclError, ValueError):
+            return {"armed": False, "updated_monotonic": now}
+        arm = self._selected_arm()
+        armed = bool(
+            self.keyboard_ros_zero_seen
+            and arm == self.keyboard_velocity_arm
+            and not self.keyboard_velocity_switching
+            and not self.sequence_running
+            and not self.keyboard_teaching_capture_in_progress
+            and math.isfinite(linear_m_s) and linear_m_s > 0.0
+            and math.isfinite(angular_rad_s) and angular_rad_s > 0.0
+            and self._keyboard_focus_allows_jog()
+        )
+        return {
+            "armed": armed,
+            "arm": arm,
+            "planning_group": planning_group,
+            "selection": selection,
+            "frame": frame,
+            "linear_m_s": linear_m_s,
+            "angular_rad_s": angular_rad_s,
+            "speed_generation": getattr(self, "keyboard_speed_generation", 0),
+            "updated_monotonic": now,
+        }
+
+    def _refresh_keyboard_fast_context(self):
+        setter = getattr(getattr(self, "node", None), "set_keyboard_fast_context", None)
+        if setter is not None:
+            setter(self._keyboard_fast_context())
+
+    def _keyboard_command_token(self):
+        """(arrow, generation) of the node's running jog command, else None."""
+        lookup = getattr(self.node, "keyboard_command_token", None)
+        if lookup is None or self.keyboard_velocity_arm is None:
+            return None
+        token = lookup(self.keyboard_velocity_arm)
+        if isinstance(token, tuple) and len(token) == 2 and isinstance(token[0], str):
+            return token
+        return None
+
+    def _sync_keyboard_fast_jog(self):
+        """Adopt a ROS-thread jog whose press event is still queued for Tk.
+
+        Key handlers that stop or re-aim the held jog must see it even when
+        their Tk event runs before the queued arrow state.
+        """
+        token = self._keyboard_command_token()
+        if token is not None and token != getattr(self, "keyboard_active_token", None):
+            self._adopt_keyboard_fast_jog(token)
+
+    def _adopt_keyboard_fast_jog(self, token):
+        """Tk bookkeeping for a jog the ROS thread started on the press."""
+        key = token[0]
+        self._cancel_keyboard_release_timer()
+        self.keyboard_ros_pending_key = None
+        self.keyboard_stop_generation += 1
+        self.keyboard_velocity_active_key = key
+        self.keyboard_active_token = token
+        arm = self.keyboard_velocity_arm
+        selection = self.keyboard_jog_selection.get()
+        self.log(
+            f"Keyboard jog START · {(arm or 'robot').upper()} {selection} {key} · "
+            "commanded from the ROS thread on the physical press"
+        )
+        self.keyboard_jog_status.set(f"MOVING {selection} {key} · release to stop")
 
     def keyboard_arrow_state_received(self, mask):
         """Consume unambiguous physical arrow state from the ROS2 X11 node."""
@@ -6102,8 +6659,12 @@ class WeldActionGui:
             and has_focus
             and self.keyboard_jog_enabled.get()
         )
+        # The node's running command (started in the ROS thread on the press,
+        # or by this handler below).  Tk mirrors it instead of replaying queued
+        # edges, which may be older than that command.
+        token = self._keyboard_command_token()
         if not usable:
-            if self.keyboard_velocity_active_key is not None:
+            if self.keyboard_velocity_active_key is not None or token is not None:
                 self._stop_keyboard_jog_command("STOPPED · keyboard input inactive")
             elif (
                 key is not None
@@ -6119,6 +6680,14 @@ class WeldActionGui:
                     "키 입력 대기 · 입력칸 포커스 — 방향키를 누르면 메인으로 전환"
                 )
             return
+        if token is not None:
+            if token != getattr(self, "keyboard_active_token", None):
+                # A press the ROS thread already commanded (possibly newer
+                # than this queued state): bookkeeping only, never a restart.
+                self._adopt_keyboard_fast_jog(token)
+            elif key is not None and key == token[0] and key == previous_key:
+                self.node.refresh_keyboard_velocity(self.keyboard_velocity_arm)
+            return
         if key == previous_key:
             if key is not None and key == self.keyboard_velocity_active_key:
                 self.node.refresh_keyboard_velocity(self.keyboard_velocity_arm)
@@ -6128,7 +6697,7 @@ class WeldActionGui:
 
         # A physical release reaches this path directly; unlike Tk auto-repeat,
         # it is not delayed to guess whether a synthetic release will be
-        # followed by another press.
+        # followed by another press.  The ROS thread has already zeroed it.
         if self.keyboard_velocity_active_key is not None:
             arm = self.keyboard_velocity_arm
             self._stop_keyboard_jog_command()
@@ -6138,6 +6707,10 @@ class WeldActionGui:
             )
         if key is None:
             return
+        physical = getattr(self.node, "keyboard_physical_key", key)
+        if (physical is None or isinstance(physical, str)) and physical != key:
+            # Queued behind a busy GUI and already released: never replay it.
+            return
         self.keyboard_ros_dispatching = True
         try:
             event = type("PhysicalKeyEvent", (), {"keysym": key})()
@@ -6145,10 +6718,37 @@ class WeldActionGui:
         finally:
             self.keyboard_ros_dispatching = False
 
+    def keyboard_speed_selected(self, arm, speed, generation):
+        if arm != self.keyboard_velocity_arm or generation < getattr(self, "keyboard_speed_generation", 0):
+            return
+        self.keyboard_speed_generation = generation
+        self.keyboard_jog_linear_speed.set(speed)
+        if self._keyboard_command_token() is None:
+            self._stop_keyboard_jog_command(publish_zero=False)
+            self.keyboard_jog_status.set(f"XYZ speed {speed:g} mm/s")
+        else:
+            self._sync_keyboard_fast_jog()
+        self._refresh_keyboard_fast_context()
+        self.log(f"Keyboard XYZ speed selected · {speed:g} mm/s")
+
     def keyboard_teaching_shortcut_key(self, event):
         """Handle speed cycling and current-pose saves in teaching mode."""
         key = str(event.keysym).lower()
+        if key == "v" and self._keyboard_ros_input_online():
+            return "break" if self.keyboard_jog_enabled.get() and self._keyboard_focus_allows_jog() else None
         cleaner = self._cleaner_task_selected()
+        scan = self._scan_task_selected()
+        key_mode = self._scan_key_mode() if scan else None
+        scan_keys = {"orientation": ORIENTATION_KEYS, "reference": REFERENCE_KEYS,
+                     "tcp_cal": TCP_CAL_KEYS}.get(key_mode, SCAN_KEY_POINTS)
+        if scan and key not in ("v", "x") and key not in scan_keys:
+            self.keyboard_jog_status.set(self._scan_key_help(key_mode))
+            return "break"
+        if scan and not self.keyboard_jog_enabled.get():
+            if key in scan_keys:
+                self.error(f"{key.upper()} scan capture not started · enable right-arm Keyboard Teaching first")
+                return "break"
+            return None
         if cleaner and key not in ("v", "x") and key not in CLEANER_KEY_POSES:
             self.keyboard_jog_status.set(
                 "Cleaner keys: " + " · ".join(
@@ -6157,7 +6757,9 @@ class WeldActionGui:
                 )
             )
             return "break"
-        if key == "u" and not cleaner:
+        if key == "u" and not cleaner and not scan:
+            return None
+        if key in ("n", "h") and not cleaner:
             return None
         registration = self.multi_pass_registration
         if not self.keyboard_jog_enabled.get():
@@ -6194,6 +6796,7 @@ class WeldActionGui:
             return "break"
         self.keyboard_shortcut_active_keys.add(key)
 
+        self._sync_keyboard_fast_jog()
         if self.keyboard_velocity_active_key is not None:
             self._stop_keyboard_jog_command()
 
@@ -6226,6 +6829,37 @@ class WeldActionGui:
             self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving cleaner {name}...")
             self.log(f"Keyboard cleaner capture · {key.upper()} → {name}")
             self.torch_cleaner_panel.capture(name)
+            return "break"
+
+        if scan:
+            if self.sequence_running or self.node.active_motion_goal is not None:
+                self.error("Cannot save a scan point during another motion")
+                return "break"
+            if self.keyboard_velocity_arm != "right" or self.keyboard_velocity_switching:
+                self.error("Enable right-arm Keyboard Teaching to save scan points")
+                return "break"
+            if key_mode == "tcp_cal":
+                self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving TCP calibration sample...")
+                self.log(f"Keyboard TCP calibration sample · {key.upper()}")
+                self.precision_sensing_test_panel.capture_tcp_sample()
+                return "break"
+            if key_mode == "orientation":
+                passes = ORIENTATION_KEYS[key]
+                name = " + ".join(f"P{k}" for k in passes)
+                self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving {name} torch orientation...")
+                self.log(f"Keyboard orientation capture · {key.upper()} → {name}")
+                self.precision_sensing_test_panel.capture_orientation(passes)
+                return "break"
+            if key_mode == "reference":
+                pass_k, end = REFERENCE_KEYS[key]
+                self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving P{pass_k} {end} reference...")
+                self.log(f"Keyboard reference capture · {key.upper()} → P{pass_k} {end}")
+                self.precision_sensing_test_panel.capture_reference(end, pass_k)
+                return "break"
+            name = SCAN_KEY_POINTS[key]
+            self.keyboard_jog_status.set(f"{key.upper()} RECEIVED · saving scan {name}...")
+            self.log(f"Keyboard scan capture · {key.upper()} → {name}")
+            self.precision_sensing_test_panel.capture_scan_point(name)
             return "break"
 
         if registration is not None and key in ("i", "j"):
@@ -6414,6 +7048,7 @@ class WeldActionGui:
         }.get(str(event.keysym).lower())
         if selection is None:
             return None
+        self._sync_keyboard_fast_jog()
         active_key = self.keyboard_velocity_active_key
         held = active_key is not None and (
             not self._keyboard_ros_input_online()
@@ -6486,8 +7121,9 @@ class WeldActionGui:
             self.error(f"Keyboard velocity TF failed · {error}")
             return "break"
         self.keyboard_stop_generation += 1
-        self.node.set_keyboard_velocity(arm, velocity)
+        self.node.set_keyboard_velocity(arm, velocity, key=event.keysym)
         self.keyboard_velocity_active_key = event.keysym
+        self.keyboard_active_token = self._keyboard_command_token()
         resolve_ms = (time.monotonic() - pressed_at) * 1000.0
         self.log(
             f"Keyboard jog START · {arm.upper()} "
@@ -6554,6 +7190,9 @@ class WeldActionGui:
     def emergency_stop_all(self, restore_keyboard_controller=True):
         """Stop every GUI-owned workflow, robot goal, and welder output."""
         self.multi_pass_registration = None
+        if hasattr(self, "scanner_connection_panel"):
+            # Laser-only control may be active even when RViz acquisition is off.
+            self.post(self.scanner_connection_panel.emergency_stop)
         self._stop_keyboard_wire()
         self._stop_keyboard_jog_command()
         self.keyboard_jog_enabled.set(False)
@@ -6636,7 +7275,7 @@ class WeldActionGui:
             value = self.robot_connected[arm]
             self.robot_connection_labels[arm].configure(
                 text=(
-                    f"Connect {arm.upper()} ({self.robot_ips[arm]}): "
+                    f"{arm.upper()} ({self.robot_ips[arm]}): "
                     f"{'O' if value else 'X'}"
                 ),
                 bg="#e6f4ea" if value else "#fce8e6",
@@ -6646,7 +7285,7 @@ class WeldActionGui:
         head_kind = "FAKE" if self.fake_head_hardware else "CAN2"
         self.robot_connection_labels["head"].configure(
             text=(
-                f"Connect HEAD ({head_kind}): "
+                f"HEAD ({head_kind}): "
                 f"{'O' if head_connected else 'X'}"
             ),
             bg="#e6f4ea" if head_connected else "#fce8e6",
@@ -6737,6 +7376,12 @@ class WeldActionGui:
             bg=background,
             fg=foreground,
         )
+        status_bar = getattr(self, "status_bar", None)
+        if status_bar is not None:
+            status_bar.pipeline(state, message)
+        event_log = getattr(self, "event_log", None)
+        if event_log is not None:
+            event_log.append(state, message)
         terminal_message = f"PIPELINE {state} · {message}"
         if hasattr(self, "node"):
             logger = self.node.get_logger()
@@ -7340,15 +7985,15 @@ class WeldActionGui:
     def _initial_state_yaml_path(self, planning_group=None, pose_name=None):
         group = planning_group or self.planning_group.get()
         selected_pose = pose_name or self._selected_teaching_pose_name()
-        return teaching_config_dir() / f"{group}_{selected_pose}_state.yaml"
+        return task_config_directory(getattr(self, "welding_position", "1G")) / f"{group}_{selected_pose}_state.yaml"
 
     def _seam_reference_yaml_path(self, planning_group=None):
         group = planning_group or self.planning_group.get()
-        return teaching_config_dir() / f"{group}_seam_teaching_reference.yaml"
+        return task_config_directory(getattr(self, "welding_position", "1G")) / f"{group}_seam_teaching_reference.yaml"
 
     def _seam_touch_yaml_path(self, planning_group=None):
         group = planning_group or self.planning_group.get()
-        return teaching_config_dir() / f"{group}_seam_touch_points.yaml"
+        return task_config_directory(getattr(self, "welding_position", "1G")) / f"{group}_seam_touch_points.yaml"
 
     def _auto_load_teaching_states(self):
         """Load every named teaching pose found at its default YAML path."""
@@ -8490,7 +9135,10 @@ class WeldActionGui:
     def close(self):
         if self._closing:
             return
+        self.save_welding_task_settings()
         self._closing = True
+        self.node.precision_sensing_test.cancel()
+        self.scanner_connection_panel.shutdown()
         self._stop_keyboard_wire()
         self._stop_keyboard_jog_command()
         if self.keyboard_velocity_arm is not None:
@@ -8522,6 +9170,7 @@ class WeldActionGui:
         if getattr(self, "_closing", False):
             return
         try:
+            self._refresh_keyboard_fast_context()
             self._drain_ui_queue()
         finally:
             if not getattr(self, "_closing", False):

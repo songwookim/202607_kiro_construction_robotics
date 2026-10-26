@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>scan_core</name>
+  <version>0.1.0</version>
+  <description>
+    ROS-independent sensing algorithms (pure Python: numpy/scipy/pyyaml) for the VC nano 3D-Z (12/24) large line profiler
+    groove scan: path generation with the motion envelope, URDF kinematics, counter-based clock model, 3D reconstruction,
+    groove model and seam estimation (1G core), cross sections and the multi-pass weld plan, calibration helpers and synthetic data.
+    No dependency on rclpy.
+  </description>
+  <maintainer email="jm68112@gmail.com">DBCM Lab</maintainer>
+  <license>MIT</license>
+
+  <depend>python3-numpy</depend>
+  <depend>python3-scipy</depend>
+  <depend>python3-yaml</depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

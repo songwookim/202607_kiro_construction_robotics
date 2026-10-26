@@ -1,0 +1,95 @@
+{
+  "source_directory": "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro",
+  "export_directory": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/imported/20261015-152045_kiro_1G_S_to_E",
+  "direction": "S_to_E",
+  "source_sha256": {
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/README.md": "8864a0617508055c4628469c92ea2fa9ba1e84a57c09652115cc0cf73e753caa",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_1_info.yaml": "b86bebe7e2b026e404ce4f492f699350c84ea787cf6f61f8781431428f47674b",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_2_info.yaml": "98170858081c308a4edf076caf70a8d4721417b7c2b7c1755f3f1dec3e4770f8",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_2.yaml": "0be7b35f9f9df3aa3e42ae0432def8d8d5f9e848ddef908687d301aac257d472",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_3_info.yaml": "63a533ed595c4d98fc59b22dc62a80aea75a229cff18458392eaf98fe8a311ed",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_3.yaml": "9e2151fcc229fc4bd9952c46bd9b90188936d3d4a6f9d92432ed54d7170f6ea0",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_4_info.yaml": "831e428614399784f3e40ee3f4768759ab0436ce53c678453d09d049d6fce197",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_4.yaml": "0b37d52c69a0477eab8c4e79ea2c5bf04b8bf1ab9c8a77f3996211475142b4b5",
+    "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_1.yaml": "8b039c9a141f20564774abf7385664fdb13a533ca4c8c6ffcef2e122151555fc"
+  },
+  "passes": [
+    {
+      "pass": 1,
+      "source": "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_1.yaml",
+      "export": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/imported/20261015-152045_kiro_1G_S_to_E/pass_1.yaml",
+      "start_world_m": [
+        0.017931071825928877,
+        -1.725102684991098,
+        0.5852717086129152
+      ],
+      "goal_world_m": [
+        0.023474799002317318,
+        -1.5258935161079545,
+        0.5879531097160268
+      ],
+      "original_endpoint_pose_preserved": true,
+      "requires_ik": true
+    },
+    {
+      "pass": 2,
+      "source": "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_2.yaml",
+      "export": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/imported/20261015-152045_kiro_1G_S_to_E/pass_2.yaml",
+      "start_world_m": [
+        0.015047900879105205,
+        -1.7239116518215214,
+        0.58770346937897
+      ],
+      "goal_world_m": [
+        0.020586078141085054,
+        -1.5246828089619513,
+        0.590242700897597
+      ],
+      "original_endpoint_pose_preserved": true,
+      "requires_ik": true
+    },
+    {
+      "pass": 3,
+      "source": "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_3.yaml",
+      "export": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/imported/20261015-152045_kiro_1G_S_to_E/pass_3.yaml",
+      "start_world_m": [
+        0.017899605138589136,
+        -1.7232230796676677,
+        0.5921698320953704
+      ],
+      "goal_world_m": [
+        0.023500509455822004,
+        -1.524004764440895,
+        0.5947484601963333
+      ],
+      "original_endpoint_pose_preserved": true,
+      "requires_ik": true
+    },
+    {
+      "pass": 4,
+      "source": "/home/irs/hongik/runs/20261015-152045_kiro_1G/kiro/pass_4.yaml",
+      "export": "/home/irs/ros2_ws/src/construct_robot_ros2/construct_description/config/scan_teaching/imported/20261015-152045_kiro_1G_S_to_E/pass_4.yaml",
+      "start_world_m": [
+        0.017169682813924322,
+        -1.723237269038478,
+        0.5949007672381773
+      ],
+      "goal_world_m": [
+        0.022739422299898778,
+        -1.5240180236446426,
+        0.5975381568610911
+      ],
+      "original_endpoint_pose_preserved": true,
+      "requires_ik": true
+    }
+  ],
+  "robot_motion_executed": false,
+  "arc_enabled": false,
+  "verification": {
+    "native_pass_yaml_parsed": 4,
+    "endpoints_exactly_preserved": 8,
+    "multipass_controller_load_references": "PASS",
+    "motion_calls": 0,
+    "ik_calls_during_load": 0
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "source_archive": "/home/irs/ros2_ws/src/hongik_kiro_delivery_2026-10-14_ec00145/bundle_2026-10-14_kiro-1g-next_ec00145/hongik_fine_sensing_ec00145.tar.gz",
+  "archive_sha256": "512470acf8f87d9289724f56260c296878f0e406ece5add42f03db885b611eef",
+  "field_patch": "/home/irs/ros2_ws/hongik_to_field_2026-10-14_kiro-1g-field/kiro-1g-field_vs_ec00145.patch",
+  "patch_sha256": "1f92f7ff8838b8ecea76c4d496c217bbbc5bf280e2081b9804bfc7ddeb8d33b4",
+  "source_tree": "/home/irs/ros2_ws/src/construct_robot_ros2/hongik_fine_sensing_field",
+  "original_site_tree_retained": "/home/irs/ros2_ws/src/hongik_kiro_delivery_2026-10-14_ec00145/bundle_2026-10-14_kiro-1g-next_ec00145/hongik_fine_sensing_ec00145/hongik_fine_sensing",
+  "colcon_discovery": "COLCON_IGNORE on field root; build uses the six explicit package paths"
+}
